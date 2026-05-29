@@ -110,7 +110,23 @@ async function renderBacktest(prefix, d, isOptions) {
   const loss = { x: d.entries.loss.x, y: d.entries.loss.y, mode: "markers", name: "loss",
                  marker: { color: "#f85149", symbol: "triangle-down", size: 7 } };
   const traces = [price, win, loss];
-  const lay = layout("Price + entries");
+  const lay = layout("Price + entries", {
+    height: 460,
+    xaxis: {
+      gridcolor: "#2a3340",
+      rangeslider: { visible: true, thickness: 0.09, bgcolor: "#10151c" },
+      rangeselector: {
+        bgcolor: "#10151c", activecolor: "#5b9dff", font: { color: "#e6edf3" },
+        buttons: [
+          { step: "month", count: 1, label: "1m", stepmode: "backward" },
+          { step: "month", count: 3, label: "3m", stepmode: "backward" },
+          { step: "month", count: 6, label: "6m", stepmode: "backward" },
+          { step: "year", count: 1, label: "1y", stepmode: "backward" },
+          { step: "all", label: "all" },
+        ],
+      },
+    },
+  });
   if (isOptions && d.delta) {
     traces.push({ x: d.delta.x, y: d.delta.y, mode: "lines", name: "Δ at entry", yaxis: "y2",
                   line: { color: "#5b9dff", width: 1, shape: "hv" } });
