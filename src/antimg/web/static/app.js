@@ -4,16 +4,20 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 const DARK = {
   paper_bgcolor: "#1a212b", plot_bgcolor: "#1a212b",
+  autosize: true, height: 340,
   font: { color: "#e6edf3", size: 11 }, margin: { t: 36, r: 40, b: 36, l: 56 },
   xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340" },
   legend: { orientation: "h", y: 1.12 },
 };
 const layout = (title, extra = {}) => ({ ...DARK, title: { text: title, font: { size: 14 } }, ...extra });
-const plot = (id, traces, lay) => {
+async function plot(id, traces, lay) {
   if (typeof Plotly === "undefined")
     throw new Error("Plotly failed to load (/vendor/plotly.min.js). Hard-reload (Ctrl+Shift+R).");
-  return Plotly.react(id, traces, lay, { responsive: true, displaylogo: false });
-};
+  const el = document.getElementById(id);
+  if (!el) throw new Error("plot container #" + id + " not found");
+  await Plotly.react(el, traces, lay, { responsive: true, displaylogo: false });
+  Plotly.Plots.resize(el);          // force correct size if the container was measured at 0
+}
 
 function toast(msg, ok = false) {
   const t = $("#toast");
@@ -88,17 +92,17 @@ $("#form-coinflip").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () => {
     const d = await post("/api/coinflip", formData(e.target));
-    plot("cf-bank", [{ x: d.history.x, y: d.history.y, mode: "lines", line: { width: 1, color: "#5b9dff" } }],
-      layout("Cumulative bank"));
-    plot("cf-streak", [{ x: d.last_series.x, y: d.last_series.y, mode: "lines", line: { color: "#3fb950" } }],
-      layout("Last winning streak"));
     const hist = Object.entries(d.series_counter).map(([k, v]) => `  ${k.padStart(3)} wins: ${v}`).join("\n");
     $("#cf-stats").textContent = statsText(d.stats) + "\n\ncycles ending at streak:\n" + hist;
+    await plot("cf-bank", [{ x: d.history.x, y: d.history.y, mode: "lines", line: { width: 1, color: "#5b9dff" } }],
+      layout("Cumulative bank"));
+    await plot("cf-streak", [{ x: d.last_series.x, y: d.last_series.y, mode: "lines", line: { color: "#3fb950" } }],
+      layout("Last winning streak"));
   });
 };
 
 // ---- tab 2 / 3 shared
-function renderBacktest(prefix, d, isOptions) {
+async function renderBacktest(prefix, d, isOptions) {
   const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "Close",
                   line: { width: 1, color: "#c9d1d9" } };
   const win = { x: d.entries.win.x, y: d.entries.win.y, mode: "markers", name: "win",
@@ -113,10 +117,10 @@ function renderBacktest(prefix, d, isOptions) {
     lay.yaxis2 = { overlaying: "y", side: "right", range: [0, 1.05], gridcolor: "transparent",
                    title: { text: "Δ" } };
   }
-  plot(`${prefix}-price`, traces, lay);
-  plot(`${prefix}-equity`, [{ x: d.equity.x, y: d.equity.y, mode: "lines", line: { color: "#a371f7" } }],
-    layout("Equity curve"));
   $(`#${prefix}-stats`).textContent = statsText(d.stats);
+  await plot(`${prefix}-price`, traces, lay);
+  await plot(`${prefix}-equity`, [{ x: d.equity.x, y: d.equity.y, mode: "lines", line: { color: "#a371f7" } }],
+    layout("Equity curve"));
 }
 
 $("#form-linear").onsubmit = (e) => {
@@ -149,9 +153,9 @@ $("#form-signals").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () => {
     const d = await post("/api/backtest/from-signals", formData(e.target));
-    plot("sig-equity", [{ x: d.equity.x, y: d.equity.y, mode: "lines", line: { color: "#a371f7" } }],
-      layout("Equity from TradingView signals"));
     $("#sig-stats").textContent = statsText(d.stats);
+    await plot("sig-equity", [{ x: d.equity.x, y: d.equity.y, mode: "lines", line: { color: "#a371f7" } }],
+      layout("Equity from TradingView signals"));
     await refreshSignals();
   });
 };
