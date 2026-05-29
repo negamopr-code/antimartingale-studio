@@ -112,8 +112,8 @@ async function renderBacktest(prefix, d, isOptions) {
   const traces = [price, win, loss];
   const lay = layout("Price + entries");
   if (isOptions && d.delta) {
-    traces.push({ x: d.delta.x, y: d.delta.y, mode: "lines", name: "call Δ", yaxis: "y2",
-                  line: { color: "#5b9dff", width: 1 } });
+    traces.push({ x: d.delta.x, y: d.delta.y, mode: "lines", name: "Δ at entry", yaxis: "y2",
+                  line: { color: "#5b9dff", width: 1, shape: "hv" } });
     lay.yaxis2 = { overlaying: "y", side: "right", range: [0, 1.05], gridcolor: "transparent",
                    title: { text: "Δ" } };
   }

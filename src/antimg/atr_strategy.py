@@ -312,25 +312,23 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
         S0 = t.entry_price
         sig0 = _sigma_at(realized_vol, t.entry_date, default_sigma)
         T0 = dte_days / 365.0
+        # Everything about the option is fixed AT ENTRY (as you really buy it): the IV (sig0,
+        # = realized vol observed at entry), the strike, and the delta. Only the underlying
+        # price S and the time-to-expiry T move forward — sig0 is NOT re-estimated later.
         K = opt.strike_for_delta(S0, T0, r, sig0, target_delta, q)
         units = bet / t.atr_entry            # 1 ATR underlying move ~ bet of exposure
         price0 = float(opt.call_price(S0, K, T0, r, sig0, q))
-        delta0 = float(opt.call_delta(S0, K, T0, r, sig0, q))
+        delta0 = float(opt.call_delta(S0, K, T0, r, sig0, q))   # delta at the moment of entry
 
-        # delta path over the holding window
+        # plot the ENTRY delta held flat for the trade's duration (the delta you bought)
         window = close.loc[(close.index >= t.entry_date) & (close.index <= t.exit_date)]
-        for d, S in window.items():
-            elapsed = (d - t.entry_date).days
-            T = max((dte_days - elapsed) / 365.0, 1e-6)
-            sig = _sigma_at(realized_vol, d, default_sigma)
+        for d in window.index:
             res.delta_dates.append(d)
-            res.delta_path.append(float(opt.call_delta(S, K, T, r, sig, q)))
+            res.delta_path.append(delta0)
 
         elapsed = (t.exit_date - t.entry_date).days
         T1 = max((dte_days - elapsed) / 365.0, 1e-6)
-        sig1 = _sigma_at(realized_vol, t.exit_date, default_sigma)
-        price1 = float(opt.call_price(t.exit_price, K, T1, r, sig1, q))
-        delta1 = float(opt.call_delta(t.exit_price, K, T1, r, sig1, q))
+        price1 = float(opt.call_price(t.exit_price, K, T1, r, sig0, q))   # entry IV held
 
         comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission_pct, slippage_pct)
         cost = comm_c + slip_c
@@ -355,8 +353,8 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
             "entry_px": round(S0, 2), "exit_px": round(t.exit_price, 2),
             "atr": round(t.atr_entry, 2), "target_up": round(S0 + t.atr_entry, 2),
             "reason": t.exit_reason, "outcome": t.outcome,
-            "strike": round(K, 2), "prem_in": round(price0, 2), "prem_out": round(price1, 2),
-            "delta_in": round(delta0, 3), "delta_out": round(delta1, 3),
+            "strike": round(K, 2), "delta_entry": round(delta0, 3),
+            "prem_in": round(price0, 2), "prem_out": round(price1, 2),
             "units": round(units, 3), "opt_pnl": round(opt_pnl, 2),
             "cost": round(cost, 2), "pnl": round(pnl, 2), "bank": round(bank, 2),
         })
