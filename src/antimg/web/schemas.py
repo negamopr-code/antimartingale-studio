@@ -23,7 +23,7 @@ class BacktestReq(BaseModel):
     mult: float = Field(1.0, gt=0, le=20)
     base_bet: float = Field(100.0, gt=0)
     target_streak: int = Field(10, ge=1, le=settings.max_target_streak)
-    commission: float = Field(0.0, ge=0)          # $ per fill (charged on entry AND exit)
+    commission_pct: float = Field(0.0, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     slippage_pct: float = Field(0.0, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     starting_bank: float = Field(10_000.0)
     cap_mult: float | None = Field(None, gt=0)
@@ -40,7 +40,7 @@ class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)
     target_streak: int = Field(10, ge=1, le=settings.max_target_streak)
-    commission: float = Field(0.0, ge=0)          # $ per fill (charged on entry AND exit)
+    commission_pct: float = Field(0.0, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     slippage_pct: float = Field(0.0, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     starting_bank: float = Field(10_000.0)
     cap_mult: float | None = Field(None, gt=0)

@@ -40,10 +40,11 @@ Antimartingale-long + martingale-short on the SAME instrument resizes in lockste
 Not implemented; documented as a rejected tactic.
 
 ## Cost model + cost-as-probability (2026-05-29)
-- **D15** — Transaction costs: commission = $/fill charged on entry AND exit (×2);
-  slippage = % of position notional per fill (×2 round-trip), notional=(bet/ATR)*price.
-  (Replaces the old `slippage_frac` of bet.) Tracked as separate cumulative curves
-  (commission, slippage, total) plotted on the equity chart alongside net vs gross equity.
+- **D15** — Transaction costs: BOTH commission and slippage are **% of position notional
+  per fill, charged on entry AND exit (×2 round-trip)**; notional=(bet/ATR)*price.
+  (Superseded the earlier $/fill commission + `slippage_frac` model — user wanted both in %.)
+  Tracked as separate cumulative curves (commission, slippage, total) plotted on the equity
+  chart on a SECONDARY axis alongside net vs gross equity.
 - **D16** — Cost expressed as a win-probability drag Δp via the breakeven shift:
   no-cost breakeven p=0.5; with avg cost κ/cycle, (2p*)^N = 1+κ/b ⇒ p*=0.5·(1+κ/b)^(1/N).
   Δp=p*−0.5 = "how much win-prob the cost eats"; if edge (p−0.5) < Δp the strategy is net −EV.

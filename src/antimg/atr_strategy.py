@@ -147,16 +147,16 @@ def _apply_pyramid(outcome: str, streak: int, bet: float, base_bet: float,
 
 
 def _trial_costs(bet: float, atr_entry: float, entry_price: float,
-                 commission: float, slippage_pct: float) -> tuple[float, float]:
+                 commission_pct: float, slippage_pct: float) -> tuple[float, float]:
     """Round-trip transaction costs for one trial (entry + exit = 2 fills).
 
-    - commission: $ PER FILL → charged twice (entry + exit).
-    - slippage_pct: PERCENT of position notional PER FILL → twice. Notional comes from the
-      Δ=1 sizing: shares = bet/ATR (so a 1·ATR move == bet $), notional = shares * price.
+    Both commission and slippage are PERCENT of position notional PER FILL, charged twice
+    (entry + exit). Notional comes from the Δ=1 sizing: shares = bet/ATR (so a 1·ATR move
+    == bet $), notional = shares * price.
     Returns (commission_cost, slippage_cost).
     """
-    commission_cost = 2.0 * commission
     notional = (bet / atr_entry) * entry_price if atr_entry else 0.0
+    commission_cost = 2.0 * (commission_pct / 100.0) * notional
     slippage_cost = 2.0 * (slippage_pct / 100.0) * notional
     return commission_cost, slippage_cost
 
@@ -187,7 +187,7 @@ def _drawdown(equity: list[float]) -> float:
 
 
 def run_linear(trials: list[Trial], base_bet: float, target_streak: int,
-               commission: float = 0.0, slippage_pct: float = 0.0,
+               commission_pct: float = 0.0, slippage_pct: float = 0.0,
                starting_bank: float = 0.0, cap_mult: float | None = None) -> BacktestResult:
     """Δ=1 linear P&L: a win is +bet, a loss is -bet (1 ATR move == bet).
 
@@ -198,7 +198,7 @@ def run_linear(trials: list[Trial], base_bet: float, target_streak: int,
     streak, bet = 0, base_bet
     wins = cum_comm = cum_slip = n_cycles = 0
     for t in trials:
-        comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission, slippage_pct)
+        comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission_pct, slippage_pct)
         cost = comm_c + slip_c
         pnl = (bet if t.outcome == "win" else -bet) - cost
         bank += pnl
@@ -221,7 +221,7 @@ def run_linear(trials: list[Trial], base_bet: float, target_streak: int,
 def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Series,
                 base_bet: float, target_streak: int, *, r: float = 0.045,
                 dte_days: int = 365, target_delta: float = 0.95, q: float = 0.0,
-                default_sigma: float = 0.20, commission: float = 0.0,
+                default_sigma: float = 0.20, commission_pct: float = 0.0,
                 slippage_pct: float = 0.0, starting_bank: float = 0.0,
                 cap_mult: float | None = None) -> BacktestResult:
     """Same win/loss sequence, but P&L from a modeled deep-ITM call (BS, IV=realized vol).
@@ -256,7 +256,7 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
         sig1 = _sigma_at(realized_vol, t.exit_date, default_sigma)
         price1 = float(opt.call_price(t.exit_price, K, T1, r, sig1, q))
 
-        comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission, slippage_pct)
+        comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission_pct, slippage_pct)
         cost = comm_c + slip_c
         pnl = (price1 - price0) * units - cost
         bank += pnl

@@ -127,7 +127,7 @@ def backtest_linear(req: BacktestReq):
     if not trials:
         raise HTTPException(status_code=422, detail="no trials resolved for these params")
     res = strat.run_linear(trials, req.base_bet, req.target_streak,
-                           commission=req.commission, slippage_pct=req.slippage_pct,
+                           commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
                            starting_bank=req.starting_bank, cap_mult=req.cap_mult)
     return _backtest_payload(daily, res)
 
@@ -141,7 +141,7 @@ def backtest_options(req: OptionsReq):
     rv = datamod.realized_vol(daily["Close"], req.iv_window)
     res = strat.run_options(trials, daily, rv, req.base_bet, req.target_streak,
                             r=req.r, dte_days=req.dte_days, target_delta=req.target_delta,
-                            commission=req.commission, slippage_pct=req.slippage_pct,
+                            commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
                             starting_bank=req.starting_bank, cap_mult=req.cap_mult)
     return _backtest_payload(daily, res, options=True)
 
@@ -184,7 +184,7 @@ def backtest_from_signals(req: FromSignalsReq):
     if not trials:
         raise HTTPException(status_code=422, detail="no outcome-bearing signals stored yet")
     res = strat.run_linear(trials, req.base_bet, req.target_streak,
-                           commission=req.commission, slippage_pct=req.slippage_pct,
+                           commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
                            starting_bank=req.starting_bank, cap_mult=req.cap_mult)
     return {
         "equity": ser.list_xy(res.equity_dates, res.equity, MP),
