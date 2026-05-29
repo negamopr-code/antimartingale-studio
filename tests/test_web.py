@@ -56,11 +56,22 @@ def test_backtest_linear(client):
     assert len(d["price"]["x"]) > 0
 
 
-def test_backtest_options_has_delta(client):
+def test_backtest_options_campaign(client):
     r = client.post("/api/backtest/options", json={"ticker": "SPY", "atr_period": 5,
-                                                   "dte_days": 365, "target_delta": 0.9})
+                                                   "dte_days": 365, "target_delta": 0.5})
     assert r.status_code == 200
-    assert "delta" in r.json()
+    d = r.json()
+    assert d["stats"]["n_trials"] > 0 and len(d["table"]) > 0
+    # campaign rows carry the entry delta + strike
+    assert "delta_entry" in d["table"][0] and "strike" in d["table"][0]
+
+
+def test_backtest_modes(client):
+    for mode in ("pyramid", "scalp"):
+        r = client.post("/api/backtest/linear", json={"ticker": "SPY", "atr_period": 5,
+                                                      "mode": mode})
+        assert r.status_code == 200, mode
+        assert len(r.json()["table"]) > 0
 
 
 def test_webhook_and_from_signals(client):

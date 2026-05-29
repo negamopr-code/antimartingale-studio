@@ -370,6 +370,201 @@ def _sigma_at(rv: pd.Series, date: pd.Timestamp, default: float) -> float:
     return float(v) if v is not None and np.isfinite(v) and v > 0 else default
 
 
+def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Series, *,
+                 base_bet: float, target_streak: int, mult: float = 1.0,
+                 instrument: str = "shares", mode: str = "pyramid",
+                 realized_vol: pd.Series | None = None, r: float = 0.045,
+                 dte_days: int = 365, target_delta: float = 0.5, qdiv: float = 0.0,
+                 default_sigma: float = 0.20, commission_pct: float = 0.0,
+                 slippage_pct: float = 0.0, starting_bank: float = 0.0,
+                 cap_mult: float | None = None) -> BacktestResult:
+    """Scale-into-ONE-position campaign on the ATR grid (the validated model).
+
+    Step h = mult*ATR (ATR fixed at entry). From entry R0, each +1 step UP adds lots on a
+    doubling ladder (1, 2, 4, 8 …) — `pyramid` mode; `scalp` mode books +b each step and
+    re-enters (no compounding). A trailing stop sits at S = avg − h/Q so the WHOLE position's
+    loss is capped at the initial risk b (= 1 step on 1 lot): every stop-out ≈ −b, every
+    target-N run is the big convex win — the coin-flip distribution.
+
+    instrument='shares' → linear P&L; 'calls' → BS-repriced long call, delta-normalised so
+    1 lot moves ~b per step regardless of delta (units = (b/h)/Δ_entry contracts), IV fixed
+    at entry (realized vol), strike chosen for `target_delta`. Calls soften the −b losses
+    (convexity) and fatten the win tail (gamma).
+    """
+    res = BacktestResult()
+    daily = daily.sort_index()
+    wk_index = weekly.index
+    bank = starting_bank
+    is_calls = instrument == "calls"
+    cumc = cums = 0.0
+    n_cycles = wins = 0
+    pos = 0
+    while pos < len(wk_index):
+        wk = wk_index[pos]
+        atr = weekly_atr.get(wk, np.nan)
+        R0 = weekly["Open"].get(wk, np.nan)
+        if not np.isfinite(atr) or atr <= 0 or not np.isfinite(R0):
+            pos += 1
+            continue
+        h = mult * atr                       # ATR step in price
+        per_pt = base_bet / h                # $ per underlying point, per lot (delta-normalised)
+        week_start = wk - pd.Timedelta(days=6)
+        future = daily.loc[daily.index >= week_start]
+        if future.empty:
+            break
+        entry_day = future.index[0]
+        R0 = float(R0)
+        entry_price0 = R0                    # campaign entry (scalp reassigns R0 later)
+
+        if is_calls:
+            sig0 = _sigma_at(realized_vol, entry_day, default_sigma)
+            T0 = dte_days / 365.0
+            K = opt.strike_for_delta(R0, T0, r, sig0, target_delta, qdiv)
+            d0 = float(opt.call_delta(R0, K, T0, r, sig0, qdiv))
+            contracts_per_lot = per_pt / max(d0, 1e-6)   # delta-normalised: 1 lot ~ b per step
+            expiry_day = entry_day + pd.Timedelta(days=dte_days)
+
+        # ladder state
+        batches: list[tuple[float, pd.Timestamp, float]] = [(R0, entry_day, 1.0)]  # (level, date, lots)
+        Q = 1.0
+        step = 0
+        lot_cap = cap_mult if cap_mult else float("inf")
+
+        def avg_price():
+            return sum(L * lots for L, _, lots in batches) / sum(lots for _, _, lots in batches)
+
+        stop = R0 - h / Q
+        exit_px = exit_date = reason = None
+        peak_step = 0
+
+        for d, row in future.iterrows():
+            hi, lo = float(row["High"]), float(row["Low"])
+            if lo <= stop:                                   # stop-out (loss-first)
+                exit_px, exit_date, reason = stop, d, "stop"
+                break
+            if is_calls and d >= expiry_day:
+                exit_px, exit_date, reason = float(row["Close"]), d, "expiry"
+                break
+            if mode == "scalp":
+                # book +b each +1 step, re-enter; loss handled by the stop above (= -b)
+                while hi >= R0 + (step + 1) * h:
+                    step += 1
+                    R0 = R0 + h                              # advance reference, single lot
+                    batches = [(R0, d, 1.0)]; Q = 1.0
+                    stop = R0 - h / Q
+                    res.table.append({"i": len(res.table) + 1, "entry": entry_day.date().isoformat(),
+                                      "step": step, "level": round(R0, 2), "lots": 1.0,
+                                      "avg": round(R0, 2), "stop": round(stop, 2),
+                                      "reason": "step+", "pnl": round(base_bet, 2)})
+                    bank += base_bet
+                    res.equity_dates.append(d); res.equity.append(bank)
+                    res.cum_commission.append(cumc); res.cum_slippage.append(cums)
+                    res.cum_cost.append(cumc + cums)
+                    wins += 1
+                    if step >= target_streak:
+                        exit_px, exit_date, reason = R0, d, "target"
+                        break
+                if reason:
+                    break
+                continue
+            # pyramid mode: add doubling lots on each up-step
+            while hi >= R0 + (step + 1) * h:
+                step += 1
+                add = min(2.0 ** step, lot_cap)
+                level = R0 + step * h
+                batches.append((level, d, add))
+                Q += add
+                stop = avg_price() - h / Q
+                peak_step = step
+                if step >= target_streak:
+                    exit_px, exit_date, reason = level, d, "target"
+                    break
+            if reason:
+                break
+        if exit_px is None:
+            break  # ran out of data with an open position
+
+        days_held = max((exit_date - entry_day).days, 0)
+        if mode == "scalp":
+            # final loss leg if we exited on stop without a step this campaign
+            if reason in ("stop", "expiry"):
+                bank -= base_bet
+                res.table.append({"i": len(res.table) + 1, "entry": entry_day.date().isoformat(),
+                                  "step": step, "level": round(R0, 2), "lots": 1.0,
+                                  "avg": round(R0, 2), "stop": round(stop, 2),
+                                  "reason": reason, "pnl": round(-base_bet, 2)})
+                res.equity_dates.append(exit_date); res.equity.append(bank)
+                res.cum_commission.append(cumc); res.cum_slippage.append(cums)
+                res.cum_cost.append(cumc + cums)
+            n_cycles += 1
+        else:
+            # pyramid P&L of the whole stack
+            if is_calls:
+                T_exit = max((dte_days - days_held) / 365.0, 1e-6)
+                p_out = float(opt.call_price(exit_px, K, T_exit, r, sig0, qdiv))
+                gross = 0.0
+                notional = 0.0
+                for L, dt, lots in batches:
+                    T_add = max((dte_days - (dt - entry_day).days) / 365.0, 1e-6)
+                    p_in = float(opt.call_price(L, K, T_add, r, sig0, qdiv))
+                    gross += lots * contracts_per_lot * (p_out - p_in)
+                    notional += lots * contracts_per_lot * (p_in + p_out)
+            else:
+                gross = sum(lots * (exit_px - L) * per_pt for L, _, lots in batches)
+                notional = sum(lots * per_pt * (L + exit_px) for L, _, lots in batches)
+            cost = (commission_pct + slippage_pct) / 100.0 * notional
+            cumc += (commission_pct / 100.0) * notional
+            cums += (slippage_pct / 100.0) * notional
+            pnl = gross - cost
+            bank += pnl
+            wins += reason == "target"
+            n_cycles += 1
+            a = avg_price()
+            res.equity_dates.append(exit_date); res.equity.append(bank)
+            res.cum_commission.append(cumc); res.cum_slippage.append(cums)
+            res.cum_cost.append(cumc + cums)
+            row = {"i": n_cycles, "entry": entry_day.date().isoformat(),
+                   "exit": exit_date.date().isoformat(), "days": days_held,
+                   "entry_px": round(R0, 2), "exit_px": round(exit_px, 2),
+                   "atr_step": round(h, 2), "steps": int(peak_step), "lots_Q": round(Q, 1),
+                   "avg": round(a, 2), "stop": round(stop, 2), "reason": reason,
+                   "gross": round(gross, 2), "cost": round(cost, 2),
+                   "pnl": round(pnl, 2), "bank": round(bank, 2)}
+            if is_calls:
+                row["strike"] = round(K, 2)
+                row["delta_entry"] = round(d0, 3)
+            res.table.append(row)
+
+        # entry marker for the price chart (green=target win, red=stop/expiry loss)
+        res.trials.append(Trial(entry_day, exit_date, entry_price0, float(exit_px),
+                                float(h), "win" if reason == "target" else "loss",
+                                days_held, reason))
+
+        later = wk_index[(wk_index - pd.Timedelta(days=6)) > exit_date]
+        if len(later) == 0:
+            break
+        new_pos = wk_index.get_loc(later[0])
+        pos = new_pos if new_pos > pos else pos + 1
+
+    res.n_trials = n_cycles
+    res.n_cycles = n_cycles
+    res.wins = wins
+    res.final_bank = bank
+    res.empirical_p = wins / n_cycles if n_cycles else 0.0
+    res.max_drawdown = _drawdown(res.equity)
+    from .simcore import closed_form_ev_cycle
+    res.closed_form_ev_cycle = closed_form_ev_cycle(base_bet, target_streak, res.empirical_p)
+    res.total_commission = cumc
+    res.total_slippage = cums
+    res.total_cost = cumc + cums
+    res.cost_per_cycle = res.total_cost / n_cycles if n_cycles else 0.0
+    res.cost_as_prob, res.breakeven_p_with_cost = cost_as_probability(
+        res.total_cost, n_cycles, base_bet, target_streak)
+    res.commission_as_prob = cost_as_probability(cumc, n_cycles, base_bet, target_streak)[0]
+    res.slippage_as_prob = cost_as_probability(cums, n_cycles, base_bet, target_streak)[0]
+    return res
+
+
 def _finalize(res: BacktestResult, base_bet: float, target_streak: int,
               wins: int, bank: float, n_cycles: int = 0) -> None:
     from .simcore import closed_form_ev_cycle

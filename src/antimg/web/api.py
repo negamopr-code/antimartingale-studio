@@ -124,27 +124,31 @@ def _backtest_payload(daily, res, options=False):
 @app.post("/api/backtest/linear")
 def backtest_linear(req: BacktestReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
-    trials = strat.resolve_trials(daily, weekly, watr, req.mult)
-    if not trials:
-        raise HTTPException(status_code=422, detail="no trials resolved for these params")
-    res = strat.run_linear(trials, req.base_bet, req.target_streak,
-                           commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-                           starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+    # scale-into-one-position campaign on the ATR grid (shares / linear)
+    res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                             target_streak=req.target_streak, mult=req.mult,
+                             instrument="shares", mode=req.mode,
+                             commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                             starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no campaigns resolved for these params")
     return _backtest_payload(daily, res)
 
 
 @app.post("/api/backtest/options")
 def backtest_options(req: OptionsReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
-    # LONG CALL has no -1 ATR stop: hold through pullbacks to the +1 ATR target or expiry.
-    trials = strat.resolve_trials_long_call(daily, weekly, watr, req.dte_days, req.mult)
-    if not trials:
-        raise HTTPException(status_code=422, detail="no trials resolved for these params")
     rv = datamod.realized_vol(daily["Close"], req.iv_window)
-    res = strat.run_options(trials, daily, rv, req.base_bet, req.target_streak,
-                            r=req.r, dte_days=req.dte_days, target_delta=req.target_delta,
-                            commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-                            starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+    # same campaign, but each lot is a delta-normalised long call (no -1ATR stop on the option;
+    # the trailing stop caps risk at the initial b, convexity softens losses).
+    res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                             target_streak=req.target_streak, mult=req.mult,
+                             instrument="calls", mode=req.mode, realized_vol=rv, r=req.r,
+                             dte_days=req.dte_days, target_delta=req.target_delta,
+                             commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                             starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no campaigns resolved for these params")
     return _backtest_payload(daily, res, options=True)
 
 

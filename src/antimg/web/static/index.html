@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=5"/>
+  <link rel="stylesheet" href="/style.css?v=6"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -46,6 +46,7 @@
       <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
       <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label>Mode <select name="mode"><option value="pyramid">pyramid (scale-in)</option><option value="scalp">scalp (book each step)</option></select></label>
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035" title="percent of notional per fill, charged on entry AND exit (x2)"></label>
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01" title="percent of position notional per fill (x2 round-trip)"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
@@ -67,9 +68,10 @@
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
       <label>Target streak <input name="target_streak" type="number" value="10"></label>
       <label>DTE days <input name="dte_days" type="number" value="365"></label>
-      <label>Target Δ <input name="target_delta" type="number" step="any" value="0.95"></label>
+      <label>Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
       <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label>Mode <select name="mode"><option value="pyramid">pyramid (scale-in)</option><option value="scalp">scalp (book each step)</option></select></label>
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035" title="percent of notional per fill, charged on entry AND exit (x2)"></label>
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01" title="percent of position notional per fill (x2 round-trip)"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
@@ -101,6 +103,6 @@
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <script src="/app.js?v=5"></script>
+  <script src="/app.js?v=6"></script>
 </body>
 </html>

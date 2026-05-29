@@ -27,6 +27,7 @@ class BacktestReq(BaseModel):
     slippage_pct: float = Field(0.01, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     starting_bank: float = Field(10_000.0)
     cap_mult: float | None = Field(None, gt=0)
+    mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")  # pyramid = scale-in; scalp = book each step
 
 
 class OptionsReq(BacktestReq):

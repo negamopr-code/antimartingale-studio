@@ -60,3 +60,14 @@ Not implemented; documented as a rejected tactic.
   prices, ATR, barriers/target, exit reason, outcome, bet/cost/pnl/bank; options add strike,
   premium in/out, delta in/out, units, option P&L. Static assets versioned (?v=N) + no-cache
   on the app shell so redeploys are always picked up.
+
+## Campaign engine: scale-into-one-position on ATR grid (2026-05-29)
+- **D19** — Backtest engine rewritten to `run_campaign`: scale into ONE position on the ATR
+  grid. Lot ladder ×2 (1,2,4,8…), weighted avg entry, trailing stop S=avg−h/Q (h=mult·ATR)
+  so the whole stack's loss is capped at the initial b → every stop-out ≈ −b, every
+  target-N run = big convex win = the coin-flip distribution. `mode`: pyramid (scale-in) |
+  scalp (book +b each step). Both backtest tabs use it: instrument='shares' (linear) /
+  'calls' (BS-repriced, delta-normalised units=(b/h)/Δ_entry so 1 lot ≈ b/step regardless of
+  delta; IV fixed at entry). Verified SPY 2010–: shares median loss = exactly −b, rare huge
+  wins; calls fatten the win tail via gamma. Delta slider (default 0.5) + per-campaign table
+  (steps/lots_Q/avg/stop/gross/pnl). Old run_linear/run_options/resolve_trials kept (tests).

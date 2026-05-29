@@ -116,6 +116,46 @@ def test_long_call_expiry_is_loss():
     assert call[0].outcome == "loss" and call[0].exit_reason == "expiry"
 
 
+def test_campaign_shares_stop_loses_exactly_base():
+    # build up 1@100, 2@101, 4@102 (ATR=1), then a -1ATR dip to the trailing stop.
+    # by construction the whole stack loses exactly base_bet at the stop.
+    import pandas as pd
+    wk = pd.DatetimeIndex([pd.Timestamp("2020-01-03")])
+    weekly = pd.DataFrame({"Open": [100.0], "High": [100.0], "Low": [100.0],
+                           "Close": [100.0], "Volume": [0]}, index=wk)
+    watr = pd.Series([1.0], index=wk)            # ATR step = 1
+    rows = [
+        ("2019-12-30", 100.4, 99.6),   # entry bar, no step, no stop (stop=99)
+        ("2019-12-31", 101.4, 100.6),  # +1 step -> add 2 @101
+        ("2020-01-02", 102.4, 101.6),  # +1 step -> add 4 @102 ; stop now avg-1/Q
+        ("2020-01-06", 102.0, 100.0),  # dips to stop (avg-1/7 = 101.29) -> stop-out
+    ]
+    daily = _daily(rows)
+    res = strat.run_campaign(daily, weekly, watr, base_bet=100, target_streak=10,
+                             instrument="shares")
+    assert res.n_cycles >= 1
+    # the stopped campaign must lose ~ -base_bet (the initial risk), not more
+    stop_rows = [r for r in res.table if r.get("reason") == "stop"]
+    assert stop_rows, "expected a stop-out"
+    assert stop_rows[0]["pnl"] == pytest.approx(-100.0, abs=1.0)
+
+
+def test_campaign_shares_target_is_big_win():
+    import pandas as pd
+    wk = pd.DatetimeIndex([pd.Timestamp("2020-01-03")])
+    weekly = pd.DataFrame({"Open": [100.0], "High": [100.0], "Low": [100.0],
+                           "Close": [100.0], "Volume": [0]}, index=wk)
+    watr = pd.Series([1.0], index=wk)
+    # a clean run up to +3 steps with target_streak=3 -> big positive
+    rows = [("2019-12-30", 100.4, 99.6), ("2019-12-31", 101.2, 100.1),
+            ("2020-01-02", 102.2, 101.1), ("2020-01-06", 103.2, 102.1)]
+    daily = _daily(rows)
+    res = strat.run_campaign(daily, weekly, watr, base_bet=100, target_streak=3,
+                             instrument="shares")
+    win = [r for r in res.table if r.get("reason") == "target"]
+    assert win and win[0]["pnl"] > 100.0    # captured more than one base bet
+
+
 def test_run_linear_all_wins_grows_bank():
     # synthetic uptrend -> every weekly trial wins
     dates = pd.bdate_range("2020-01-01", periods=120)
