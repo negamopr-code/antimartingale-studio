@@ -29,6 +29,17 @@ app.add_middleware(
     CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
     allow_headers=["*"], allow_credentials=False)
 
+
+@app.middleware("http")
+async def _no_cache_app_assets(request: Request, call_next):
+    """Force revalidation of the app shell (html/js/css) so a redeploy is always picked
+    up. The big vendored Plotly bundle stays cacheable."""
+    resp = await call_next(request)
+    p = request.url.path
+    if "/vendor/" not in p and (p == "/" or p.endswith((".js", ".css", ".html"))):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
 STORE: signals.SignalStore = signals.SQLiteSignalStore(settings.signal_db)
 MP = settings.max_points
 
