@@ -117,10 +117,38 @@ async function renderBacktest(prefix, d, isOptions) {
     lay.yaxis2 = { overlaying: "y", side: "right", range: [0, 1.05], gridcolor: "transparent",
                    title: { text: "Δ" } };
   }
-  $(`#${prefix}-stats`).textContent = statsText(d.stats);
+  // stats + "cost as probability" verdict
+  const s = d.stats;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }));
+  let extra = "";
+  if (s.cost_as_prob != null) {
+    const edge = s.empirical_p - 0.5;
+    const ok = edge >= s.cost_as_prob;
+    extra = "\n— cost as win-prob drag (Δp) —\n"
+      + `commission Δp : ${f(s.commission_as_prob)}\n`
+      + `slippage   Δp : ${f(s.slippage_as_prob)}\n`
+      + `TOTAL      Δp : ${f(s.cost_as_prob)}\n`
+      + `breakeven p*  : ${f(s.breakeven_p_with_cost)}\n`
+      + `your edge p-.5: ${f(edge)}\n`
+      + (ok ? "✓ edge still covers costs → net +EV"
+            : "✗ costs exceed edge → net −EV");
+  }
+  $(`#${prefix}-stats`).textContent = statsText(s) + extra;
+
   await plot(`${prefix}-price`, traces, lay);
-  await plot(`${prefix}-equity`, [{ x: d.equity.x, y: d.equity.y, mode: "lines", line: { color: "#a371f7" } }],
-    layout("Equity curve"));
+
+  // equity: net vs gross (no costs) + separate commission & slippage curves
+  const grossY = d.equity.y.map((v, i) => v + (d.cum_cost.y[i] || 0));
+  await plot(`${prefix}-equity`, [
+    { x: d.equity.x, y: grossY, mode: "lines", name: "equity (gross, no costs)",
+      line: { color: "#8b949e", dash: "dot", width: 1 } },
+    { x: d.equity.x, y: d.equity.y, mode: "lines", name: "equity (net)",
+      line: { color: "#a371f7" } },
+    { x: d.cum_commission.x, y: d.cum_commission.y, mode: "lines", name: "cum commission",
+      line: { color: "#f0883e", width: 1 } },
+    { x: d.cum_slippage.x, y: d.cum_slippage.y, mode: "lines", name: "cum slippage",
+      line: { color: "#39c5cf", width: 1 } },
+  ], layout("Equity (net vs gross) + cost curves"));
 }
 
 $("#form-linear").onsubmit = (e) => {

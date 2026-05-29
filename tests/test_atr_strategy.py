@@ -66,6 +66,31 @@ def test_pyramid_cap():
     assert b == 8.0  # capped below 64
 
 
+def test_costs_roundtrip_commission_and_pct_slippage():
+    # commission is per-fill (x2), slippage is % of notional (x2). notional=(bet/atr)*price.
+    t1 = strat.Trial(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-02"),
+                     100.0, 110.0, 10.0, "win", 1)
+    t2 = strat.Trial(pd.Timestamp("2020-01-08"), pd.Timestamp("2020-01-09"),
+                     100.0, 90.0, 10.0, "loss", 1)
+    res = strat.run_linear([t1, t2], base_bet=100, target_streak=10,
+                           commission=1.0, slippage_pct=0.1)
+    # commission: 2 fills * $1 * 2 trials = 4
+    assert res.total_commission == pytest.approx(4.0)
+    # slippage: t1 bet=100 -> notional 1000 -> 2*0.001*1000=2 ; t2 bet=200 -> notional 2000 -> 4
+    assert res.total_slippage == pytest.approx(6.0)
+    assert res.total_cost == pytest.approx(10.0)
+    assert res.n_cycles == 1
+    assert res.cost_as_prob > 0 and res.breakeven_p_with_cost > 0.5
+
+
+def test_no_costs_zero_prob_drag():
+    t = strat.Trial(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-02"),
+                    100.0, 90.0, 10.0, "loss", 1)
+    res = strat.run_linear([t], base_bet=100, target_streak=10)
+    assert res.total_cost == 0.0
+    assert res.cost_as_prob == 0.0 and res.breakeven_p_with_cost == 0.5
+
+
 def test_run_linear_all_wins_grows_bank():
     # synthetic uptrend -> every weekly trial wins
     dates = pd.bdate_range("2020-01-01", periods=120)

@@ -38,3 +38,13 @@ Running log of design decisions. Read before structural edits.
 Antimartingale-long + martingale-short on the SAME instrument resizes in lockstep
 (`bet_long ≡ bet_short`) ⇒ net exposure 0 ⇒ deterministic zero gross, costs make it negative.
 Not implemented; documented as a rejected tactic.
+
+## Cost model + cost-as-probability (2026-05-29)
+- **D15** — Transaction costs: commission = $/fill charged on entry AND exit (×2);
+  slippage = % of position notional per fill (×2 round-trip), notional=(bet/ATR)*price.
+  (Replaces the old `slippage_frac` of bet.) Tracked as separate cumulative curves
+  (commission, slippage, total) plotted on the equity chart alongside net vs gross equity.
+- **D16** — Cost expressed as a win-probability drag Δp via the breakeven shift:
+  no-cost breakeven p=0.5; with avg cost κ/cycle, (2p*)^N = 1+κ/b ⇒ p*=0.5·(1+κ/b)^(1/N).
+  Δp=p*−0.5 = "how much win-prob the cost eats"; if edge (p−0.5) < Δp the strategy is net −EV.
+  Reported per-component (commission/slippage) and total; UI shows a ✓/✗ verdict vs the edge.

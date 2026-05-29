@@ -46,8 +46,8 @@
       <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
       <label>Target streak <input name="target_streak" type="number" value="10"></label>
-      <label>Commission $ <input name="commission" type="number" step="any" value="0"></label>
-      <label>Slippage frac <input name="slippage_frac" type="number" step="any" value="0"></label>
+      <label>Commission $/fill <input name="commission" type="number" step="any" value="0" title="per fill, charged on entry AND exit (x2)"></label>
+      <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0" title="percent of position notional per fill (x2 round-trip)"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
       <button type="submit">Run backtest</button>
@@ -69,8 +69,8 @@
       <label>Target Δ <input name="target_delta" type="number" step="any" value="0.95"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
       <label>IV window <input name="iv_window" type="number" value="20"></label>
-      <label>Commission $ <input name="commission" type="number" step="any" value="0"></label>
-      <label>Slippage frac <input name="slippage_frac" type="number" step="any" value="0"></label>
+      <label>Commission $/fill <input name="commission" type="number" step="any" value="0" title="per fill, charged on entry AND exit (x2)"></label>
+      <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0" title="percent of position notional per fill (x2 round-trip)"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
       <button type="submit">Run backtest</button>

@@ -56,6 +56,20 @@ class BacktestResult:
     final_bank: float = 0.0
     max_drawdown: float = 0.0
     closed_form_ev_cycle: float = 0.0
+    # cost decomposition (per-trial cumulative, aligned with equity_dates)
+    cum_commission: list[float] = field(default_factory=list)
+    cum_slippage: list[float] = field(default_factory=list)
+    cum_cost: list[float] = field(default_factory=list)
+    total_commission: float = 0.0
+    total_slippage: float = 0.0
+    total_cost: float = 0.0
+    n_cycles: int = 0
+    cost_per_cycle: float = 0.0
+    # cost expressed as a win-probability drag (breakeven shift) — see cost_as_probability
+    cost_as_prob: float = 0.0          # total cost
+    commission_as_prob: float = 0.0
+    slippage_as_prob: float = 0.0
+    breakeven_p_with_cost: float = 0.5
     # options-only
     delta_dates: list[pd.Timestamp] = field(default_factory=list)
     delta_path: list[float] = field(default_factory=list)
@@ -132,6 +146,37 @@ def _apply_pyramid(outcome: str, streak: int, bet: float, base_bet: float,
     return streak, bet
 
 
+def _trial_costs(bet: float, atr_entry: float, entry_price: float,
+                 commission: float, slippage_pct: float) -> tuple[float, float]:
+    """Round-trip transaction costs for one trial (entry + exit = 2 fills).
+
+    - commission: $ PER FILL → charged twice (entry + exit).
+    - slippage_pct: PERCENT of position notional PER FILL → twice. Notional comes from the
+      Δ=1 sizing: shares = bet/ATR (so a 1·ATR move == bet $), notional = shares * price.
+    Returns (commission_cost, slippage_cost).
+    """
+    commission_cost = 2.0 * commission
+    notional = (bet / atr_entry) * entry_price if atr_entry else 0.0
+    slippage_cost = 2.0 * (slippage_pct / 100.0) * notional
+    return commission_cost, slippage_cost
+
+
+def cost_as_probability(cost_dollars: float, n_cycles: int, base_bet: float,
+                        target_streak: int) -> tuple[float, float]:
+    """Translate a total cost into a win-probability drag (Δp) and the breakeven p.
+
+    Per-cycle EV (no cost) = b·((2p)^N − 1); breakeven is p=0.5. With an average cost κ per
+    cycle the breakeven becomes (2p*)^N = 1 + κ/b ⇒ p* = 0.5·(1 + κ/b)^(1/N).
+    Δp = p* − 0.5 is "how much win-probability the cost eats": if your edge (p−0.5) < Δp,
+    costs flip the strategy net-negative. (Approximate attribution when split by component.)
+    """
+    if n_cycles <= 0 or base_bet <= 0 or target_streak <= 0:
+        return 0.0, 0.5
+    kappa_over_b = (cost_dollars / n_cycles) / base_bet
+    p_be = 0.5 * (1.0 + kappa_over_b) ** (1.0 / target_streak)
+    return p_be - 0.5, p_be
+
+
 def _drawdown(equity: list[float]) -> float:
     peak = -np.inf
     mdd = 0.0
@@ -142,23 +187,34 @@ def _drawdown(equity: list[float]) -> float:
 
 
 def run_linear(trials: list[Trial], base_bet: float, target_streak: int,
-               commission: float = 0.0, slippage_frac: float = 0.0,
+               commission: float = 0.0, slippage_pct: float = 0.0,
                starting_bank: float = 0.0, cap_mult: float | None = None) -> BacktestResult:
-    """Δ=1 linear P&L: a win is +bet, a loss is -bet (1 ATR move == bet)."""
+    """Δ=1 linear P&L: a win is +bet, a loss is -bet (1 ATR move == bet).
+
+    commission = $/fill (×2 round-trip); slippage_pct = % of notional/fill (×2).
+    """
     res = BacktestResult(trials=trials)
     bank = starting_bank
     streak, bet = 0, base_bet
-    wins = 0
+    wins = cum_comm = cum_slip = n_cycles = 0
     for t in trials:
-        cost = commission + slippage_frac * bet
+        comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission, slippage_pct)
+        cost = comm_c + slip_c
         pnl = (bet if t.outcome == "win" else -bet) - cost
         bank += pnl
         streak, bet = _apply_pyramid(t.outcome, streak, bet, base_bet, target_streak, cap_mult)
+        if streak == 0:
+            n_cycles += 1
         wins += t.outcome == "win"
+        cum_comm += comm_c
+        cum_slip += slip_c
         res.records.append(TrialRecord(t, bet, pnl, bank, streak))
         res.equity_dates.append(t.exit_date)
         res.equity.append(bank)
-    _finalize(res, base_bet, target_streak, wins, bank)
+        res.cum_commission.append(cum_comm)
+        res.cum_slippage.append(cum_slip)
+        res.cum_cost.append(cum_comm + cum_slip)
+    _finalize(res, base_bet, target_streak, wins, bank, n_cycles)
     return res
 
 
@@ -166,7 +222,7 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
                 base_bet: float, target_streak: int, *, r: float = 0.045,
                 dte_days: int = 365, target_delta: float = 0.95, q: float = 0.0,
                 default_sigma: float = 0.20, commission: float = 0.0,
-                slippage_frac: float = 0.0, starting_bank: float = 0.0,
+                slippage_pct: float = 0.0, starting_bank: float = 0.0,
                 cap_mult: float | None = None) -> BacktestResult:
     """Same win/loss sequence, but P&L from a modeled deep-ITM call (BS, IV=realized vol).
 
@@ -176,7 +232,7 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
     res = BacktestResult(trials=trials)
     bank = starting_bank
     streak, bet = 0, base_bet
-    wins = 0
+    wins = cum_comm = cum_slip = n_cycles = 0
     close = daily["Close"]
     for t in trials:
         S0 = t.entry_price
@@ -200,15 +256,23 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
         sig1 = _sigma_at(realized_vol, t.exit_date, default_sigma)
         price1 = float(opt.call_price(t.exit_price, K, T1, r, sig1, q))
 
-        cost = commission + slippage_frac * bet
+        comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission, slippage_pct)
+        cost = comm_c + slip_c
         pnl = (price1 - price0) * units - cost
         bank += pnl
         streak, bet = _apply_pyramid(t.outcome, streak, bet, base_bet, target_streak, cap_mult)
+        if streak == 0:
+            n_cycles += 1
         wins += t.outcome == "win"
+        cum_comm += comm_c
+        cum_slip += slip_c
         res.records.append(TrialRecord(t, bet, pnl, bank, streak))
         res.equity_dates.append(t.exit_date)
         res.equity.append(bank)
-    _finalize(res, base_bet, target_streak, wins, bank)
+        res.cum_commission.append(cum_comm)
+        res.cum_slippage.append(cum_slip)
+        res.cum_cost.append(cum_comm + cum_slip)
+    _finalize(res, base_bet, target_streak, wins, bank, n_cycles)
     return res
 
 
@@ -221,7 +285,7 @@ def _sigma_at(rv: pd.Series, date: pd.Timestamp, default: float) -> float:
 
 
 def _finalize(res: BacktestResult, base_bet: float, target_streak: int,
-              wins: int, bank: float) -> None:
+              wins: int, bank: float, n_cycles: int = 0) -> None:
     from .simcore import closed_form_ev_cycle
     res.n_trials = len(res.trials)
     res.wins = wins
@@ -229,3 +293,15 @@ def _finalize(res: BacktestResult, base_bet: float, target_streak: int,
     res.empirical_p = wins / res.n_trials if res.n_trials else 0.0
     res.max_drawdown = _drawdown(res.equity)
     res.closed_form_ev_cycle = closed_form_ev_cycle(base_bet, target_streak, res.empirical_p)
+    # cost aggregates
+    res.total_commission = res.cum_commission[-1] if res.cum_commission else 0.0
+    res.total_slippage = res.cum_slippage[-1] if res.cum_slippage else 0.0
+    res.total_cost = res.total_commission + res.total_slippage
+    res.n_cycles = n_cycles
+    res.cost_per_cycle = res.total_cost / n_cycles if n_cycles else 0.0
+    res.cost_as_prob, res.breakeven_p_with_cost = cost_as_probability(
+        res.total_cost, n_cycles, base_bet, target_streak)
+    res.commission_as_prob = cost_as_probability(
+        res.total_commission, n_cycles, base_bet, target_streak)[0]
+    res.slippage_as_prob = cost_as_probability(
+        res.total_slippage, n_cycles, base_bet, target_streak)[0]
