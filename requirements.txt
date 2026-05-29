@@ -1,0 +1,11 @@
+# Full dev set (desktop GUI + web + tests). For the lean runtime image see requirements-web.txt.
+numpy
+pandas
+matplotlib
+scipy
+yfinance
+fastapi
+uvicorn[standard]
+gunicorn
+httpx
+pytest

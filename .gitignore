@@ -1,0 +1,9 @@
+.venv/
+.cache/
+__pycache__/
+*.pyc
+/tmp/
+.DS_Store
+
+# Claude local settings (not part of the app)
+.claude/

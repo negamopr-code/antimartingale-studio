@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Antimartingale studio</title>
+  <link rel="stylesheet" href="/style.css"/>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+  <header>
+    <h1>Antimartingale studio</h1>
+    <nav id="tabs">
+      <button class="tab active" data-tab="coinflip">1 · Coin-flip</button>
+      <button class="tab" data-tab="linear">2 · ATR backtest</button>
+      <button class="tab" data-tab="options">3 · Options (auto Δ)</button>
+      <button class="tab" data-tab="signals">4 · TradingView</button>
+    </nav>
+  </header>
+
+  <!-- TAB 1 -->
+  <section id="coinflip" class="panel active">
+    <form class="controls" id="form-coinflip">
+      <label>Iterations <input name="iterations" type="number" value="100000"></label>
+      <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label>Base bet <input name="base_bet" type="number" step="any" value="1"></label>
+      <label>Win prob <input name="win_prob" type="number" step="any" value="0.5"></label>
+      <label>Seed <input name="seed" type="number" placeholder="random"></label>
+      <label>Mode
+        <select name="mode"><option>separate</option><option>continuous</option></select>
+      </label>
+      <button type="submit">Run</button>
+    </form>
+    <div class="results"><div class="plots"><div id="cf-bank"></div><div id="cf-streak"></div></div>
+      <pre class="stats" id="cf-stats"></pre></div>
+  </section>
+
+  <!-- TAB 2 -->
+  <section id="linear" class="panel">
+    <form class="controls" id="form-linear">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2005-01-01"></label>
+      <label>ATR period <input name="atr_period" type="number" value="14"></label>
+      <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
+      <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
+      <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label>Commission $ <input name="commission" type="number" step="any" value="0"></label>
+      <label>Slippage frac <input name="slippage_frac" type="number" step="any" value="0"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <button type="submit">Run backtest</button>
+    </form>
+    <div class="results"><div class="plots"><div id="lin-price"></div><div id="lin-equity"></div></div>
+      <pre class="stats" id="lin-stats"></pre></div>
+  </section>
+
+  <!-- TAB 3 -->
+  <section id="options" class="panel">
+    <form class="controls" id="form-options">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2005-01-01"></label>
+      <label>ATR period <input name="atr_period" type="number" value="14"></label>
+      <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
+      <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
+      <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label>DTE days <input name="dte_days" type="number" value="365"></label>
+      <label>Target Δ <input name="target_delta" type="number" step="any" value="0.95"></label>
+      <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
+      <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label>Commission $ <input name="commission" type="number" step="any" value="0"></label>
+      <label>Slippage frac <input name="slippage_frac" type="number" step="any" value="0"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <button type="submit">Run backtest</button>
+    </form>
+    <div class="results"><div class="plots"><div id="opt-price"></div><div id="opt-equity"></div></div>
+      <pre class="stats" id="opt-stats"></pre></div>
+  </section>
+
+  <!-- TAB 4 -->
+  <section id="signals" class="panel">
+    <p class="hint">TradingView strategy alerts POST to <code>/api/webhook/tradingview</code>
+      (set <code>ANTIMG_WEBHOOK_SECRET</code> and include <code>"passphrase"</code> in the alert JSON).
+      Stored win/loss signals feed the antimartingale sizing engine below.</p>
+    <form class="controls" id="form-signals">
+      <label>Strategy id <input name="strategy_id" placeholder="all"></label>
+      <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
+      <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <button type="submit">Run on stored signals</button>
+      <button type="button" id="refresh-signals">Refresh list</button>
+    </form>
+    <div class="results"><div class="plots"><div id="sig-equity"></div></div>
+      <pre class="stats" id="sig-stats"></pre></div>
+    <table id="sig-table"><thead><tr><th>id</th><th>time</th><th>ticker</th>
+      <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <script src="/app.js"></script>
+</body>
+</html>

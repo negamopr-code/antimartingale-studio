@@ -1,0 +1,8 @@
+# Runtime deps for the web service (lean image — no matplotlib/tkinter).
+numpy
+pandas
+scipy
+yfinance
+fastapi
+uvicorn[standard]
+gunicorn

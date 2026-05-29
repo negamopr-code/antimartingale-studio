@@ -1,0 +1,9 @@
+.venv/
+.cache/
+**/__pycache__/
+*.pyc
+.git/
+tests/
+*.md
+.gitignore
+.dockerignore
