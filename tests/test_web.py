@@ -16,7 +16,12 @@ def client(monkeypatch):
     df = pd.DataFrame({"Open": price, "High": price * 1.01,
                        "Low": price * 0.995, "Close": price,
                        "Volume": 0}, index=dates)
-    monkeypatch.setattr(data, "fetch", lambda *a, **k: df)
+    vix = pd.DataFrame({"Open": 18.0, "High": 18.0, "Low": 18.0,
+                        "Close": 18.0, "Volume": 0}, index=dates)  # ~18% IV
+
+    def fake_fetch(ticker="SPY", *a, **k):
+        return vix if str(ticker).upper().startswith("^VIX") else df
+    monkeypatch.setattr(data, "fetch", fake_fetch)
 
     # isolate signal store + enable webhook
     api.STORE = api.signals.InMemorySignalStore()

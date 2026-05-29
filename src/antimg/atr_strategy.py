@@ -370,6 +370,66 @@ def _sigma_at(rv: pd.Series, date: pd.Timestamp, default: float) -> float:
     return float(v) if v is not None and np.isfinite(v) and v > 0 else default
 
 
+def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *,
+                        r, dte_days, target_delta, qdiv, realized_vol, default_sigma,
+                        roll_buffer, commission_pct, slippage_pct):
+    """Mark-to-market P&L of a long-call campaign WITH auto-rolling.
+
+    Walks daily entry->exit. Buys delta-normalised calls at each ladder add (priced at the
+    add level). When the held option comes within `roll_buffer` days of expiry it ROLLS:
+    crystallise the current calls, re-strike to `target_delta` at the current price for a
+    fresh DTE, keep the same lot exposure. Every fill (add / roll close+open / final close)
+    pays commission+slippage on its notional. Returns (gross_pnl, commission, slippage, n_rolls).
+    """
+    seg = daily.loc[(daily.index >= entry_day) & (daily.index <= exit_date)]
+    batches = sorted(batches, key=lambda b: (b[1], b[0]))
+    realized = comm = slip = contracts = book = 0.0
+    n_rolls = 0
+    K = expiry = sig = None
+    T0 = dte_days / 365.0
+    bi = 0
+
+    def trem(d):
+        return max((expiry - d).days / 365.0, 1e-6)
+
+    def fill(qty, price):
+        nonlocal comm, slip
+        notion = abs(qty) * price
+        comm += commission_pct / 100.0 * notion
+        slip += slippage_pct / 100.0 * notion
+
+    for d, row in seg.iterrows():
+        sclose = float(row["Close"])
+        if K is not None and (expiry - d).days <= roll_buffer:        # roll near expiry
+            p = float(opt.call_price(sclose, K, trem(d), r, sig, qdiv))
+            realized += contracts * p - book
+            fill(contracts, p)                                        # close leg
+            sig = _sigma_at(realized_vol, d, default_sigma)
+            expiry = d + pd.Timedelta(days=dte_days)
+            K = opt.strike_for_delta(sclose, T0, r, sig, target_delta, qdiv)
+            lots_held = sum(l for _, _, l in batches[:bi])
+            contracts = lots_held * (per_pt / target_delta)
+            p2 = float(opt.call_price(sclose, K, T0, r, sig, qdiv))
+            book = contracts * p2
+            fill(contracts, p2)                                       # open leg
+            n_rolls += 1
+        while bi < len(batches) and batches[bi][1] <= d:              # ladder adds on this bar
+            L, dt, lots = batches[bi]; bi += 1
+            if K is None:                                             # entry add sets up the option
+                sig = _sigma_at(realized_vol, entry_day, default_sigma)
+                expiry = entry_day + pd.Timedelta(days=dte_days)
+                K = opt.strike_for_delta(L, T0, r, sig, target_delta, qdiv)
+            dlt = max(float(opt.call_delta(L, K, trem(dt), r, sig, qdiv)), 1e-6)
+            addc = lots * (per_pt / dlt)
+            p = float(opt.call_price(L, K, trem(dt), r, sig, qdiv))
+            contracts += addc; book += addc * p
+            fill(addc, p)
+    p = float(opt.call_price(exit_px, K, trem(exit_date), r, sig, qdiv))  # final close
+    realized += contracts * p - book
+    fill(contracts, p)
+    return realized, comm, slip, n_rolls
+
+
 def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Series, *,
                  base_bet: float, target_streak: int, mult: float = 1.0,
                  instrument: str = "shares", mode: str = "pyramid",
@@ -377,7 +437,7 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                  dte_days: int = 365, target_delta: float = 0.5, qdiv: float = 0.0,
                  default_sigma: float = 0.20, commission_pct: float = 0.0,
                  slippage_pct: float = 0.0, starting_bank: float = 0.0,
-                 cap_mult: float | None = None) -> BacktestResult:
+                 cap_mult: float | None = None, roll_buffer_days: int = 5) -> BacktestResult:
     """Scale-into-ONE-position campaign on the ATR grid (the validated model).
 
     Step h = mult*ATR (ATR fixed at entry). From entry R0, each +1 step UP adds lots on a
@@ -499,22 +559,22 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
             n_cycles += 1
         else:
             # pyramid P&L of the whole stack
+            n_rolls = 0
             if is_calls:
-                T_exit = max((dte_days - days_held) / 365.0, 1e-6)
-                p_out = float(opt.call_price(exit_px, K, T_exit, r, sig0, qdiv))
-                gross = 0.0
-                notional = 0.0
-                for L, dt, lots in batches:
-                    T_add = max((dte_days - (dt - entry_day).days) / 365.0, 1e-6)
-                    p_in = float(opt.call_price(L, K, T_add, r, sig0, qdiv))
-                    gross += lots * contracts_per_lot * (p_out - p_in)
-                    notional += lots * contracts_per_lot * (p_in + p_out)
+                gross, comm_c, slip_c, n_rolls = _calls_campaign_pnl(
+                    daily, entry_day, exit_date, exit_px, batches, per_pt,
+                    r=r, dte_days=dte_days, target_delta=target_delta, qdiv=qdiv,
+                    realized_vol=realized_vol, default_sigma=default_sigma,
+                    roll_buffer=roll_buffer_days, commission_pct=commission_pct,
+                    slippage_pct=slippage_pct)
             else:
                 gross = sum(lots * (exit_px - L) * per_pt for L, _, lots in batches)
                 notional = sum(lots * per_pt * (L + exit_px) for L, _, lots in batches)
-            cost = (commission_pct + slippage_pct) / 100.0 * notional
-            cumc += (commission_pct / 100.0) * notional
-            cums += (slippage_pct / 100.0) * notional
+                comm_c = commission_pct / 100.0 * notional
+                slip_c = slippage_pct / 100.0 * notional
+            cost = comm_c + slip_c
+            cumc += comm_c
+            cums += slip_c
             pnl = gross - cost
             bank += pnl
             wins += reason == "target"
@@ -533,6 +593,7 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
             if is_calls:
                 row["strike"] = round(K, 2)
                 row["delta_entry"] = round(d0, 3)
+                row["rolls"] = n_rolls
             res.table.append(row)
 
         # entry marker for the price chart (green=target win, red=stop/expiry loss)

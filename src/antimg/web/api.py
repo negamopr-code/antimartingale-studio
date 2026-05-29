@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 from fastapi import Body, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -135,10 +136,33 @@ def backtest_linear(req: BacktestReq):
     return _backtest_payload(daily, res)
 
 
+_SP500 = {"SPY", "^GSPC", "^SPX", "SPX", "ES=F", "VOO", "IVV", "SPXL", "UPRO"}
+
+
+def _iv_series(req: "OptionsReq", daily):
+    """Implied-vol input for the option model.
+
+    'vix'/'auto'(S&P) → real historical IMPLIED vol from ^VIX (market IV, free) — far more
+    realistic than realized vol (which understates premiums). 'realized' → rolling realized
+    vol of the asset. 'constant' → a flat IV. Falls back to realized if VIX is unavailable.
+    """
+    src = req.iv_source
+    if src == "constant":
+        return pd.Series(req.iv_const, index=daily.index)
+    if src == "vix" or (src == "auto" and req.ticker.upper() in _SP500):
+        try:
+            vix = datamod.fetch("^VIX", start=req.start)["Close"] / 100.0
+            if not vix.empty:
+                return vix
+        except Exception:
+            pass
+    return datamod.realized_vol(daily["Close"], req.iv_window)
+
+
 @app.post("/api/backtest/options")
 def backtest_options(req: OptionsReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
-    rv = datamod.realized_vol(daily["Close"], req.iv_window)
+    rv = _iv_series(req, daily)
     # same campaign, but each lot is a delta-normalised long call (no -1ATR stop on the option;
     # the trailing stop caps risk at the initial b, convexity softens losses).
     res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
@@ -146,7 +170,8 @@ def backtest_options(req: OptionsReq):
                              instrument="calls", mode=req.mode, realized_vol=rv, r=req.r,
                              dte_days=req.dte_days, target_delta=req.target_delta,
                              commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-                             starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+                             starting_bank=req.starting_bank, cap_mult=req.cap_mult,
+                             roll_buffer_days=req.roll_buffer_days)
     if not res.table:
         raise HTTPException(status_code=422, detail="no campaigns resolved for these params")
     return _backtest_payload(daily, res, options=True)

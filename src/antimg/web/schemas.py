@@ -35,6 +35,9 @@ class OptionsReq(BacktestReq):
     dte_days: int = Field(365, ge=1, le=3650)
     target_delta: float = Field(0.95, gt=0, lt=1)
     iv_window: int = Field(20, ge=2, le=500)
+    roll_buffer_days: int = Field(5, ge=0, le=60)   # roll the call this many days before expiry
+    iv_source: str = Field("auto", pattern="^(auto|vix|realized|constant)$")  # auto=VIX for S&P
+    iv_const: float = Field(0.20, gt=0, le=3)       # used when iv_source=constant
 
 
 class FromSignalsReq(BaseModel):

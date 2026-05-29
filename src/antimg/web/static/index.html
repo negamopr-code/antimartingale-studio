@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=7"/>
+  <link rel="stylesheet" href="/style.css?v=8"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -71,6 +71,8 @@
       <label>Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
       <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label>IV source <select name="iv_source"><option value="auto">auto (VIX for S&P)</option><option value="vix">VIX</option><option value="realized">realized</option><option value="constant">constant</option></select></label>
+      <label>Roll @ d-to-exp <input name="roll_buffer_days" type="number" value="5"></label>
       <label>Mode <select name="mode"><option value="pyramid">pyramid (scale-in)</option><option value="scalp">scalp (book each step)</option></select></label>
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035" title="percent of notional per fill, charged on entry AND exit (x2)"></label>
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01" title="percent of position notional per fill (x2 round-trip)"></label>
@@ -103,6 +105,6 @@
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <script src="/app.js?v=7"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>

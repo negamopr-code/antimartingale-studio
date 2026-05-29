@@ -71,3 +71,16 @@ Not implemented; documented as a rejected tactic.
   delta; IV fixed at entry). Verified SPY 2010–: shares median loss = exactly −b, rare huge
   wins; calls fatten the win tail via gamma. Delta slider (default 0.5) + per-campaign table
   (steps/lots_Q/avg/stop/gross/pnl). Old run_linear/run_options/resolve_trials kept (tests).
+
+## Real implied vol (VIX) + option rolling (2026-05-29)
+- **D20** — Option IV input: `iv_source` = auto|vix|realized|constant. **auto/vix uses ^VIX**
+  (real historical market IMPLIED vol, free) for S&P tickers — realized vol understated
+  premiums badly (e.g. 2020 ATM 365d: $8 realized vs $15 VIX). Δ=0.5 strike barely moves,
+  but premium/theta become market-real → option P&L is honest (lower). Non-S&P → realized
+  vol fallback (no free vol index). Brainstormer "colleague" used intrinsic+rule-of-thumb,
+  not real chains — our BS+VIX is strictly more rigorous. Caveat: VIX is 30d ATM, used flat
+  (no term structure, no skew).
+- **D21** — Auto-roll: when a held call is within `roll_buffer_days` (default 5) of expiry and
+  the campaign is still open, roll = crystallise + re-strike to target_delta at current price
+  for a fresh DTE, same lot exposure; each roll leg pays commission+slippage. Lets short/weekly
+  DTE ride the trend (verified: weekly 7d → ~265 rolls). `_calls_campaign_pnl` is MTM with rolls.
