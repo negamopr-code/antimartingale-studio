@@ -9,8 +9,18 @@ const DARK = {
   legend: { orientation: "h", y: 1.12 },
 };
 const layout = (title, extra = {}) => ({ ...DARK, title: { text: title, font: { size: 14 } }, ...extra });
-const plot = (id, traces, lay) =>
-  Plotly.react(id, traces, lay, { responsive: true, displaylogo: false });
+const plot = (id, traces, lay) => {
+  if (typeof Plotly === "undefined")
+    throw new Error("Plotly failed to load (/vendor/plotly.min.js). Hard-reload (Ctrl+Shift+R).");
+  return Plotly.react(id, traces, lay, { responsive: true, displaylogo: false });
+};
+
+function toast(msg, ok = false) {
+  const t = $("#toast");
+  t.textContent = msg; t.hidden = false; t.classList.toggle("ok", ok);
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.hidden = true; }, ok ? 3000 : 9000);
+}
 
 function errMsg(body, status) {
   if (body && typeof body.error === "string") return body.error;
@@ -69,7 +79,7 @@ const statsText = (s) => Object.entries(s)
 
 async function withBusy(btn, fn) {
   btn.disabled = true; const t = btn.textContent; btn.textContent = "…";
-  try { await fn(); } catch (e) { alert("Error: " + e.message); }
+  try { await fn(); } catch (e) { toast("Error: " + (e && e.message || e)); console.error(e); }
   finally { btn.disabled = false; btn.textContent = t; }
 }
 
@@ -147,3 +157,7 @@ $("#form-signals").onsubmit = (e) => {
 };
 
 loadInstruments();
+window.addEventListener("load", () => {
+  if (typeof Plotly === "undefined")
+    toast("Charts library (Plotly) did not load from /vendor/plotly.min.js — charts will not render.");
+});

@@ -30,4 +30,4 @@ HEALTHCHECK --interval=30s --timeout=4s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",8000)}/api/health').status==200 else 1)"
 
 # gunicorn process manager + uvicorn workers (scale workers via WEB_CONCURRENCY)
-CMD ["sh", "-c", "gunicorn antimg.web.api:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT} -w ${WEB_CONCURRENCY} --timeout 120"]
+CMD ["sh", "-c", "gunicorn antimg.web.api:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT} -w ${WEB_CONCURRENCY} --timeout 120 --access-logfile - --error-logfile -"]
