@@ -15,7 +15,7 @@ async function plot(id, traces, lay) {
     throw new Error("Plotly failed to load (/vendor/plotly.min.js). Hard-reload (Ctrl+Shift+R).");
   const el = document.getElementById(id);
   if (!el) throw new Error("plot container #" + id + " not found");
-  await Plotly.react(el, traces, lay, { responsive: true, displaylogo: false });
+  await Plotly.react(el, traces, lay, { responsive: true, displaylogo: false, scrollZoom: true });
   Plotly.Plots.resize(el);          // force correct size if the container was measured at 0
 }
 
@@ -105,16 +105,16 @@ $("#form-coinflip").onsubmit = (e) => {
 async function renderBacktest(prefix, d, isOptions) {
   const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "Close",
                   line: { width: 1, color: "#c9d1d9" } };
-  const win = { x: d.entries.win.x, y: d.entries.win.y, mode: "markers", name: "win",
-                marker: { color: "#3fb950", symbol: "triangle-up", size: 7 } };
-  const loss = { x: d.entries.loss.x, y: d.entries.loss.y, mode: "markers", name: "loss",
-                 marker: { color: "#f85149", symbol: "triangle-down", size: 7 } };
-  const traces = [price, win, loss];
-  const lay = layout("Price + entries", {
-    height: 460,
+  const loss = { x: d.entries.loss.x, y: d.entries.loss.y, mode: "markers", name: "loss (−b)",
+                 marker: { color: "#f85149", symbol: "triangle-down", size: 6, opacity: 0.6 } };
+  const win = { x: d.entries.win.x, y: d.entries.win.y, mode: "markers", name: "WIN (trend)",
+                marker: { color: "#3fb950", symbol: "star", size: 14,
+                          line: { color: "#0f1419", width: 1 } } };
+  const traces = [price, loss, win];   // win last = drawn on top
+  const lay = layout("Price + entries  (drag/scroll to zoom)", {
+    height: 380,
     xaxis: {
       gridcolor: "#2a3340",
-      rangeslider: { visible: true, thickness: 0.09, bgcolor: "#10151c" },
       rangeselector: {
         bgcolor: "#10151c", activecolor: "#5b9dff", font: { color: "#e6edf3" },
         buttons: [
@@ -149,7 +149,17 @@ async function renderBacktest(prefix, d, isOptions) {
       + (ok ? "✓ edge still covers costs → net +EV"
             : "✗ costs exceed edge → net −EV");
   }
-  $(`#${prefix}-stats`).textContent = statsText(s) + extra;
+  // win/loss breakdown — explains why equity can soar while most campaigns lose −b
+  const pnls = (d.table || []).map((r) => r.pnl).filter((v) => typeof v === "number");
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  const W = pnls.filter((p) => p > 0), L = pnls.filter((p) => p < 0);
+  const breakdown = pnls.length
+    ? `WINS   ${W.length} : +${f(sum(W))}\n`
+      + `losses ${L.length} : ${f(sum(L))}\n`
+      + `net      : ${f(sum(pnls))}\n`
+      + `(few big wins outweigh many −b losses)\n\n`
+    : "";
+  $(`#${prefix}-stats`).textContent = breakdown + statsText(s) + extra;
 
   await plot(`${prefix}-price`, traces, lay);
 
