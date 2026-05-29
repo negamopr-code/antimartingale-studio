@@ -52,7 +52,8 @@ def test_continuous_mode_chains_bank():
 
 def test_fair_coin_empirical_ev_near_zero():
     sim = Simulation()
-    res = sim.simulate(200000, 10, 1.0, 0.5, seed=42)
+    # long-run study: keep booking cycles instead of stopping at the first target streak
+    res = sim.simulate(200000, 10, 1.0, 0.5, seed=42, stop_at_first_target=False)
     # per-trade EV must hover near zero for a fair coin
     per_trade = res.cumulative_bank / res.total_iterations
     assert abs(per_trade) < 0.2

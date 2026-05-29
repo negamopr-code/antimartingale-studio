@@ -137,23 +137,17 @@ async function renderBacktest(prefix, d, isOptions) {
 
   await plot(`${prefix}-price`, traces, lay);
 
-  // equity: net vs gross (no costs) on the left axis; cumulative cost curves on a
-  // SEPARATE right axis so they stay visible even when small vs equity.
+  // equity on a SINGLE axis: gross (no costs) vs net — the gap between them IS the cost.
+  // gross = net + cumulative cost.
   const grossY = d.equity.y.map((v, i) => v + (d.cum_cost.y[i] || 0));
-  const eqLay = layout("Equity (net/gross · left) + cumulative cost ($ · right)", {
-    yaxis2: { overlaying: "y", side: "right", title: { text: "cost $" },
-              gridcolor: "transparent", rangemode: "tozero" },
-  });
+  const dp = s.cost_as_prob != null ? ` — costs ≈ Δp ${f(s.cost_as_prob)} in win-prob` : "";
   await plot(`${prefix}-equity`, [
-    { x: d.equity.x, y: grossY, mode: "lines", name: "equity (gross, no costs)",
-      line: { color: "#8b949e", dash: "dot", width: 1 } },
-    { x: d.equity.x, y: d.equity.y, mode: "lines", name: "equity (net)",
-      line: { color: "#a371f7" } },
-    { x: d.cum_commission.x, y: d.cum_commission.y, mode: "lines", name: "cum commission",
-      yaxis: "y2", line: { color: "#f0883e", width: 1.5 } },
-    { x: d.cum_slippage.x, y: d.cum_slippage.y, mode: "lines", name: "cum slippage",
-      yaxis: "y2", line: { color: "#39c5cf", width: 1.5 } },
-  ], eqLay);
+    { x: d.equity.x, y: grossY, mode: "lines", name: "gross (no costs)",
+      line: { color: "#8b949e", dash: "dot", width: 1.5 } },
+    { x: d.equity.x, y: d.equity.y, mode: "lines", name: "net (after costs)",
+      line: { color: "#a371f7", width: 2 },
+      fill: "tonexty", fillcolor: "rgba(248,81,73,0.15)" },
+  ], layout("Equity: net vs gross" + dp));
 }
 
 $("#form-linear").onsubmit = (e) => {

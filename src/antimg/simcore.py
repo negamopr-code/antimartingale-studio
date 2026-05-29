@@ -3,9 +3,10 @@
 Improved port of the user's original Tkinter `Simulation` class:
   - bet doubles after every WIN, resets to base after every LOSS;
   - a cycle ends either on a loss (failure) or on reaching `streak_target` (success);
-  - on success we BOOK the pyramid and CONTINUE (the original `break`-on-first-target
-    stopped the whole run — that hid the long-run behaviour, so it's replaced by a
-    proper cycle loop). Set `stop_at_first_target=True` to recover the old behaviour.
+  - DEFAULT (stop_at_first_target=True) reproduces the original script: stop at the FIRST
+    target streak (for p=0.5, target N this happens around ~2^(N+1) trials — e.g. ~2046 for
+    N=10, hence the chart naturally ends near there). Set stop_at_first_target=False to keep
+    booking cycles and run the full `iterations` for long-run EV studies.
 
 Bugs fixed vs the original:
   - `series_counter` is no longer pre-seeded with a misleading {1..50} dict; it is a
@@ -78,7 +79,7 @@ class Simulation:
         base_bet: float,
         win_prob: float,
         mode: str = "separate",
-        stop_at_first_target: bool = False,
+        stop_at_first_target: bool = True,   # original behaviour: stop at the first target streak
         seed: int | None = None,
     ) -> CoinFlipResult:
         if mode == "separate":

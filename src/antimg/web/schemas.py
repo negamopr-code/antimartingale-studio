@@ -13,7 +13,7 @@ class CoinFlipReq(BaseModel):
     win_prob: float = Field(0.5, ge=0.0, le=1.0)
     mode: str = Field("separate", pattern="^(separate|continuous)$")
     seed: int | None = None
-    stop_at_first_target: bool = False
+    stop_at_first_target: bool = True   # original behaviour: stop at the first target streak
 
 
 class BacktestReq(BaseModel):
