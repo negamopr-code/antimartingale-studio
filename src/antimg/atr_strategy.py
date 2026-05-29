@@ -29,10 +29,11 @@ class Trial:
     entry_date: pd.Timestamp
     exit_date: pd.Timestamp
     entry_price: float
-    exit_price: float          # barrier level hit
+    exit_price: float          # barrier level hit (or expiry close for the no-stop call)
     atr_entry: float
     outcome: str               # 'win' | 'loss'
     days_held: int
+    exit_reason: str = ""      # 'target' | 'stop' | 'straddle' | 'expiry'
 
 
 @dataclass
@@ -70,6 +71,8 @@ class BacktestResult:
     commission_as_prob: float = 0.0
     slippage_as_prob: float = 0.0
     breakeven_p_with_cost: float = 0.5
+    # per-trial detail table (JSON-able dicts) for the UI
+    table: list[dict] = field(default_factory=list)
     # options-only
     delta_dates: list[pd.Timestamp] = field(default_factory=list)
     delta_path: list[float] = field(default_factory=list)
@@ -98,16 +101,17 @@ def resolve_trials(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Ser
         outcome = None
         exit_date = None
         exit_price = np.nan
+        reason = ""
         for d, row in future.iterrows():
             hi, lo = row["High"], row["Low"]
             hit_up = hi >= up
             hit_dn = lo <= dn
             if hit_up and hit_dn:
-                outcome, exit_price = "loss", dn      # B-2 loss-first
+                outcome, exit_price, reason = "loss", dn, "straddle"   # B-2 loss-first
             elif hit_dn:
-                outcome, exit_price = "loss", dn
+                outcome, exit_price, reason = "loss", dn, "stop"
             elif hit_up:
-                outcome, exit_price = "win", up
+                outcome, exit_price, reason = "win", up, "target"
             if outcome:
                 exit_date = d
                 break
@@ -116,7 +120,7 @@ def resolve_trials(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Ser
 
         days_held = max((exit_date - future.index[0]).days, 0)
         trials.append(Trial(future.index[0], exit_date, float(entry), float(exit_price),
-                            float(atr_e), outcome, days_held))
+                            float(atr_e), outcome, days_held, reason))
         # advance to the first weekly bar whose week START is strictly after the
         # resolution day (compare on week-start, NOT the Friday label, else the
         # current week's own label > exit_date re-enters the same week forever).
@@ -128,6 +132,63 @@ def resolve_trials(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Ser
         if new_pos <= pos:                  # safety: guarantee forward progress
             new_pos = pos + 1
         pos = new_pos
+    return trials
+
+
+def resolve_trials_long_call(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Series,
+                             dte_days: int, mult: float = 1.0) -> list[Trial]:
+    """Win/loss sequence for a LONG CALL — the whole point: there is **NO −1·ATR stop**.
+
+    A linear position gets whipsawed out on every −1·ATR pullback; a long call does not —
+    its downside is the premium, so we HOLD through pullbacks. A trial resolves as:
+      - WIN  : price reaches entry + mult·ATR (the +1·ATR target) before the option expires;
+      - LOSS : the option reaches expiry (entry_day + dte_days) without hitting the target.
+    Because pullbacks no longer end the trade, an up-trend that whipsaws a linear stop is
+    captured far more often here — exactly the call's edge. `exit_price` is the target level
+    on a win, or the expiry close on a loss; `exit_reason` is 'target' or 'expiry'.
+    """
+    trials: list[Trial] = []
+    daily = daily.sort_index()
+    wk_index = weekly.index
+    pos = 0
+    while pos < len(wk_index):
+        wk_date = wk_index[pos]
+        atr_e = weekly_atr.get(wk_date, np.nan)
+        entry = weekly["Open"].get(wk_date, np.nan)
+        if not np.isfinite(atr_e) or atr_e <= 0 or not np.isfinite(entry):
+            pos += 1
+            continue
+        up = entry + mult * atr_e
+        week_start = wk_date - pd.Timedelta(days=6)
+        future = daily.loc[daily.index >= week_start]
+        if future.empty:
+            break
+        entry_day = future.index[0]
+        expiry = entry_day + pd.Timedelta(days=dte_days)
+
+        outcome = exit_date = None
+        exit_price = np.nan
+        reason = ""
+        for d, row in future.iterrows():
+            if row["High"] >= up:                      # target reached — no stop in between
+                outcome, exit_price, reason = "win", up, "target"
+                exit_date = d
+                break
+            if d >= expiry:                            # held to expiry without the target
+                outcome, exit_price, reason = "loss", float(row["Close"]), "expiry"
+                exit_date = d
+                break
+        if outcome is None:
+            break  # ran out of data before target or expiry
+
+        days_held = max((exit_date - entry_day).days, 0)
+        trials.append(Trial(entry_day, exit_date, float(entry), float(exit_price),
+                            float(atr_e), outcome, days_held, reason))
+        later = wk_index[(wk_index - pd.Timedelta(days=6)) > exit_date]
+        if len(later) == 0:
+            break
+        new_pos = wk_index.get_loc(later[0])
+        pos = new_pos if new_pos > pos else pos + 1
     return trials
 
 
@@ -197,7 +258,8 @@ def run_linear(trials: list[Trial], base_bet: float, target_streak: int,
     bank = starting_bank
     streak, bet = 0, base_bet
     wins = cum_comm = cum_slip = n_cycles = 0
-    for t in trials:
+    for i, t in enumerate(trials):
+        used_bet = bet
         comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission_pct, slippage_pct)
         cost = comm_c + slip_c
         pnl = (bet if t.outcome == "win" else -bet) - cost
@@ -214,6 +276,17 @@ def run_linear(trials: list[Trial], base_bet: float, target_streak: int,
         res.cum_commission.append(cum_comm)
         res.cum_slippage.append(cum_slip)
         res.cum_cost.append(cum_comm + cum_slip)
+        res.table.append({
+            "i": i + 1, "entry": t.entry_date.date().isoformat(),
+            "exit": t.exit_date.date().isoformat(), "days": t.days_held,
+            "entry_px": round(t.entry_price, 2), "exit_px": round(t.exit_price, 2),
+            "atr": round(t.atr_entry, 2),
+            "up": round(t.entry_price + t.atr_entry, 2),
+            "dn": round(t.entry_price - t.atr_entry, 2),
+            "reason": t.exit_reason, "outcome": t.outcome,
+            "bet": round(used_bet, 2), "cost": round(cost, 2),
+            "pnl": round(pnl, 2), "bank": round(bank, 2),
+        })
     _finalize(res, base_bet, target_streak, wins, bank, n_cycles)
     return res
 
@@ -234,13 +307,15 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
     streak, bet = 0, base_bet
     wins = cum_comm = cum_slip = n_cycles = 0
     close = daily["Close"]
-    for t in trials:
+    for i, t in enumerate(trials):
+        used_bet = bet
         S0 = t.entry_price
         sig0 = _sigma_at(realized_vol, t.entry_date, default_sigma)
         T0 = dte_days / 365.0
         K = opt.strike_for_delta(S0, T0, r, sig0, target_delta, q)
         units = bet / t.atr_entry            # 1 ATR underlying move ~ bet of exposure
         price0 = float(opt.call_price(S0, K, T0, r, sig0, q))
+        delta0 = float(opt.call_delta(S0, K, T0, r, sig0, q))
 
         # delta path over the holding window
         window = close.loc[(close.index >= t.entry_date) & (close.index <= t.exit_date)]
@@ -255,10 +330,12 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
         T1 = max((dte_days - elapsed) / 365.0, 1e-6)
         sig1 = _sigma_at(realized_vol, t.exit_date, default_sigma)
         price1 = float(opt.call_price(t.exit_price, K, T1, r, sig1, q))
+        delta1 = float(opt.call_delta(t.exit_price, K, T1, r, sig1, q))
 
         comm_c, slip_c = _trial_costs(bet, t.atr_entry, t.entry_price, commission_pct, slippage_pct)
         cost = comm_c + slip_c
-        pnl = (price1 - price0) * units - cost
+        opt_pnl = (price1 - price0) * units
+        pnl = opt_pnl - cost
         bank += pnl
         streak, bet = _apply_pyramid(t.outcome, streak, bet, base_bet, target_streak, cap_mult)
         if streak == 0:
@@ -272,6 +349,17 @@ def run_options(trials: list[Trial], daily: pd.DataFrame, realized_vol: pd.Serie
         res.cum_commission.append(cum_comm)
         res.cum_slippage.append(cum_slip)
         res.cum_cost.append(cum_comm + cum_slip)
+        res.table.append({
+            "i": i + 1, "entry": t.entry_date.date().isoformat(),
+            "exit": t.exit_date.date().isoformat(), "days": t.days_held,
+            "entry_px": round(S0, 2), "exit_px": round(t.exit_price, 2),
+            "atr": round(t.atr_entry, 2), "target_up": round(S0 + t.atr_entry, 2),
+            "reason": t.exit_reason, "outcome": t.outcome,
+            "strike": round(K, 2), "prem_in": round(price0, 2), "prem_out": round(price1, 2),
+            "delta_in": round(delta0, 3), "delta_out": round(delta1, 3),
+            "units": round(units, 3), "opt_pnl": round(opt_pnl, 2),
+            "cost": round(cost, 2), "pnl": round(pnl, 2), "bank": round(bank, 2),
+        })
     _finalize(res, base_bet, target_streak, wins, bank, n_cycles)
     return res
 

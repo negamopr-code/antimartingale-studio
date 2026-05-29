@@ -148,6 +148,23 @@ async function renderBacktest(prefix, d, isOptions) {
       line: { color: "#a371f7", width: 2 },
       fill: "tonexty", fillcolor: "rgba(248,81,73,0.15)" },
   ], layout("Equity: net vs gross" + dp));
+
+  renderTable(`${prefix}-table`, d.table);
+}
+
+// detailed per-trial table under the charts
+function renderTable(id, rows) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!rows || !rows.length) { el.innerHTML = ""; return; }
+  const cols = Object.keys(rows[0]);
+  const head = "<tr>" + cols.map((c) => `<th>${c}</th>`).join("") + "</tr>";
+  const body = rows.map((r) => {
+    const cls = r.outcome === "win" ? "w" : (r.outcome === "loss" ? "l" : "");
+    return `<tr class="${cls}">` + cols.map((c) => `<td>${r[c]}</td>`).join("") + "</tr>";
+  }).join("");
+  el.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
+    + `<div class="tt-note">${rows.length} trials · scroll for all</div>`;
 }
 
 $("#form-linear").onsubmit = (e) => {

@@ -91,6 +91,31 @@ def test_no_costs_zero_prob_drag():
     assert res.cost_as_prob == 0.0 and res.breakeven_p_with_cost == 0.5
 
 
+def test_long_call_holds_through_dip_where_linear_stops():
+    # price dips below -1ATR (would stop a linear pos) then rallies above +1ATR.
+    weekly = _week("2020-01-03", 100.0)
+    watr = pd.Series([10.0], index=weekly.index)            # up=110, dn=90
+    daily = _daily([
+        ("2019-12-30", 105, 88),    # dips to 88 (< dn) — linear STOP, call ignores
+        ("2019-12-31", 112, 104),   # rallies to 112 (>= up) — target
+    ])
+    lin = strat.resolve_trials(daily, weekly, watr, mult=1.0)
+    call = strat.resolve_trials_long_call(daily, weekly, watr, dte_days=30, mult=1.0)
+    assert lin[0].outcome == "loss" and lin[0].exit_reason in ("stop", "straddle")
+    assert call[0].outcome == "win" and call[0].exit_reason == "target"
+
+
+def test_long_call_expiry_is_loss():
+    weekly = _week("2020-01-03", 100.0)
+    watr = pd.Series([10.0], index=weekly.index)            # up=110
+    daily = _daily([
+        ("2019-12-30", 104, 96),
+        ("2020-03-01", 108, 95),    # never reaches 110; well past a 30-day expiry
+    ])
+    call = strat.resolve_trials_long_call(daily, weekly, watr, dte_days=30, mult=1.0)
+    assert call[0].outcome == "loss" and call[0].exit_reason == "expiry"
+
+
 def test_run_linear_all_wins_grows_bank():
     # synthetic uptrend -> every weekly trial wins
     dates = pd.bdate_range("2020-01-01", periods=120)

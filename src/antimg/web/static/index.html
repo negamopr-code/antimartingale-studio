@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=2"/>
+  <link rel="stylesheet" href="/style.css?v=3"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -54,6 +54,7 @@
     </form>
     <div class="results"><div class="plots"><div id="lin-price"></div><div id="lin-equity"></div></div>
       <pre class="stats" id="lin-stats"></pre></div>
+    <div class="tradetable" id="lin-table"></div>
   </section>
 
   <!-- TAB 3 -->
@@ -77,6 +78,7 @@
     </form>
     <div class="results"><div class="plots"><div id="opt-price"></div><div id="opt-equity"></div></div>
       <pre class="stats" id="opt-stats"></pre></div>
+    <div class="tradetable" id="opt-table"></div>
   </section>
 
   <!-- TAB 4 -->
@@ -99,6 +101,6 @@
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <script src="/app.js?v=2"></script>
+  <script src="/app.js?v=3"></script>
 </body>
 </html>

@@ -49,3 +49,14 @@ Not implemented; documented as a rejected tactic.
   no-cost breakeven p=0.5; with avg cost κ/cycle, (2p*)^N = 1+κ/b ⇒ p*=0.5·(1+κ/b)^(1/N).
   Δp=p*−0.5 = "how much win-prob the cost eats"; if edge (p−0.5) < Δp the strategy is net −EV.
   Reported per-component (commission/slippage) and total; UI shows a ✓/✗ verdict vs the edge.
+
+## Options resolution fixed: no stop + per-trial table (2026-05-29)
+- **D17** — A LONG CALL has **no −1·ATR stop** (downside = premium). New
+  `resolve_trials_long_call`: hold through pullbacks; WIN = price reaches +1·ATR before
+  expiry, LOSS = expiry (entry+DTE) without the target. The options tab uses THIS, not the
+  linear whipsaw stops. Demonstrated: SPY 2010–2026 linear p≈0.58 vs option p≈0.98 — the
+  call captures the up-move far more often (the whole point the user flagged).
+- **D18** — Detailed per-trial table under both backtest charts (`res.table`): entry/exit,
+  prices, ATR, barriers/target, exit reason, outcome, bet/cost/pnl/bank; options add strike,
+  premium in/out, delta in/out, units, option P&L. Static assets versioned (?v=N) + no-cache
+  on the app shell so redeploys are always picked up.

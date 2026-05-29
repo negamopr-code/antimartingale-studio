@@ -35,3 +35,13 @@ th { color:var(--muted); }
          background:#3a1416; color:#ffd7d4; border:1px solid var(--red); border-radius:8px;
          padding:12px 16px; font-size:13px; box-shadow:0 4px 18px rgba(0,0,0,.4); white-space:pre-wrap; }
 #toast.ok { background:#10261a; color:#c7f0d0; border-color:var(--green); }
+.tradetable { margin-top:16px; }
+.tt-scroll { max-height:360px; overflow:auto; border:1px solid #2a3340; border-radius:8px; }
+.tradetable table { width:100%; border-collapse:collapse; font-size:12px;
+                    font-family:"Courier New", monospace; }
+.tradetable th { position:sticky; top:0; background:#10151c; color:var(--muted);
+                 padding:6px 9px; text-align:right; white-space:nowrap; }
+.tradetable td { padding:4px 9px; text-align:right; border-bottom:1px solid #20272f; white-space:nowrap; }
+.tradetable tr.w td { color:#9be7a8; }
+.tradetable tr.l td { color:#ffb3ae; }
+.tt-note { color:var(--muted); font-size:11px; margin-top:6px; }

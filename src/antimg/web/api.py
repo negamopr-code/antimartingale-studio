@@ -98,6 +98,7 @@ def _backtest_payload(daily, res, options=False):
         "cum_commission": ser.list_xy(res.equity_dates, res.cum_commission, MP),
         "cum_slippage": ser.list_xy(res.equity_dates, res.cum_slippage, MP),
         "cum_cost": ser.list_xy(res.equity_dates, res.cum_cost, MP),
+        "table": res.table,
         "stats": {
             "n_trials": res.n_trials, "wins": res.wins, "empirical_p": res.empirical_p,
             "final_bank": res.final_bank, "max_drawdown": res.max_drawdown,
@@ -135,7 +136,8 @@ def backtest_linear(req: BacktestReq):
 @app.post("/api/backtest/options")
 def backtest_options(req: OptionsReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
-    trials = strat.resolve_trials(daily, weekly, watr, req.mult)
+    # LONG CALL has no -1 ATR stop: hold through pullbacks to the +1 ATR target or expiry.
+    trials = strat.resolve_trials_long_call(daily, weekly, watr, req.dte_days, req.mult)
     if not trials:
         raise HTTPException(status_code=422, detail="no trials resolved for these params")
     rv = datamod.realized_vol(daily["Close"], req.iv_window)
