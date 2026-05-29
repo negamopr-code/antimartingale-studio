@@ -21,7 +21,7 @@
   <!-- TAB 1 -->
   <section id="coinflip" class="panel active">
     <form class="controls" id="form-coinflip">
-      <label>Iterations <input name="iterations" type="number" value="100000"></label>
+      <label>Iterations <input name="iterations" type="number" value="100000" min="1" max="2000000" step="1000" title="max 2,000,000 (anti-DoS cap; raise via ANTIMG_MAX_ITERATIONS)"></label>
       <label>Target streak <input name="target_streak" type="number" value="10"></label>
       <label>Base bet <input name="base_bet" type="number" step="any" value="1"></label>
       <label>Win prob <input name="win_prob" type="number" step="any" value="0.5"></label>

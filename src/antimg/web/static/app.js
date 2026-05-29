@@ -12,10 +12,17 @@ const layout = (title, extra = {}) => ({ ...DARK, title: { text: title, font: { 
 const plot = (id, traces, lay) =>
   Plotly.react(id, traces, lay, { responsive: true, displaylogo: false });
 
+function errMsg(body, status) {
+  if (body && typeof body.error === "string") return body.error;
+  if (body && typeof body.detail === "string") return body.detail;
+  if (body && Array.isArray(body.detail))   // FastAPI/pydantic validation errors
+    return body.detail.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ");
+  return "HTTP " + status;
+}
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error || body.detail || r.status);
+  if (!r.ok) throw new Error(errMsg(body, r.status));
   return body;
 }
 const formData = (form) => {
