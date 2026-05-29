@@ -8,7 +8,8 @@ services:
       dockerfile: deploy/Dockerfile
     image: antimg-web
     ports:
-      - "${PORT:-8000}:8000"
+      # host 8090 (8000 is taken by zoe-serve, 9000 by dash-serve) -> container 8000
+      - "${PORT:-8090}:8000"
     environment:
       WEB_CONCURRENCY: "${WEB_CONCURRENCY:-4}"
       ANTIMG_CORS_ORIGINS: "${ANTIMG_CORS_ORIGINS:-*}"

@@ -46,7 +46,7 @@ three above + a **TradingView** tab). See `ARCHITECTURE.md` for the scaling & Tr
 integration design.
 
 ```bash
-# local dev (auto-reload) -> http://127.0.0.1:8000
+# local dev (auto-reload) -> http://127.0.0.1:8090
 .venv/bin/python scripts/run_web.py
 
 # production-ish, portable Docker (any VPS / PaaS)
