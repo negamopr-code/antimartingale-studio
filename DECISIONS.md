@@ -101,3 +101,22 @@ Not implemented; documented as a rejected tactic.
 - Empirical (SPY 2015–26, base $100, target 4, costs on): shares +$22.8k PF2.9; deep-ITM LEAPS
   (DTE365, Δ0.9, real VIX) +$18.3k PF2.2; **weekly DTE7 Δ0.5 calls at real VIX bleed theta to
   −$20.2k** — the data-driven case for the doctrine's deep-ITM low-theta LEAPS.
+
+## Vol surface: term structure + skew + non-S&P indices (2026-05-30)
+- **D25** — New `src/antimg/vol.py` `VolModel`: IV is a surface, not a flat number.
+  **Term structure** from real CBOE constant-maturity vol indices (S&P: ^VIX9D/^VIX/^VIX3M/
+  ^VIX6M) interpolated to the option's tenor in **variance-time** (linear in σ²·T), flat-σ
+  extrapolation outside. `use_term_structure=False` → nearest tenor, flat in T.
+- **D26** — **Non-S&P vol indices** by asset class: ^VXN (nasdaq), ^RVX (russell), ^VXD (dow),
+  ^GVZ (gold), ^OVX (oil), ^EVZ (eurusd); else realized-vol fallback. (Replaces the old
+  "VIX for S&P, realized for everything else".) `iv_source` adds `index`; `auto` picks the
+  class index then falls back to realized.
+- **D27** — **Skew** = additive `σ(m) = σ_atm + β·ln(K/S)`, fixed β per asset class (equity
+  smirk β<0: SPY −0.18, QQQ −0.16; gold −0.05; FX −0.03; other −0.10), overridable via UI
+  `skew_beta`. With a Δ-target the strike is off-ATM, so the smile shifts the premium:
+  deep-ITM (K<S) picks up the smirk. β=0 = pure ATM (prior behaviour). β is a calibration
+  (a slider), NOT market data — kept explicit/simple, no full smile fit.
+- Wiring: `run_campaign`/`_calls_campaign_pnl` take optional `vol_model`; strike solved at the
+  ATM term IV, option priced/repriced at the skew-adjusted IV (entry + every roll). Options
+  payload reports `vol_model`/`vol_class`/`skew_beta`. Verified skew monotone (β0 +$24.1k →
+  β−0.4 +$20.8k); GLD→index:gold, QQQ→index:nasdaq. assets ?v=10. 43 tests green.
