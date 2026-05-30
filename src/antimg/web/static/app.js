@@ -148,9 +148,9 @@ async function renderBacktest(prefix, d, isOptions) {
   const pnls = (d.table || []).map((r) => r.pnl).filter((v) => typeof v === "number");
   const sum = (a) => a.reduce((x, y) => x + y, 0);
   const W = pnls.filter((p) => p > 0), L = pnls.filter((p) => p < 0);
-  const net = sum(pnls), gain = sum(W), loss = sum(L);
-  const pf = loss !== 0 ? gain / Math.abs(loss) : Infinity;
-  const avgW = W.length ? gain / W.length : 0, avgL = L.length ? loss / L.length : 0;
+  const net = sum(pnls), winSum = sum(W), lossSum = sum(L);
+  const pf = lossSum !== 0 ? winSum / Math.abs(lossSum) : Infinity;
+  const avgW = W.length ? winSum / W.length : 0, avgL = L.length ? lossSum / L.length : 0;
   const wr = pnls.length ? (100 * W.length / pnls.length) : 0;
   const verdict = pnls.length
     ? `${net > 0 ? "✅ PROFITABLE" : "❌ NOT PROFITABLE"}   net P&L ${net >= 0 ? "+" : ""}${f(net)}\n`
