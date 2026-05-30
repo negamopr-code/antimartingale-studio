@@ -84,3 +84,20 @@ Not implemented; documented as a rejected tactic.
   the campaign is still open, roll = crystallise + re-strike to target_delta at current price
   for a fresh DTE, same lot exposure; each roll leg pays commission+slippage. Lets short/weekly
   DTE ride the trend (verified: weekly 7d → ~265 rolls). `_calls_campaign_pnl` is MTM with rolls.
+
+## Pyramid-on-options bugfix + honest profitability (2026-05-30)
+- **D22** — `run_campaign` calls path used to force-close each campaign at the option's expiry
+  (`d >= expiry_day`). With short DTE that fired in week 1 before price moved +1·ATR, so the
+  ladder never built (lots_Q≡1) and D21's rolling was dead code. **Removed the campaign-level
+  expiry exit**: a finite option life is handled solely by ROLLING; the campaign exits only on
+  stop/target/open (same as shares). Verified lots_Q ∈ {1,3,7,15,31}.
+- **D23** — The campaign is NOT a fair coin-flip; its `empirical_p` is the campaign target-hit
+  rate (~0.11), NOT a per-step win prob. So the coin-flip `edge = p−0.5` / breakeven-`p*`
+  readout (D16) is **meaningless for the campaign** (reported fake −EV on profitable runs).
+  UI now shows a plain PROFITABILITY VERDICT: net P&L, profit factor, win/loss counts+averages.
+  `cost_as_prob`/`breakeven_p_with_cost` kept in the payload but no longer drive a verdict.
+- **D24** — Price chart shows a green triangle-up at every +1·ATR scale-in (`entries.add`);
+  target win = gold star, stop loss = red down-triangle.
+- Empirical (SPY 2015–26, base $100, target 4, costs on): shares +$22.8k PF2.9; deep-ITM LEAPS
+  (DTE365, Δ0.9, real VIX) +$18.3k PF2.2; **weekly DTE7 Δ0.5 calls at real VIX bleed theta to
+  −$20.2k** — the data-driven case for the doctrine's deep-ITM low-theta LEAPS.
