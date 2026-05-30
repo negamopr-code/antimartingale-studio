@@ -122,17 +122,17 @@ Not implemented; documented as a rejected tactic.
   β−0.4 +$20.8k); GLD→index:gold, QQQ→index:nasdaq. assets ?v=10. 43 tests green.
 
 ## Coin-flip chart fix (2026-05-30)
-- **D28** — Bug: `simcore.run()` appended to `cumulative_bank` only ONCE after the loop →
-  `history()` returned a 1-element list → the "Cumulative bank" chart was a single dot
-  (the "catastrophe"). Rewrote `run()` with a `book()` helper that records the running
-  cumulative P&L after EVERY booked cycle → one point per cycle = a real equity curve.
-  With a fixed base bet, per-cycle P&L is identical in `separate` and `continuous`, so both
-  modes now yield the SAME correct curve (mode is no longer a no-op-with-different-bug; it's
-  a no-op-because-mathematically-equal under fixed bet — documented). `last_series` now holds
-  the last WINNING (target-hit) streak, with a fallback to the last cycle. `stats()` fixed:
-  real `mode` (was hardcoded "separate"), removed the duplicate `empirical_ev_per_cycle`
-  key, wired `empirical_ev_cycle` (= final/cycles). UI: coin-flip verdict (📈/📉/➖ + final
-  P&L + empirical-vs-closed-form EV/cycle + win-rate), equity curve filled green/red by sign.
-  assets ?v=12. Test `test_continuous_mode_accumulates` → `test_equity_curve_is_per_cycle`.
-  Also fixed (v11): app.js failed to parse — duplicate `const loss` (verdict block vs chart
-  trace) broke the whole page; renamed to winSum/lossSum. Always `node --check` app.js.
+- **D28** — Coin-flip UI restyle. The backend (`simcore.Simulation.simulate`) was already
+  correct: `history` is the per-TRIAL bank path (multi-point, NOT a single dot — an earlier
+  commit message wrongly claimed a "single point" bug; that diagnosis was mistaken and the
+  attempted simcore rewrite never applied). The real defect was the UI: a leftover commit
+  briefly wired the coin-flip stats block to NON-EXISTENT keys (`empirical_ev_per_cycle`,
+  `win_rate`) → stats rendered as "—"/NaN. Corrected to the actual API keys: `final_bank`,
+  `cycles`, `successes`, `ev_cycle_empirical`, `ev_cycle_theory`, `trades_per_cycle`. UI now
+  shows a verdict line (📈/📉/➖ + final P&L over N cycles, empirical vs closed-form EV/cycle,
+  target-hit %), the equity curve filled green/red by sign ("cycle/trial #" axis) and the
+  streak chart relabelled. assets ?v=13. No backend/test changes (simcore untouched).
+  Also fixed earlier this session (v11): app.js failed to parse — duplicate `const loss`
+  (verdict block vs chart trace) broke the whole page; renamed to winSum/lossSum.
+  **Lesson: always check the real API payload keys before binding the UI to them, and
+  `node --check` app.js after every edit.**

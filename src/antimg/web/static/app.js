@@ -95,12 +95,13 @@ $("#form-coinflip").onsubmit = (e) => {
     const s = d.stats;
     const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }));
     const up = s.final_bank > 0;
+    const winRate = s.cycles ? 100 * s.successes / s.cycles : 0;
     const verdict = `${up ? "📈 EQUITY RISES" : (s.final_bank < 0 ? "📉 EQUITY FALLS" : "➖ FLAT")}  `
       + `final P&L ${s.final_bank >= 0 ? "+" : ""}${f(s.final_bank)} over ${f(s.cycles)} cycles\n`
-      + `empirical EV/cycle : ${f(s.empirical_ev_per_cycle)}\n`
-      + `closed-form  b·((2p)^N−1) : ${f(s.ev_per_cycle_closed_form)}\n`
-      + `win-rate (hit target) : ${f(100 * s.win_rate)}%\n`
-      + `(p>0.5 ⇒ rises, p=0.5 ⇒ flat, p<0.5 ⇒ falls)\n\n`;
+      + `empirical EV/cycle : ${f(s.ev_cycle_empirical)}\n`
+      + `closed-form  b·((2p)^N−1) : ${f(s.ev_cycle_theory)}\n`
+      + `target-hit cycles : ${f(s.successes)} / ${f(s.cycles)}  (${f(winRate)}%)\n`
+      + `(p>0.5 ⇒ rises, p=0.5 ⇒ flat over many cycles, p<0.5 ⇒ falls)\n\n`;
     const hist = Object.entries(d.series_counter)
       .sort((a, b) => (+a[0]) - (+b[0]))
       .map(([k, v]) => `  ${String(k).padStart(3)} wins: ${v}`).join("\n");
