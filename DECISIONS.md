@@ -120,3 +120,19 @@ Not implemented; documented as a rejected tactic.
   ATM term IV, option priced/repriced at the skew-adjusted IV (entry + every roll). Options
   payload reports `vol_model`/`vol_class`/`skew_beta`. Verified skew monotone (β0 +$24.1k →
   β−0.4 +$20.8k); GLD→index:gold, QQQ→index:nasdaq. assets ?v=10. 43 tests green.
+
+## Coin-flip chart fix (2026-05-30)
+- **D28** — Bug: `simcore.run()` appended to `cumulative_bank` only ONCE after the loop →
+  `history()` returned a 1-element list → the "Cumulative bank" chart was a single dot
+  (the "catastrophe"). Rewrote `run()` with a `book()` helper that records the running
+  cumulative P&L after EVERY booked cycle → one point per cycle = a real equity curve.
+  With a fixed base bet, per-cycle P&L is identical in `separate` and `continuous`, so both
+  modes now yield the SAME correct curve (mode is no longer a no-op-with-different-bug; it's
+  a no-op-because-mathematically-equal under fixed bet — documented). `last_series` now holds
+  the last WINNING (target-hit) streak, with a fallback to the last cycle. `stats()` fixed:
+  real `mode` (was hardcoded "separate"), removed the duplicate `empirical_ev_per_cycle`
+  key, wired `empirical_ev_cycle` (= final/cycles). UI: coin-flip verdict (📈/📉/➖ + final
+  P&L + empirical-vs-closed-form EV/cycle + win-rate), equity curve filled green/red by sign.
+  assets ?v=12. Test `test_continuous_mode_accumulates` → `test_equity_curve_is_per_cycle`.
+  Also fixed (v11): app.js failed to parse — duplicate `const loss` (verdict block vs chart
+  trace) broke the whole page; renamed to winSum/lossSum. Always `node --check` app.js.
