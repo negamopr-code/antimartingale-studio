@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import atr_strategy as strat
 from .. import data as datamod
+from .. import vol as volmod
 from .. import instruments, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
@@ -138,45 +139,44 @@ def backtest_linear(req: BacktestReq):
     return _backtest_payload(daily, res)
 
 
-_SP500 = {"SPY", "^GSPC", "^SPX", "SPX", "ES=F", "VOO", "IVV", "SPXL", "UPRO"}
+def _build_vol(req: "OptionsReq", daily):
+    """Construct the IV surface (real CBOE term structure + fixed-β skew) for the option model.
 
-
-def _iv_series(req: "OptionsReq", daily):
-    """Implied-vol input for the option model.
-
-    'vix'/'auto'(S&P) → real historical IMPLIED vol from ^VIX (market IV, free) — far more
-    realistic than realized vol (which understates premiums). 'realized' → rolling realized
-    vol of the asset. 'constant' → a flat IV. Falls back to realized if VIX is unavailable.
+    Falls back to the asset's realized vol when no vol index is available (non-S&P/-VXN/etc),
+    and to a flat constant when iv_source='constant'. With use_term_structure=False only the
+    nearest tenor is used (flat in T). Returns a vol.VolModel (see src/antimg/vol.py).
     """
-    src = req.iv_source
-    if src == "constant":
-        return pd.Series(req.iv_const, index=daily.index)
-    if src == "vix" or (src == "auto" and req.ticker.upper() in _SP500):
-        try:
-            vix = datamod.fetch("^VIX", start=req.start)["Close"] / 100.0
-            if not vix.empty:
-                return vix
-        except Exception:
-            pass
-    return datamod.realized_vol(daily["Close"], req.iv_window)
+    realized = datamod.realized_vol(daily["Close"], req.iv_window)
+    vm = volmod.build(req.ticker, req.start, iv_source=req.iv_source,
+                      skew_beta=req.skew_beta, realized=realized, iv_const=req.iv_const)
+    if not req.use_term_structure and len(vm._T) > 1:    # collapse to the tenor nearest the option
+        target = req.dte_days / 365.0
+        keep = min(vm._T, key=lambda t: abs(t - target))
+        vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
+    return vm, realized
 
 
 @app.post("/api/backtest/options")
 def backtest_options(req: OptionsReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
-    rv = _iv_series(req, daily)
+    vm, realized = _build_vol(req, daily)
     # same campaign, but each lot is a delta-normalised long call (no -1ATR stop on the option;
-    # the trailing stop caps risk at the initial b, convexity softens losses).
+    # the trailing stop caps risk at the initial b, convexity softens losses). IV from the
+    # surface: real CBOE vol-index term structure interpolated to the tenor, + fixed-β skew.
     res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
                              target_streak=req.target_streak, mult=req.mult,
-                             instrument="calls", mode=req.mode, realized_vol=rv, r=req.r,
+                             instrument="calls", mode=req.mode, realized_vol=realized, r=req.r,
                              dte_days=req.dte_days, target_delta=req.target_delta,
                              commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
                              starting_bank=req.starting_bank, cap_mult=req.cap_mult,
-                             roll_buffer_days=req.roll_buffer_days)
+                             roll_buffer_days=req.roll_buffer_days, vol_model=vm)
     if not res.table:
         raise HTTPException(status_code=422, detail="no campaigns resolved for these params")
-    return _backtest_payload(daily, res, options=True)
+    payload = _backtest_payload(daily, res, options=True)
+    payload["stats"]["vol_model"] = vm.label
+    payload["stats"]["skew_beta"] = vm.skew_beta
+    payload["stats"]["vol_class"] = volmod.classify(req.ticker)
+    return payload
 
 
 # ----------------------------------------------------------------- TradingView ingest

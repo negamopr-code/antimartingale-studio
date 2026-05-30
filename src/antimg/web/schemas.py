@@ -36,8 +36,10 @@ class OptionsReq(BacktestReq):
     target_delta: float = Field(0.95, gt=0, lt=1)
     iv_window: int = Field(20, ge=2, le=500)
     roll_buffer_days: int = Field(5, ge=0, le=60)   # roll the call this many days before expiry
-    iv_source: str = Field("auto", pattern="^(auto|vix|realized|constant)$")  # auto=VIX for S&P
+    iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")  # auto=vol-index by class
     iv_const: float = Field(0.20, gt=0, le=3)       # used when iv_source=constant
+    skew_beta: float | None = Field(None, ge=-2, le=2)  # additive IV per unit ln-moneyness; None=asset-class default
+    use_term_structure: bool = True   # interpolate real CBOE vol-index term structure to the option tenor
 
 
 class FromSignalsReq(BaseModel):

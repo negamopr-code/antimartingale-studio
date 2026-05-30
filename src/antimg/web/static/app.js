@@ -167,6 +167,13 @@ async function renderBacktest(prefix, d, isOptions) {
       + `slippage   : ${f(s.total_slippage)}\n`
       + `total cost : ${f(s.total_cost)}\n`;
   }
+  // volatility surface used to price the options (term structure + skew)
+  if (s.vol_model != null) {
+    extra += "\n— vol surface —\n"
+      + `IV source  : ${s.vol_model}  (class ${s.vol_class})\n`
+      + `skew β     : ${f(s.skew_beta)} per ln-moneyness\n`
+      + (s.delta_mean != null ? `Δ used     : mean ${f(s.delta_mean)} (min ${f(s.delta_min)})\n` : "");
+  }
   $(`#${prefix}-stats`).textContent = verdict + "— raw stats —\n" + statsText(s) + extra;
 
   await plot(`${prefix}-price`, traces, lay);

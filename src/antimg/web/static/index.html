@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=9"/>
+  <link rel="stylesheet" href="/style.css?v=10"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -71,7 +71,9 @@
       <label>Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
       <label>IV window <input name="iv_window" type="number" value="20"></label>
-      <label>IV source <select name="iv_source"><option value="auto">auto (VIX for S&P)</option><option value="vix">VIX</option><option value="realized">realized</option><option value="constant">constant</option></select></label>
+      <label>IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="index">force vol-index</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label title="Real CBOE vol-index term structure (^VIX9D/^VIX/^VIX3M/^VIX6M for S&P) interpolated to the option tenor in variance-time. Off = nearest tenor flat.">Term structure <select name="use_term_structure"><option value="true">on (interp to DTE)</option><option value="false">off (flat)</option></select></label>
+      <label title="Volatility skew β: additive IV per unit ln-moneyness. Negative = equity smirk (low strikes richer). Blank = asset-class default (SPY −0.18, gold −0.05, FX −0.03).">Skew β <input name="skew_beta" type="number" step="any" placeholder="class default"></label>
       <label>Roll @ d-to-exp <input name="roll_buffer_days" type="number" value="5"></label>
       <label>Mode <select name="mode"><option value="pyramid">pyramid (scale-in)</option><option value="scalp">scalp (book each step)</option></select></label>
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035" title="percent of notional per fill, charged on entry AND exit (x2)"></label>
@@ -105,6 +107,6 @@
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <script src="/app.js?v=9"></script>
+  <script src="/app.js?v=10"></script>
 </body>
 </html>

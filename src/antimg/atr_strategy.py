@@ -375,7 +375,7 @@ def _sigma_at(rv: pd.Series, date: pd.Timestamp, default: float) -> float:
 
 def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *,
                         r, dte_days, target_delta, qdiv, realized_vol, default_sigma,
-                        roll_buffer, commission_pct, slippage_pct):
+                        roll_buffer, commission_pct, slippage_pct, vol_model=None):
     """Mark-to-market P&L of a long-call campaign WITH auto-rolling.
 
     Walks daily entry->exit. Buys delta-normalised calls at each ladder add (priced at the
@@ -383,6 +383,10 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
     crystallise the current calls, re-strike to `target_delta` at the current price for a
     fresh DTE, keep the same lot exposure. Every fill (add / roll close+open / final close)
     pays commission+slippage on its notional. Returns (gross_pnl, commission, slippage, n_rolls).
+
+    If `vol_model` is given the IV is read off the real ATM term-structure at the option's
+    nominal tenor T0 and skew-adjusted at the chosen strike; otherwise it falls back to the
+    flat per-date `realized_vol` series (the original behaviour).
     """
     seg = daily.loc[(daily.index >= entry_day) & (daily.index <= exit_date)]
     batches = sorted(batches, key=lambda b: (b[1], b[0]))
@@ -394,6 +398,21 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
 
     def trem(d):
         return max((expiry - d).days / 365.0, 1e-6)
+
+    def pick(date, S):
+        """(strike, skew-adjusted IV) for a fresh option struck at spot S on `date`.
+
+        Strike is solved with the ATM term-structure IV; the returned IV adds the skew at
+        that strike, so a deep-ITM (K<S) strike picks up the smile premium (β<0 ⇒ higher IV).
+        """
+        if vol_model is not None:
+            a = vol_model.atm(date, T0)
+            if a is None:
+                a = _sigma_at(realized_vol, date, default_sigma)
+            k = opt.strike_for_delta(S, T0, r, a, target_delta, qdiv)
+            return k, vol_model.sigma(date, T0, k, S, default_sigma)
+        s = _sigma_at(realized_vol, date, default_sigma)
+        return opt.strike_for_delta(S, T0, r, s, target_delta, qdiv), s
 
     def fill(qty, price):
         nonlocal comm, slip
@@ -407,9 +426,8 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
             p = float(opt.call_price(sclose, K, trem(d), r, sig, qdiv))
             realized += contracts * p - book
             fill(contracts, p)                                        # close leg
-            sig = _sigma_at(realized_vol, d, default_sigma)
+            K, sig = pick(d, sclose)
             expiry = d + pd.Timedelta(days=dte_days)
-            K = opt.strike_for_delta(sclose, T0, r, sig, target_delta, qdiv)
             lots_held = sum(l for _, _, l in batches[:bi])
             contracts = lots_held * (per_pt / target_delta)
             p2 = float(opt.call_price(sclose, K, T0, r, sig, qdiv))
@@ -419,9 +437,8 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
         while bi < len(batches) and batches[bi][1] <= d:              # ladder adds on this bar
             L, dt, lots = batches[bi]; bi += 1
             if K is None:                                             # entry add sets up the option
-                sig = _sigma_at(realized_vol, entry_day, default_sigma)
                 expiry = entry_day + pd.Timedelta(days=dte_days)
-                K = opt.strike_for_delta(L, T0, r, sig, target_delta, qdiv)
+                K, sig = pick(entry_day, L)
             dlt = max(float(opt.call_delta(L, K, trem(dt), r, sig, qdiv)), 1e-6)
             addc = lots * (per_pt / dlt)
             p = float(opt.call_price(L, K, trem(dt), r, sig, qdiv))
@@ -440,7 +457,8 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                  dte_days: int = 365, target_delta: float = 0.5, qdiv: float = 0.0,
                  default_sigma: float = 0.20, commission_pct: float = 0.0,
                  slippage_pct: float = 0.0, starting_bank: float = 0.0,
-                 cap_mult: float | None = None, roll_buffer_days: int = 5) -> BacktestResult:
+                 cap_mult: float | None = None, roll_buffer_days: int = 5,
+                 vol_model=None) -> BacktestResult:
     """Scale-into-ONE-position campaign on the ATR grid (the validated model).
 
     Step h = mult*ATR (ATR fixed at entry). From entry R0, each +1 step UP adds lots on a
@@ -480,9 +498,14 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
         entry_price0 = R0                    # campaign entry (scalp reassigns R0 later)
 
         if is_calls:
-            sig0 = _sigma_at(realized_vol, entry_day, default_sigma)
             T0 = dte_days / 365.0
-            K = opt.strike_for_delta(R0, T0, r, sig0, target_delta, qdiv)
+            if vol_model is not None:                     # ATM term-structure → strike → skew IV
+                atm0 = vol_model.atm(entry_day, T0) or _sigma_at(realized_vol, entry_day, default_sigma)
+                K = opt.strike_for_delta(R0, T0, r, atm0, target_delta, qdiv)
+                sig0 = vol_model.sigma(entry_day, T0, K, R0, default_sigma)
+            else:
+                sig0 = _sigma_at(realized_vol, entry_day, default_sigma)
+                K = opt.strike_for_delta(R0, T0, r, sig0, target_delta, qdiv)
             d0 = float(opt.call_delta(R0, K, T0, r, sig0, qdiv))
             contracts_per_lot = per_pt / max(d0, 1e-6)   # delta-normalised: 1 lot ~ b per step
             expiry_day = entry_day + pd.Timedelta(days=dte_days)
@@ -572,7 +595,7 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                     r=r, dte_days=dte_days, target_delta=target_delta, qdiv=qdiv,
                     realized_vol=realized_vol, default_sigma=default_sigma,
                     roll_buffer=roll_buffer_days, commission_pct=commission_pct,
-                    slippage_pct=slippage_pct)
+                    slippage_pct=slippage_pct, vol_model=vol_model)
             else:
                 gross = sum(lots * (exit_px - L) * per_pt for L, _, lots in batches)
                 notional = sum(lots * per_pt * (L + exit_px) for L, _, lots in batches)
