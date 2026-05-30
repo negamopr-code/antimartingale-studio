@@ -92,12 +92,30 @@ $("#form-coinflip").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () => {
     const d = await post("/api/coinflip", formData(e.target));
-    const hist = Object.entries(d.series_counter).map(([k, v]) => `  ${k.padStart(3)} wins: ${v}`).join("\n");
-    $("#cf-stats").textContent = statsText(d.stats) + "\n\ncycles ending at streak:\n" + hist;
-    await plot("cf-bank", [{ x: d.history.x, y: d.history.y, mode: "lines", line: { width: 1, color: "#5b9dff" } }],
-      layout("Cumulative bank"));
-    await plot("cf-streak", [{ x: d.last_series.x, y: d.last_series.y, mode: "lines", line: { color: "#3fb950" } }],
-      layout("Last winning streak"));
+    const s = d.stats;
+    const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }));
+    const up = s.final_bank > 0;
+    const verdict = `${up ? "📈 EQUITY RISES" : (s.final_bank < 0 ? "📉 EQUITY FALLS" : "➖ FLAT")}  `
+      + `final P&L ${s.final_bank >= 0 ? "+" : ""}${f(s.final_bank)} over ${f(s.cycles)} cycles\n`
+      + `empirical EV/cycle : ${f(s.empirical_ev_per_cycle)}\n`
+      + `closed-form  b·((2p)^N−1) : ${f(s.ev_per_cycle_closed_form)}\n`
+      + `win-rate (hit target) : ${f(100 * s.win_rate)}%\n`
+      + `(p>0.5 ⇒ rises, p=0.5 ⇒ flat, p<0.5 ⇒ falls)\n\n`;
+    const hist = Object.entries(d.series_counter)
+      .sort((a, b) => (+a[0]) - (+b[0]))
+      .map(([k, v]) => `  ${String(k).padStart(3)} wins: ${v}`).join("\n");
+    $("#cf-stats").textContent = verdict + "— raw stats —\n" + statsText(s)
+      + "\n\ncycles ending at streak:\n" + hist;
+    // equity curve: cumulative P&L across cycles (one point per booked cycle)
+    const eqUp = up ? "#3fb950" : "#f85149";
+    await plot("cf-bank", [{ x: d.history.x, y: d.history.y, mode: "lines", name: "cumulative P&L",
+                             line: { width: 1.5, color: eqUp },
+                             fill: "tozeroy", fillcolor: up ? "rgba(63,185,80,0.12)" : "rgba(248,81,73,0.12)" }],
+      layout("Equity curve — cumulative P&L over cycles", { xaxis: { gridcolor: "#2a3340", title: { text: "cycle #" } } }));
+    // within-cycle bet escalation of the last winning streak (0, b(2¹−1), b(2²−1), …)
+    await plot("cf-streak", [{ x: d.last_series.x, y: d.last_series.y, mode: "lines+markers",
+                              line: { color: "#3fb950" }, marker: { size: 5 } }],
+      layout("Last winning streak — bank within one cycle", { xaxis: { gridcolor: "#2a3340", title: { text: "win #" } } }));
   });
 };
 
