@@ -114,6 +114,8 @@ def _backtest_payload(daily, res, options=False):
             "edge_vs_breakeven": res.empirical_p - res.breakeven_p_with_cost,
         },
     }
+    out["entries"]["add"] = {"x": [d.isoformat() for d in res.add_dates],
+                             "y": [float(v) for v in res.add_levels]}
     if options and res.delta_path:
         out["delta"] = ser.list_xy(res.delta_dates, res.delta_path, MP)
         dp = res.delta_path

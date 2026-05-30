@@ -107,10 +107,13 @@ async function renderBacktest(prefix, d, isOptions) {
                   line: { width: 1, color: "#c9d1d9" } };
   const loss = { x: d.entries.loss.x, y: d.entries.loss.y, mode: "markers", name: "loss (−b)",
                  marker: { color: "#f85149", symbol: "triangle-down", size: 6, opacity: 0.6 } };
-  const win = { x: d.entries.win.x, y: d.entries.win.y, mode: "markers", name: "WIN (trend)",
-                marker: { color: "#3fb950", symbol: "star", size: 14,
+  const add = { x: (d.entries.add || {}).x || [], y: (d.entries.add || {}).y || [],
+                mode: "markers", name: "scale-in (+1 ATR)",
+                marker: { color: "#3fb950", symbol: "triangle-up", size: 9, opacity: 0.85 } };
+  const win = { x: d.entries.win.x, y: d.entries.win.y, mode: "markers", name: "WIN (target hit)",
+                marker: { color: "#f0c000", symbol: "star", size: 15,
                           line: { color: "#0f1419", width: 1 } } };
-  const traces = [price, loss, win];   // win last = drawn on top
+  const traces = [price, loss, add, win];   // win last = drawn on top
   const lay = layout("Price + entries  (drag/scroll to zoom)", {
     height: 380,
     xaxis: {
@@ -136,30 +139,35 @@ async function renderBacktest(prefix, d, isOptions) {
   // stats + "cost as probability" verdict
   const s = d.stats;
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }));
-  let extra = "";
-  if (s.cost_as_prob != null) {
-    const edge = s.empirical_p - 0.5;
-    const ok = edge >= s.cost_as_prob;
-    extra = "\n— cost as win-prob drag (Δp) —\n"
-      + `commission Δp : ${f(s.commission_as_prob)}\n`
-      + `slippage   Δp : ${f(s.slippage_as_prob)}\n`
-      + `TOTAL      Δp : ${f(s.cost_as_prob)}\n`
-      + `breakeven p*  : ${f(s.breakeven_p_with_cost)}\n`
-      + `your edge p-.5: ${f(edge)}\n`
-      + (ok ? "✓ edge still covers costs → net +EV"
-            : "✗ costs exceed edge → net −EV");
-  }
-  // win/loss breakdown — explains why equity can soar while most campaigns lose −b
+  // ---- PROFITABILITY VERDICT ----------------------------------------------------------
+  // The campaign is a *skewed coin-flip*: many small −b losses, a few large convex wins.
+  // It is NOT judged by win-rate vs 50% — only the bottom line (net P&L / profit factor).
+  // (The old "edge p−0.5 / breakeven p*" readout was a leftover from the sequential model
+  //  and was MEANINGLESS here: its `p` is the campaign target-hit rate, not a per-step win
+  //  probability, so it reported a fake negative edge even on profitable runs.)
   const pnls = (d.table || []).map((r) => r.pnl).filter((v) => typeof v === "number");
   const sum = (a) => a.reduce((x, y) => x + y, 0);
   const W = pnls.filter((p) => p > 0), L = pnls.filter((p) => p < 0);
-  const breakdown = pnls.length
-    ? `WINS   ${W.length} : +${f(sum(W))}\n`
-      + `losses ${L.length} : ${f(sum(L))}\n`
-      + `net      : ${f(sum(pnls))}\n`
-      + `(few big wins outweigh many −b losses)\n\n`
+  const net = sum(pnls), gain = sum(W), loss = sum(L);
+  const pf = loss !== 0 ? gain / Math.abs(loss) : Infinity;
+  const avgW = W.length ? gain / W.length : 0, avgL = L.length ? loss / L.length : 0;
+  const wr = pnls.length ? (100 * W.length / pnls.length) : 0;
+  const verdict = pnls.length
+    ? `${net > 0 ? "✅ PROFITABLE" : "❌ NOT PROFITABLE"}   net P&L ${net >= 0 ? "+" : ""}${f(net)}\n`
+      + `profit factor : ${pf === Infinity ? "∞" : f(pf)}  ${pf >= 1 ? "(wins outweigh losses)" : "(losses outweigh wins)"}\n`
+      + `big wins  ${W.length}  · avg +${f(avgW)}\n`
+      + `losses    ${L.length}  · avg ${f(avgL)}\n`
+      + `win-rate  ${f(wr)}%   (low is NORMAL — payoff is skewed, not 50/50)\n\n`
     : "";
-  $(`#${prefix}-stats`).textContent = breakdown + statsText(s) + extra;
+  // transaction-cost drag (informational; already deducted from net P&L above)
+  let extra = "";
+  if (s.cost_as_prob != null) {
+    extra = "\n— transaction-cost drag (already in net) —\n"
+      + `commission : ${f(s.total_commission)}\n`
+      + `slippage   : ${f(s.total_slippage)}\n`
+      + `total cost : ${f(s.total_cost)}\n`;
+  }
+  $(`#${prefix}-stats`).textContent = verdict + "— raw stats —\n" + statsText(s) + extra;
 
   await plot(`${prefix}-price`, traces, lay);
 

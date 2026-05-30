@@ -76,6 +76,9 @@ class BacktestResult:
     # options-only
     delta_dates: list[pd.Timestamp] = field(default_factory=list)
     delta_path: list[float] = field(default_factory=list)
+    # scale-in (ladder add) markers for the price chart — one per +1·ATR rung added
+    add_dates: list[pd.Timestamp] = field(default_factory=list)
+    add_levels: list[float] = field(default_factory=list)
 
 
 def resolve_trials(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Series,
@@ -502,9 +505,11 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
             if lo <= stop:                                   # stop-out (loss-first)
                 exit_px, exit_date, reason = stop, d, "stop"
                 break
-            if is_calls and d >= expiry_day:
-                exit_px, exit_date, reason = float(row["Close"]), d, "expiry"
-                break
+            # NOTE: a finite option life is handled by ROLLING inside _calls_campaign_pnl
+            # (re-strike within roll_buffer of expiry), NOT by ending the campaign. The
+            # campaign rides the ATR grid (stop/target/open) exactly like shares — otherwise
+            # a short DTE would close every campaign after one week at Q=1 and the pyramid
+            # could never build (and the roll logic would be dead).
             if mode == "scalp":
                 # book +b each +1 step, re-enter; loss handled by the stop above (= -b)
                 while hi >= R0 + (step + 1) * h:
@@ -533,6 +538,7 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 add = min(2.0 ** step, lot_cap)
                 level = R0 + step * h
                 batches.append((level, d, add))
+                res.add_dates.append(d); res.add_levels.append(level)   # scale-in marker
                 Q += add
                 stop = avg_price() - h / Q
                 peak_step = step
