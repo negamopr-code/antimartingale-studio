@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=15"/>
+  <link rel="stylesheet" href="/style.css?v=16"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -18,6 +18,7 @@
       <button class="tab" data-tab="options">3 · Options (auto Δ)</button>
       <button class="tab" data-tab="signals">4 · TradingView</button>
       <button class="tab" data-tab="scan">5 · Scan all</button>
+      <button class="tab" data-tab="explain">6 · Explain</button>
     </nav>
   </header>
 
@@ -132,6 +133,28 @@
     <div class="tradetable" id="scan-table"></div>
   </section>
 
-  <script src="/app.js?v=15"></script>
+  <!-- TAB 6 -->
+  <section id="explain" class="panel">
+    <p class="hint">Пошаговая трассировка <b>реального движка</b> (<code>run_campaign</code>) на простом
+      синтетическом отрезке — видно, где вход, где каждый долив по +1·ATR и где выход. Ключевой
+      инвариант: риск всего стека на стопе всегда ровно <code>b</code>, сколько бы лотов ни долилось.</p>
+    <form class="controls" id="form-explain">
+      <label>Сценарий
+        <select name="scenario">
+          <option value="uptrend">тренд вверх → цель (win)</option>
+          <option value="flat">флет → стоп (−b)</option>
+          <option value="downtrend">тренд вниз → стоп (−b)</option>
+        </select>
+      </label>
+      <label>Целевая серия N <input name="target_streak" type="number" value="4" min="1" max="8"></label>
+      <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
+      <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
+      <button type="submit">Показать трассировку</button>
+    </form>
+    <div class="results"><div class="plots"><div id="expl-chart"></div></div>
+      <pre class="stats" id="expl-stats"></pre></div>
+  </section>
+
+  <script src="/app.js?v=16"></script>
 </body>
 </html>

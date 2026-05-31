@@ -57,6 +57,15 @@ class ScanReq(BaseModel):
     mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")
 
 
+class ExplainReq(BaseModel):
+    """Step-by-step trace of one campaign on a synthetic flat/up/down path (Explain tab)."""
+    scenario: str = Field("uptrend", pattern="^(flat|uptrend|downtrend)$")
+    target_streak: int = Field(4, ge=1, le=8)   # small N so the pyramid is readable
+    mult: float = Field(1.0, gt=0, le=20)
+    base_bet: float = Field(100.0, gt=0)
+    atr_period: int = Field(4, ge=2, le=20)
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

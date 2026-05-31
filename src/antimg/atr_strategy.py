@@ -458,7 +458,7 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                  default_sigma: float = 0.20, commission_pct: float = 0.0,
                  slippage_pct: float = 0.0, starting_bank: float = 0.0,
                  cap_mult: float | None = None, roll_buffer_days: int = 5,
-                 vol_model=None) -> BacktestResult:
+                 vol_model=None, trace: list | None = None) -> BacktestResult:
     """Scale-into-ONE-position campaign on the ATR grid (the validated model).
 
     Step h = mult*ATR (ATR fixed at entry). From entry R0, each +1 step UP adds lots on a
@@ -523,6 +523,13 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
         exit_px = exit_date = reason = None
         peak_step = 0
 
+        if trace is not None:                       # step-by-step trace for the Explain tab
+            trace.append({"t": "entry", "camp": n_cycles + 1,
+                          "date": entry_day.date().isoformat(), "price": round(R0, 4),
+                          "atr": round(atr, 4), "h": round(h, 4), "per_pt": round(per_pt, 6),
+                          "lots": 1.0, "Q": 1.0, "avg": round(R0, 4), "stop": round(stop, 4),
+                          "risk": round(1.0 * (R0 - stop) * per_pt, 2)})
+
         for d, row in future.iterrows():
             hi, lo = float(row["High"]), float(row["Low"])
             if lo <= stop:                                   # stop-out (loss-first)
@@ -549,6 +556,10 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                     res.cum_commission.append(cumc); res.cum_slippage.append(cums)
                     res.cum_cost.append(cumc + cums)
                     wins += 1
+                    if trace is not None:
+                        trace.append({"t": "step", "camp": n_cycles + 1, "step": step,
+                                      "date": d.date().isoformat(), "level": round(R0, 4),
+                                      "booked": round(base_bet, 2)})
                     if step >= target_streak:
                         exit_px, exit_date, reason = R0, d, "target"
                         break
@@ -565,6 +576,14 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 Q += add
                 stop = avg_price() - h / Q
                 peak_step = step
+                if trace is not None:
+                    a_ = avg_price()
+                    trace.append({"t": "add", "camp": n_cycles + 1, "step": step,
+                                  "date": d.date().isoformat(),
+                                  "trigger": round(R0 + step * h, 4), "level": round(level, 4),
+                                  "lots_added": add, "Q": round(Q, 1), "avg": round(a_, 4),
+                                  "stop": round(stop, 4),
+                                  "risk": round(Q * (a_ - stop) * per_pt, 2)})
                 if step >= target_streak:
                     exit_px, exit_date, reason = level, d, "target"
                     break
@@ -585,6 +604,11 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 res.equity_dates.append(exit_date); res.equity.append(bank)
                 res.cum_commission.append(cumc); res.cum_slippage.append(cums)
                 res.cum_cost.append(cumc + cums)
+            if trace is not None:
+                trace.append({"t": "exit", "camp": n_cycles + 1,
+                              "date": exit_date.date().isoformat(), "reason": reason,
+                              "price": round(float(exit_px), 4), "steps": int(step),
+                              "bank": round(bank, 2)})
             n_cycles += 1
         else:
             # pyramid P&L of the whole stack
@@ -624,6 +648,13 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 row["delta_entry"] = round(d0, 3)
                 row["rolls"] = n_rolls
             res.table.append(row)
+            if trace is not None:
+                trace.append({"t": "exit", "camp": n_cycles,
+                              "date": exit_date.date().isoformat(), "reason": reason,
+                              "price": round(float(exit_px), 4), "steps": int(peak_step),
+                              "Q": round(Q, 1), "avg": round(a, 4), "stop": round(stop, 4),
+                              "gross": round(gross, 2), "cost": round(cost, 2),
+                              "pnl": round(pnl, 2), "bank": round(bank, 2)})
 
         # entry marker for the price chart (green=target win, red=stop/expiry loss)
         res.trials.append(Trial(entry_day, exit_date, entry_price0, float(exit_px),

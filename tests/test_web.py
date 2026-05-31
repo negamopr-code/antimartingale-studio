@@ -96,6 +96,38 @@ def test_scan_all(client):
     assert d["summary"]["best"]["ticker"] and d["summary"]["worst"]["ticker"]
 
 
+def test_explain_scenarios(client):
+    # uptrend → target win with scale-ins; flat/down → −b stop. Trace invariant: risk ≡ b.
+    expect = {"uptrend": "target", "flat": "stop", "downtrend": "stop"}
+    for sc, reason in expect.items():
+        r = client.post("/api/explain", json={"scenario": sc, "target_streak": 4, "base_bet": 100})
+        assert r.status_code == 200, sc
+        d = r.json()
+        assert d["exit"]["reason"] == reason, sc
+        # every traced step keeps whole-stack risk at exactly the base bet b
+        for ev in d["trace"]:
+            if "risk" in ev:
+                assert abs(ev["risk"] - 100) < 1e-6, (sc, ev)
+        if sc == "uptrend":
+            assert d["exit"]["pnl"] > 0 and any(e["t"] == "add" for e in d["trace"])
+        else:
+            assert abs(d["exit"]["pnl"] + 100) < 1e-6   # exactly −b
+
+
+def test_explain_trace_invariant_direct():
+    # the engine's own trace, not the API: risk stays = b through a full pyramid
+    from antimg import scenarios, data as datamod, atr_strategy as strat
+    daily = scenarios.scenario("uptrend", atr_period=4, target_streak=4)
+    weekly = datamod.weekly(daily)
+    watr = datamod.atr(weekly, 4)
+    trace = []
+    strat.run_campaign(daily, weekly, watr, base_bet=100, target_streak=4, mult=1.0,
+                       instrument="shares", mode="pyramid", trace=trace)
+    adds = [e for e in trace if e["t"] == "add" and e["camp"] == 1]
+    assert [a["lots_added"] for a in adds] == [2, 4, 8, 16]    # doubling ladder
+    assert all(abs(a["risk"] - 100) < 1e-6 for a in adds)
+
+
 def test_webhook_and_from_signals(client):
     # bad secret rejected
     assert client.post("/api/webhook/tradingview",

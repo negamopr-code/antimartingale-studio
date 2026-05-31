@@ -362,6 +362,89 @@ $("#form-scan").onsubmit = (e) => {
     renderScan(await post("/api/scan", formData(e.target))));
 };
 
+// ---- tab 6 explain (step-by-step trace of the real engine)
+async function renderExplain(d) {
+  const b = d.b;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const adds = d.trace.filter((t) => t.t === "add");
+  const won = d.exit && d.exit.reason === "target";
+
+  // markers
+  const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена (close)",
+                  line: { color: "#c9d1d9", width: 1.5 } };
+  const entry = { x: [d.entry.date], y: [d.entry.price], mode: "markers", name: "вход (1 лот)",
+                  marker: { color: "#5b9dff", symbol: "triangle-up", size: 14,
+                            line: { color: "#0f1419", width: 1 } } };
+  const addT = { x: adds.map((a) => a.date), y: adds.map((a) => a.level), mode: "markers+text",
+                 name: "долив +2^k лотов",
+                 text: adds.map((a) => `шаг ${a.step}: +${a.lots_added}→Q${a.Q}`),
+                 textposition: "top center", textfont: { size: 9, color: "#3fb950" },
+                 marker: { color: "#3fb950", symbol: "circle", size: 11,
+                           line: { color: "#0f1419", width: 1 } } };
+  const exitT = { x: [d.exit.date], y: [d.exit.price], mode: "markers",
+                  name: won ? "ЦЕЛЬ (win)" : "СТОП (−b)",
+                  marker: { color: won ? "#f0c000" : "#f85149",
+                            symbol: won ? "star" : "x", size: 16,
+                            line: { color: "#0f1419", width: 1 } } };
+  // trailing stop as a step line over the event timeline
+  const stopEv = [d.entry, ...adds, d.exit].filter((e) => e && e.stop != null);
+  const stop = { x: stopEv.map((e) => e.date), y: stopEv.map((e) => e.stop), mode: "lines",
+                 name: "трейлинг-стоп", line: { color: "#f85149", width: 1.5, shape: "hv", dash: "dash" } };
+
+  // rung levels as faint horizontal lines + right-edge labels
+  const x0 = d.price.x[0], x1 = d.price.x[d.price.x.length - 1];
+  const shapes = d.rungs.map((r) => ({
+    type: "line", xref: "x", yref: "y", x0, x1, y0: r.level, y1: r.level,
+    line: { color: r.k === 0 ? "#5b9dff" : "#39414d", width: 1, dash: "dot" },
+  }));
+  const annos = d.rungs.map((r) => ({
+    xref: "paper", x: 1, y: r.level, yref: "y", xanchor: "left",
+    text: r.k === 0 ? " вход R0" : ` +${r.k}·h`, showarrow: false,
+    font: { size: 9, color: r.k === 0 ? "#5b9dff" : "#8b949e" },
+  }));
+
+  await plot("expl-chart", [price, stop, addT, entry, exitT], layout(
+    `${d.scenario} — пошаговый разбор кампании`, {
+      height: 460, shapes, annotations: annos,
+      margin: { t: 36, r: 64, b: 36, l: 56 },
+      xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } },
+    }));
+
+  // plain-language narration straight from the engine's own trace
+  const L = [];
+  L.push(`СЦЕНАРИЙ: ${d.scenario}   ·   base bet b = $${f(b)}\n`);
+  const e0 = d.entry;
+  L.push(`1) ВХОД ${e0.date}: цена R0=${f(e0.price)}, ATR=${f(e0.atr)} ⇒ шаг сетки h=${f(e0.h)}.`);
+  L.push(`   Беру 1 лот (${f(e0.per_pt)} $/пункт). Стоп = R0−h = ${f(e0.stop)}.`);
+  L.push(`   Риск стека = Q·(avg−stop)·$/пункт = ${f(e0.risk)} = ровно b. ✔\n`);
+  let n = 2;
+  for (const a of adds) {
+    L.push(`${n}) ШАГ ${a.step} (${a.date}): цена дошла до R0+${a.step}·h = ${f(a.trigger)}.`);
+    L.push(`   Удваиваю: доливаю 2^${a.step}=${f(a.lots_added)} лота → всего Q=${f(a.Q)} лотов, средняя=${f(a.avg)}.`);
+    L.push(`   Стоп подтягивается к avg−h/Q = ${f(a.stop)}. Риск стека снова = $${f(a.risk)} = b. ✔\n`);
+    n++;
+  }
+  const x = d.exit;
+  if (won) {
+    L.push(`${n}) ЦЕЛЬ ${x.date}: достигнут шаг N=${x.steps} на уровне ${f(x.price)}.`);
+    L.push(`   Закрываю весь стек (Q=${f(x.Q)} лотов). Брутто = +$${f(x.gross)} = ${f(x.gross / b)}×b.`);
+    L.push(`   Это и есть редкий «выпуклый» выигрыш. Банк: ${f(x.bank)}.`);
+  } else {
+    L.push(`${n}) СТОП ${x.date} на ${f(x.price)}: весь стек закрыт.`);
+    L.push(`   Убыток = −$${f(-x.pnl)} = −b. Сколько бы лотов ни долилось — стоп всегда отдаёт ровно b.`);
+    L.push(`   Банк: ${f(x.bank)}.`);
+  }
+  L.push(`\nИТОГ: проигрыш стоит всегда −b; выигрыш длинной серии — большой кратник b.`);
+  L.push(`Поэтому распределение скошено: много мелких −b, изредка один крупный +. (Вкладка 5 показывает, что на большинстве реальных инструментов крупный + так и не наступает.)`);
+  $("#expl-stats").textContent = L.join("\n");
+}
+
+$("#form-explain").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () =>
+    renderExplain(await post("/api/explain", formData(e.target))));
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

@@ -18,11 +18,11 @@ from fastapi.staticfiles import StaticFiles
 from .. import atr_strategy as strat
 from .. import data as datamod
 from .. import vol as volmod
-from .. import instruments, signals, tradingview
+from .. import instruments, scenarios, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
-from .schemas import BacktestReq, CoinFlipReq, FromSignalsReq, OptionsReq, ScanReq
+from .schemas import BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq, OptionsReq, ScanReq
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -248,6 +248,51 @@ def scan_all(req: ScanReq):
             "best": max(ok, key=lambda r: r["ret_pct"], default=None),
             "worst": min(ok, key=lambda r: r["ret_pct"], default=None),
         },
+    }
+
+
+# ----------------------------------------------------------------- tab 6: explain (step-by-step trace)
+def _jsonable(events: list[dict]) -> list[dict]:
+    """Coerce numpy scalars in the trace to plain Python so FastAPI can serialise them."""
+    out = []
+    for e in events:
+        out.append({k: (float(v) if isinstance(v, (float, int)) and not isinstance(v, bool)
+                        else v) for k, v in e.items()})
+    return out
+
+
+@app.post("/api/explain")
+def explain(req: ExplainReq):
+    """Run the REAL run_campaign on a deliberately simple synthetic path and return the
+    step-by-step trace of the first campaign — so the entry / scale-in / exit mechanics
+    (and the 'risk stays = b at every step' invariant) can be inspected directly."""
+    daily = scenarios.scenario(req.scenario, atr_period=req.atr_period,
+                               target_streak=req.target_streak)
+    weekly = datamod.weekly(daily)
+    watr = datamod.atr(weekly, req.atr_period)
+    trace: list[dict] = []
+    res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                             target_streak=req.target_streak, mult=req.mult,
+                             instrument="shares", mode="pyramid", starting_bank=10_000.0,
+                             trace=trace)
+    camp1 = _jsonable([e for e in trace if e.get("camp") == 1])
+    entry = next((e for e in camp1 if e["t"] == "entry"), None)
+    exit_ = next((e for e in camp1 if e["t"] == "exit"), None)
+    rungs = []
+    if entry:
+        R0, h = entry["price"], entry["h"]
+        rungs = [{"k": k, "level": round(R0 + k * h, 4)}
+                 for k in range(0, req.target_streak + 1)]
+    # trim the daily series to a tidy window: lead-in start .. a few days past the exit
+    end = pd.Timestamp(exit_["date"]) + pd.Timedelta(days=7) if exit_ else daily.index[-1]
+    win = daily.loc[daily.index <= end]
+    return {
+        "scenario": req.scenario, "b": req.base_bet,
+        "price": ser.series_xy(win["Close"], MP),
+        "high": ser.series_xy(win["High"], MP),
+        "low": ser.series_xy(win["Low"], MP),
+        "trace": camp1, "rungs": rungs, "entry": entry, "exit": exit_,
+        "table": res.table[:1],
     }
 
 
