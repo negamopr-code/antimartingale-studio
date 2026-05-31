@@ -491,9 +491,12 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
 
     Step h = mult*ATR (ATR fixed at entry). From entry R0, each +1 step UP adds lots on a
     doubling ladder (1, 2, 4, 8 …) — `pyramid` mode; `scalp` mode books +b each step and
-    re-enters (no compounding). A trailing stop sits at S = avg − h/Q so the WHOLE position's
-    loss is capped at the initial risk b (= 1 step on 1 lot): every stop-out ≈ −b, every
-    target-N run is the big convex win — the coin-flip distribution.
+    re-enters (no compounding). The stop is AVERAGE-BASED, not a classic peak-minus-ATR trail:
+    S = avg − h/Q, chosen so the realised loss measured FROM THE AVERAGE is exactly the initial
+    risk b at every step — Q·(avg−S)·per_pt = h·per_pt = b, independent of Q. (The stop does
+    ratchet up as avg rises and h/Q shrinks, but its DEFINITION is constant-risk-from-average,
+    not "follow the peak".) So every stop-out ≈ −b, every target-N run is the big convex win —
+    the coin-flip distribution.
 
     instrument='shares' → linear P&L; 'calls' → BS-repriced long call, delta-normalised so
     1 lot moves ~b per step regardless of delta (units = (b/h)/Δ_entry contracts), IV fixed

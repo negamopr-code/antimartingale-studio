@@ -391,7 +391,7 @@ async function renderExplain(d) {
                             line: { color: "#0f1419", width: 1 } } };
   const stopEv = [d.entry, ...adds, d.exit].filter((e) => e && e.stop != null);
   const stop = { x: stopEv.map((e) => e.date), y: stopEv.map((e) => e.stop), mode: "lines",
-                 name: "трейлинг-стоп", line: { color: "#f85149", width: 1.5, shape: "hv", dash: "dash" } };
+                 name: "стоп от средней (риск = b)", line: { color: "#f85149", width: 1.5, shape: "hv", dash: "dash" } };
   const x0 = d.price.x[0], x1 = d.price.x[d.price.x.length - 1];
   const shapes = d.rungs.map((r) => ({
     type: "line", xref: "x", yref: "y", x0, x1, y0: r.level, y1: r.level,
@@ -422,13 +422,15 @@ async function renderExplain(d) {
   const e0 = d.entry, x = d.exit;
   L.push(`СЦЕНАРИЙ: ${d.scenario}  ·  инструмент: ${isCalls ? "коллы (auto-Δ)" : "акции (Δ=1)"}  ·  b = $${f(b)}\n`);
   L.push(`СЕТКА (одинакова для акций и коллов):`);
-  L.push(`1) ВХОД ${e0.date}: R0=${f(e0.price)}, ATR=${f(e0.atr)} ⇒ шаг h=${f(e0.h)}. Стоп сетки = R0−h = ${f(e0.stop)}.`);
+  L.push(`1) ВХОД ${e0.date}: R0=${f(e0.price)}, ATR=${f(e0.atr)} ⇒ шаг h=${f(e0.h)}. Стоп = R0−h = ${f(e0.stop)} (риск 1 лота = b).`);
   let n = 2;
   for (const a of adds) {
-    L.push(`${n}) ШАГ ${a.step} (${a.date}): цена на R0+${a.step}·h = ${f(a.trigger)} → долив 2^${a.step}=${f(a.lots_added)} лота, Q=${f(a.Q)}, стоп→${f(a.stop)}.`);
+    L.push(`${n}) ШАГ ${a.step} (${a.date}): цена на R0+${a.step}·h = ${f(a.trigger)} → долив 2^${a.step}=${f(a.lots_added)} лота, Q=${f(a.Q)}, средняя=${f(a.avg)}, стоп = avg−h/Q = ${f(a.stop)}.`);
     n++;
   }
   L.push(`${n}) ${won ? "ЦЕЛЬ" : "СТОП"} ${x.date} на ${f(x.price)}.\n`);
+  L.push(`СТОП = СРЕДНЯЯ − h/Q (НЕ классический трейлинг от пика!). Дистанция до стопа сжимается (h/Q),`);
+  L.push(`но убыток ОТ СРЕДНЕЙ при выносе = Q·(avg−stop)·$/пункт = h·$/пункт = РОВНО начальный b на любом шаге.\n`);
 
   if (!isCalls) {
     // ----- shares money -----
