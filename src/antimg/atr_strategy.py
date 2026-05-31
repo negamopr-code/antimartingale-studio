@@ -761,7 +761,7 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
                       dte_days: int = 365, iv: float = 0.20, r: float = 0.045, qdiv: float = 0.0,
                       commission_pct: float = 0.0, slippage_pct: float = 0.0,
                       starting_bank: float = 0.0, realized_vol: "pd.Series | None" = None,
-                      trace: list | None = None) -> BacktestResult:
+                      iv_markup: float = 1.0, trace: list | None = None) -> BacktestResult:
     """Long-call COIN-FLIP: the bet is the PREMIUM, so risk is capped at b by construction.
 
     A long call cannot lose more than its premium, so if each bet spends exactly the current
@@ -800,18 +800,20 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
             i += 1
             continue
         # ---- cycle ----
-        stake = base_bet
+        stake = base_bet                       # premium deployed this round (the "bet")
+        external_in = base_bet * (1.0 + fee)   # ONLY external cash: round-1 premium + its buy fee
+        fee_paid = fee * base_bet
         streak = 0
-        cycle_cost = 0.0
         S = float(cl_s[i])
         entry_date = idx[i]
         cur = i
         outcome = None
-        proceeds = 0.0
+        proceeds = final_cash = 0.0
         last_sell_i = i
         while True:
-            # IV per round: real per-date volatility if provided (backtest), else the constant (demo)
-            iv_r = _sigma_at(realized_vol, entry_date, iv) if realized_vol is not None else iv
+            # IV per round: per-date realized vol (backtest) or the constant (demo), × markup
+            # for the variance-risk premium (real options trade above realized vol).
+            iv_r = (_sigma_at(realized_vol, entry_date, iv) if realized_vol is not None else iv) * iv_markup
             K = float(opt.strike_for_delta(S, T0, r, iv_r, target_delta, qdiv))
             prem_per = float(opt.call_price(S, K, T0, r, iv_r, qdiv))
             if prem_per <= 1e-9:
@@ -823,7 +825,6 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
             S_star = float(opt.price_for_value(target_per, K, T0, r, iv_r, qdiv))
             m_star = (S_star - S) / h
             expiry = entry_date + pd.Timedelta(days=dte_days)
-            cycle_cost += fee * stake                       # buy fill
 
             round_win = False
             sell_S = float(cl_s[-1]); sell_date = idx[-1]; T_rem = 1e-6
@@ -842,12 +843,11 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
                     break
                 j += 1
 
-            # WIN books exactly the doubling value (the win condition IS "worth ≥ 2× premium",
-            # so we conservatively realise 2× even if the bar overshot); LOSS books the real
-            # expiry/salvage value. Either way proceeds ≥ 0 ⇒ cycle P&L ≥ −b.
+            # WIN books exactly the doubling value; LOSS books the real expiry/salvage value.
             val_per = target_per if round_win else float(opt.call_price(sell_S, K, T_rem, r, iv_r, qdiv))
-            proceeds = contracts * val_per
-            cycle_cost += fee * proceeds                    # sell fill
+            proceeds = contracts * val_per                  # gross from selling the calls
+            net_proceeds = proceeds * (1.0 - fee)           # after sell-side spread/commission
+            fee_paid += fee * proceeds
             last_sell_i = j if j < len(idx) else len(idx) - 1
 
             if trace is not None:
@@ -861,19 +861,26 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
                               "val_per": round(val_per, 4), "proceeds": round(proceeds, 2),
                               "win": round_win})
 
+            if round_win and streak + 1 < target_streak:
+                # ROLL: redeploy the net sale proceeds (the next buy fee is embedded), so rolls
+                # are self-funded — only the round-1 b was ever external ⇒ cycle loss ≤ b(1+fee).
+                streak += 1
+                wins += 1
+                stake = net_proceeds / (1.0 + fee)
+                fee_paid += fee * stake
+                S, entry_date, cur = sell_S, sell_date, last_sell_i
+                continue
             if round_win:
                 streak += 1
                 wins += 1
-                stake = proceeds                            # RIDE: reinvest all proceeds
-                S, entry_date, cur = sell_S, sell_date, last_sell_i
-                if streak >= target_streak:
-                    outcome = "target"
-                    break
+                outcome = "target"
             else:
                 outcome = "expiry"
-                break
+            final_cash = net_proceeds
+            break
 
-        cycle_pnl = proceeds - base_bet - cycle_cost
+        cycle_pnl = final_cash - external_in
+        cycle_cost = fee_paid
         bank += cycle_pnl
         cumc += cycle_cost
         n_cycles += 1

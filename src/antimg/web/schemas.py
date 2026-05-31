@@ -44,6 +44,7 @@ class OptionsReq(BacktestReq):
     # 'coinflip' = long-call coin-flip (premium IS the bet, risk ≤ b, double-or-roll)
     opt_model: str = Field("pyramid", pattern="^(pyramid|coinflip)$")
     double_target: float = Field(2.0, gt=1, le=10)   # coinflip: value multiple that counts as a win
+    iv_markup: float = Field(1.25, ge=1, le=3)       # coinflip: pay IV = realized × this (variance risk premium)
 
 
 class ScanReq(BaseModel):

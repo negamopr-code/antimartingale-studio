@@ -80,8 +80,8 @@ def test_backtest_options_coinflip(client):
     d = r.json()
     assert d["stats"]["model"].startswith("long-call coin-flip")
     assert len(d["table"]) > 0 and "pnl" in d["table"][0]
-    # risk-capped by construction: no cycle loses more than the base bet
-    assert all(row["pnl"] >= -100 - 1e-6 for row in d["table"])
+    # risk-capped by construction even WITH costs (netted into the roll): loss ≤ b·(1+fee)
+    assert all(row["pnl"] >= -101 for row in d["table"])
 
 
 def test_backtest_modes(client):

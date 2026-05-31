@@ -190,7 +190,8 @@ def backtest_options(req: OptionsReq):
                                       double_target=req.double_target, target_delta=req.target_delta,
                                       dte_days=req.dte_days, iv=req.iv_const, r=req.r,
                                       commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-                                      starting_bank=req.starting_bank, realized_vol=realized)
+                                      starting_bank=req.starting_bank, realized_vol=realized,
+                                      iv_markup=req.iv_markup)
         if not res.table:
             raise HTTPException(status_code=422, detail="no cycles resolved for these params")
         return _coinflip_payload(daily, res, req.double_target)
