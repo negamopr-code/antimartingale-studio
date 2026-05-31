@@ -88,6 +88,31 @@ class ExplainReq(BaseModel):
     double_target: float = Field(2.0, gt=1, le=10)  # calls coin-flip: value multiple that counts as a "win"
 
 
+class InspectReq(BaseModel):
+    """Drill into a REAL instrument over a chosen window: run the engine with full tracing
+    so every entry / scale-in / exit can be inspected campaign-by-campaign (Inspect tab)."""
+    ticker: str = Field("SPY", min_length=1, max_length=20)
+    start: str = "2020-01-01"
+    end: str | None = None
+    atr_period: int = Field(14, ge=2, le=200)
+    mult: float = Field(1.0, gt=0, le=20)
+    base_bet: float = Field(100.0, gt=0)
+    target_streak: int = Field(10, ge=1, le=settings.max_target_streak)
+    mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")
+    commission_pct: float = Field(0.0, ge=0, le=50)
+    slippage_pct: float = Field(0.0, ge=0, le=50)
+    starting_bank: float = Field(10_000.0)
+    cap_mult: float | None = Field(8.0, gt=0)
+    model: str = Field("shares", pattern="^(shares|coinflip)$")
+    # coin-flip params
+    target_delta: float = Field(0.5, gt=0, lt=1)
+    dte_days: int = Field(45, ge=7, le=3650)
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_markup: float = Field(1.25, ge=1, le=3)
+    double_target: float = Field(2.0, gt=1, le=10)
+    r: float = Field(0.045, ge=-0.05, le=0.5)
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

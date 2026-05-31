@@ -22,7 +22,8 @@ from .. import instruments, scenarios, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
-from .schemas import BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq, OptionsReq, ScanReq
+from .schemas import (BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq, InspectReq,
+                      OptionsReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -361,6 +362,54 @@ def explain(req: ExplainReq):
         "low": ser.series_xy(win["Low"], MP),
         "trace": camp1, "rungs": rungs, "entry": entry, "exit": exit_,
         "table": res.table[:1],
+    }
+
+
+@app.post("/api/inspect")
+def inspect(req: InspectReq):
+    """Run the engine on a REAL instrument over a chosen window with full tracing, returning
+    ALL campaigns' events so the UI can give a window overview and drill into any one campaign
+    (entry / scale-in / exit detail) exactly like the Explain tab, but on real data."""
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < req.atr_period * 7:
+        raise HTTPException(status_code=422, detail="not enough data in this window for the ATR period")
+    weekly = datamod.weekly(daily)
+    watr = datamod.atr(weekly, req.atr_period)
+    trace: list[dict] = []
+
+    if req.model == "coinflip":
+        realized = datamod.realized_vol(daily["Close"], req.iv_window)
+        res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
+                                      target_streak=req.target_streak, mult=req.mult,
+                                      double_target=req.double_target, target_delta=req.target_delta,
+                                      dte_days=req.dte_days, iv=0.20, r=req.r,
+                                      commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                                      starting_bank=req.starting_bank, realized_vol=realized,
+                                      iv_markup=req.iv_markup, trace=trace)
+        model, instrument = "coinflip", "calls"
+    else:
+        res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                                 target_streak=req.target_streak, mult=req.mult,
+                                 instrument="shares", mode=req.mode,
+                                 commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                                 starting_bank=req.starting_bank, cap_mult=req.cap_mult, trace=trace)
+        model, instrument = "grid", "shares"
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no campaigns resolved in this window")
+    return {
+        "ticker": req.ticker, "model": model, "instrument": instrument, "b": req.base_bet,
+        "target_streak": req.target_streak, "double_target": req.double_target,
+        "final_bank": res.final_bank, "n_cycles": res.n_cycles,
+        "price": ser.series_xy(daily["Close"], MP),
+        "high": ser.series_xy(daily["High"], MP),
+        "low": ser.series_xy(daily["Low"], MP),
+        "trace": _jsonable(trace), "table": res.table,
     }
 
 

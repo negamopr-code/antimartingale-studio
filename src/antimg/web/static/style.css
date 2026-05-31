@@ -44,4 +44,6 @@ th { color:var(--muted); }
 .tradetable td { padding:4px 9px; text-align:right; border-bottom:1px solid #20272f; white-space:nowrap; }
 .tradetable tr.w td { color:#9be7a8; }
 .tradetable tr.l td { color:#ffb3ae; }
+.tradetable tr[data-camp]:hover td { background:#1c2530; }
+.tradetable tr.sel td { background:#243042; box-shadow:inset 2px 0 0 #5b9dff; }
 .tt-note { color:var(--muted); font-size:11px; margin-top:6px; }

@@ -201,6 +201,21 @@ def test_scan_coinflip(client, monkeypatch):
     assert ok and all("ret_pct" in x and "profit_factor" in x for x in ok)
 
 
+def test_inspect_window(client):
+    # Inspect runs the real engine over a window and returns ALL campaigns' trace + table
+    for model, ev in (("shares", "entry"), ("coinflip", "cf_round")):
+        r = client.post("/api/inspect", json={"ticker": "SPY", "start": "2015-01-02",
+                                              "model": model, "atr_period": 5, "target_streak": 4})
+        assert r.status_code == 200, model
+        d = r.json()
+        assert d["model"] == ("coinflip" if model == "coinflip" else "grid")
+        assert len(d["table"]) > 0 and len(d["trace"]) > 0
+        # trace covers multiple campaigns, keyed to table rows by camp == i
+        camps = {e["camp"] for e in d["trace"]}
+        assert {row["i"] for row in d["table"]} <= camps
+        assert any(e["t"] == ev for e in d["trace"])
+
+
 def test_webhook_and_from_signals(client):
     # bad secret rejected
     assert client.post("/api/webhook/tradingview",

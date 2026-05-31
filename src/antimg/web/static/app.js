@@ -363,8 +363,8 @@ $("#form-scan").onsubmit = (e) => {
 };
 
 // ---- tab 6 explain (step-by-step trace of the real engine)
-async function renderExplain(d) {
-  if (d.model === "coinflip") return renderExplainCoinflip(d);
+async function renderExplain(d, ids = { chart: "expl-chart", stats: "expl-stats", ledger: "expl-ledger" }) {
+  if (d.model === "coinflip") return renderExplainCoinflip(d, ids);
   const b = d.b, isCalls = d.instrument === "calls";
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const adds = d.trace.filter((t) => t.t === "add");
@@ -421,7 +421,7 @@ async function renderExplain(d) {
       text: r.k === 0 ? " вход R0" : ` +${r.k}·h`, showarrow: false,
       font: { size: 9, color: r.k === 0 ? "#5b9dff" : "#8b949e" } }));
   }
-  await plot("expl-chart", traces, lay);
+  await plot(ids.chart, traces, lay);
 
   // --- common grid narration (instrument-agnostic: where we enter/scale/exit) ---
   const L = [];
@@ -476,10 +476,10 @@ async function renderExplain(d) {
     }
   }
   L.push(`\nИТОГ: проигрыши малы и часты, выигрыш серии — крупный, но требует раздувания капитала/премии (см. cap_mult, скан вкладки 5).`);
-  $("#expl-stats").textContent = L.join("\n");
+  $("#" + ids.stats).textContent = L.join("\n");
 
   // --- money ledger table ---
-  const led = $("#expl-ledger");
+  const led = $("#" + ids.ledger);
   let cols, rows, note;
   if (!isCalls) {
     cols = [["t", "событие"], ["price", "цена"], ["level", "ур."], ["Q", "Q лот"],
@@ -504,7 +504,7 @@ async function renderExplain(d) {
 }
 
 // long-call coin-flip view: premium = the bet, risk ≤ b, dynamic doubling target
-async function renderExplainCoinflip(d) {
+async function renderExplainCoinflip(d, ids = { chart: "expl-chart", stats: "expl-stats", ledger: "expl-ledger" }) {
   const b = d.b, f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const rounds = d.rounds, x = d.cf_exit, won = x && x.reason === "target";
 
@@ -530,7 +530,7 @@ async function renderExplainCoinflip(d) {
     y0: r.double_at, y1: r.double_at,
     line: { color: r.win ? "#f0c000" : "#8b949e", width: 1, dash: "dot" } }));
 
-  await plot("expl-chart", [price, entries, wins, loss], layout(
+  await plot(ids.chart, [price, entries, wins, loss], layout(
     `${d.scenario} (коллы, коин-флип) — премия = ставка, риск ≤ b`, {
       height: 460, shapes, margin: { t: 36, r: 20, b: 36, l: 56 },
       xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
@@ -553,9 +553,9 @@ async function renderExplainCoinflip(d) {
     L.push(`ИТОГ: проигрыш цикла = −$${f(-x.pnl)} ≤ b. Колл просто истёк, не удвоившись.`);
     L.push(`Максимум потерь = первоначальная премия b = $${f(b)}, как в коин-флипе.`);
   }
-  $("#expl-stats").textContent = L.join("\n");
+  $("#" + ids.stats).textContent = L.join("\n");
 
-  const led = $("#expl-ledger");
+  const led = $("#" + ids.ledger);
   const cols = [["round", "раунд"], ["entry", "вход"], ["delta", "Δ"], ["prem_per", "премия/ед"],
     ["contracts", "контр."], ["stake", "ставка$"], ["double_at", "удвоение@"], ["m_atr", "+ATR"],
     ["proceeds", "выручка$"]];
@@ -573,6 +573,98 @@ $("#form-explain").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () =>
     renderExplain(await post("/api/explain", formData(e.target))));
+};
+
+// ---- tab 7 inspect: real instrument + window, drill into each campaign (reuses Explain renderers)
+let _inspect = null;
+
+function _sliceWin(px, d0, d1, pad = 3) {
+  let lo = px.x.findIndex((x) => x >= d0); if (lo < 0) lo = 0; lo = Math.max(0, lo - pad);
+  let hi = px.x.length - 1; for (let i = px.x.length - 1; i >= 0; i--) { if (px.x[i] <= d1) { hi = i; break; } }
+  hi = Math.min(px.x.length - 1, hi + pad);
+  return { x: px.x.slice(lo, hi + 1), y: px.y.slice(lo, hi + 1) };
+}
+function _inspCampShares(d, camp) {
+  const ev = d.trace.filter((e) => e.camp === camp);
+  const entry = ev.find((e) => e.t === "entry"), exit_ = ev.find((e) => e.t === "exit");
+  const rungs = [];
+  for (let k = 0; k <= d.target_streak; k++) rungs.push({ k, level: +(entry.price + k * entry.h).toFixed(4) });
+  return { model: "grid", instrument: "shares", b: d.b, scenario: `${d.ticker} · кампания ${camp}`,
+           price: _sliceWin(d.price, entry.date, exit_.date), trace: ev, rungs, entry, exit: exit_ };
+}
+function _inspCampCF(d, camp) {
+  const ev = d.trace.filter((e) => e.camp === camp);
+  const rounds = ev.filter((e) => e.t === "cf_round"), cf_exit = ev.find((e) => e.t === "cf_exit");
+  const d0 = rounds[0] && rounds[0].date, d1 = (cf_exit && cf_exit.date) || (rounds[rounds.length - 1] || {}).sell_date;
+  return { model: "coinflip", instrument: "calls", b: d.b, double_target: d.double_target,
+           scenario: `${d.ticker} · кампания ${camp}`, price: _sliceWin(d.price, d0, d1),
+           rounds, cf_exit, trace: ev };
+}
+const INSP_IDS = { chart: "insp-chart", stats: "insp-stats", ledger: "insp-ledger" };
+function inspShowCamp(camp) {
+  const d = _inspect; if (!d) return;
+  const payload = d.model === "coinflip" ? _inspCampCF(d, camp) : _inspCampShares(d, camp);
+  renderExplain(payload, INSP_IDS);
+  $$("#insp-list tr[data-camp]").forEach((tr) =>
+    tr.classList.toggle("sel", +tr.dataset.camp === camp));
+}
+function renderInspList(d) {
+  const el = $("#insp-list");
+  const cols = Object.keys(d.table[0]);
+  const head = "<tr>" + cols.map((c) => `<th>${c}</th>`).join("") + "</tr>";
+  const body = d.table.map((r) => {
+    const cls = r.outcome === "win" ? "w" : (r.outcome === "loss" ? "l" : "");
+    return `<tr data-camp="${r.i}" class="${cls}" style="cursor:pointer">`
+      + cols.map((c) => `<td>${r[c]}</td>`).join("") + "</tr>";
+  }).join("");
+  el.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
+    + `<div class="tt-note">${d.table.length} кампаний · клик по строке = детальный разбор ↓</div>`;
+  $$("#insp-list tr[data-camp]").forEach((tr) => tr.onclick = () => inspShowCamp(+tr.dataset.camp));
+}
+async function renderInspect(d) {
+  _inspect = d;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена", line: { color: "#c9d1d9", width: 1 } };
+  const traces = [price];
+  if (d.model === "coinflip") {
+    const re = d.trace.filter((e) => e.t === "cf_round"), w = re.filter((e) => e.win), l = re.filter((e) => !e.win);
+    traces.push({ x: re.map((e) => e.date), y: re.map((e) => e.entry), mode: "markers", name: "вход раунда",
+                  marker: { color: "#5b9dff", symbol: "triangle-up", size: 7, opacity: 0.7 } });
+    traces.push({ x: w.map((e) => e.sell_date), y: w.map((e) => e.double_at), mode: "markers", name: "×2 win",
+                  marker: { color: "#f0c000", symbol: "circle", size: 6, opacity: 0.85 } });
+    traces.push({ x: l.map((e) => e.sell_date), y: l.map((e) => e.sell), mode: "markers", name: "проигрыш",
+                  marker: { color: "#f85149", symbol: "x", size: 7, opacity: 0.7 } });
+  } else {
+    const en = d.trace.filter((e) => e.t === "entry"), ad = d.trace.filter((e) => e.t === "add"),
+          ex = d.trace.filter((e) => e.t === "exit");
+    const w = ex.filter((e) => e.reason === "target"), l = ex.filter((e) => e.reason !== "target");
+    traces.push({ x: en.map((e) => e.date), y: en.map((e) => e.price), mode: "markers", name: "вход",
+                  marker: { color: "#5b9dff", symbol: "triangle-up", size: 8, opacity: 0.7 } });
+    traces.push({ x: ad.map((e) => e.date), y: ad.map((e) => e.level), mode: "markers", name: "долив",
+                  marker: { color: "#3fb950", symbol: "circle", size: 4, opacity: 0.5 } });
+    traces.push({ x: w.map((e) => e.date), y: w.map((e) => e.price), mode: "markers", name: "WIN",
+                  marker: { color: "#f0c000", symbol: "star", size: 11, line: { color: "#0f1419", width: 1 } } });
+    traces.push({ x: l.map((e) => e.date), y: l.map((e) => e.price), mode: "markers", name: "стоп",
+                  marker: { color: "#f85149", symbol: "x", size: 8, opacity: 0.7 } });
+  }
+  await plot("insp-overview", traces, layout(`${d.ticker} (${d.instrument}) — обзор окна, ${d.table.length} кампаний`, {
+    height: 400, xaxis: { gridcolor: "#2a3340", rangeselector: {
+      bgcolor: "#10151c", activecolor: "#5b9dff", font: { color: "#e6edf3" }, buttons: [
+        { step: "month", count: 3, label: "3m", stepmode: "backward" },
+        { step: "year", count: 1, label: "1y", stepmode: "backward" }, { step: "all", label: "all" }] } } }));
+  const net = d.table.reduce((a, r) => a + (r.pnl || 0), 0);
+  const wins = d.table.filter((r) => r.outcome === "win").length;
+  $("#insp-summary").textContent =
+    `${d.ticker} · ${d.model === "coinflip" ? "coin-flip (коллы)" : "shares (ATR-пирамида)"} · кампаний ${d.table.length} (вин ${wins})\n`
+    + `итоговый банк ${f(d.final_bank)}   net P&L ${net >= 0 ? "+" : ""}${f(net)}\n`
+    + `↓ клик по строке таблицы — пошаговый разбор входов и наращиваний этой кампании`;
+  renderInspList(d);
+  if (d.table.length) inspShowCamp(d.table[0].i);
+}
+$("#form-inspect").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () =>
+    renderInspect(await post("/api/inspect", formData(e.target))));
 };
 
 loadInstruments();
