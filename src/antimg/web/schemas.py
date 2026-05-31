@@ -26,7 +26,10 @@ class BacktestReq(BaseModel):
     commission_pct: float = Field(0.035, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     slippage_pct: float = Field(0.01, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     starting_bank: float = Field(10_000.0)
-    cap_mult: float | None = Field(None, gt=0)
+    # cap on lots added per scale-in step (add = min(2^step, cap_mult)); default 8 bounds the
+    # otherwise-exponential ladder (1,2,4,8,8,8…) so notional stays realistic. Risk per stop is
+    # still exactly b regardless (stop = avg − h/Q). Set 0/None to uncap (raw 2^N pyramid).
+    cap_mult: float | None = Field(8.0, gt=0)
     mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")  # pyramid = scale-in; scalp = book each step
 
 
@@ -58,7 +61,7 @@ class ScanReq(BaseModel):
     commission_pct: float = Field(0.035, ge=0, le=50)
     slippage_pct: float = Field(0.01, ge=0, le=50)
     starting_bank: float = Field(10_000.0)
-    cap_mult: float | None = Field(None, gt=0)
+    cap_mult: float | None = Field(8.0, gt=0)   # shares: cap lots per scale-in (see BacktestReq)
     mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")
     # which strategy to sweep: 'shares' = linear ATR pyramid (default); 'coinflip' = long-call coin-flip
     model: str = Field("shares", pattern="^(shares|coinflip)$")
@@ -92,4 +95,4 @@ class FromSignalsReq(BaseModel):
     commission_pct: float = Field(0.035, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     slippage_pct: float = Field(0.01, ge=0, le=50)  # % of notional per fill (×2 round-trip)
     starting_bank: float = Field(10_000.0)
-    cap_mult: float | None = Field(None, gt=0)
+    cap_mult: float | None = Field(8.0, gt=0)   # cap antimartingale bet doubling (see BacktestReq)

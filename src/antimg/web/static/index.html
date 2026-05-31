@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=24"/>
+  <link rel="stylesheet" href="/style.css?v=25"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -52,7 +52,7 @@
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035" title="percent of notional per fill, charged on entry AND exit (x2)"></label>
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01" title="percent of position notional per fill (x2 round-trip)"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
-      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" value="8" title="кэп лотов на каждый долив: 1,2,4,8,8… (default 8). Стоп всё равно даёт −b. Большое число ≈ без кэпа (raw 2^N)."></label>
       <button type="submit">Run backtest</button>
     </form>
     <div class="results"><div class="plots"><div id="lin-price"></div><div id="lin-equity"></div><div id="lin-hist"></div></div>
@@ -84,7 +84,7 @@
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035" title="percent of notional per fill, charged on entry AND exit (x2)"></label>
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01" title="percent of position notional per fill (x2 round-trip)"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
-      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" value="8" title="кэп лотов на каждый долив: 1,2,4,8,8… (default 8). Стоп всё равно даёт −b. Большое число ≈ без кэпа (raw 2^N)."></label>
       <button type="submit">Run backtest</button>
     </form>
     <div class="results"><div class="plots"><div id="opt-price"></div><div id="opt-equity"></div><div id="opt-hist"></div></div>
@@ -102,7 +102,7 @@
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
       <label>Target streak <input name="target_streak" type="number" value="10"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
-      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" value="8" title="кэп лотов на каждый долив: 1,2,4,8,8… (default 8). Стоп всё равно даёт −b. Большое число ≈ без кэпа (raw 2^N)."></label>
       <button type="submit">Run on stored signals</button>
       <button type="button" id="refresh-signals">Refresh list</button>
     </form>
@@ -130,7 +130,7 @@
       <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035"></label>
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
-      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" value="8" title="кэп лотов на каждый долив: 1,2,4,8,8… (default 8). Стоп всё равно даёт −b. Большое число ≈ без кэпа (raw 2^N)."></label>
       <label title="coin-flip only">Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
       <label title="coin-flip only">DTE дней <input name="dte_days" type="number" value="45"></label>
       <label title="coin-flip only: IV = realized × markup">IV markup <input name="iv_markup" type="number" step="any" value="1.25"></label>
@@ -176,6 +176,6 @@
     <div class="tradetable" id="expl-ledger"></div>
   </section>
 
-  <script src="/app.js?v=24"></script>
+  <script src="/app.js?v=25"></script>
 </body>
 </html>
