@@ -42,6 +42,21 @@ class OptionsReq(BacktestReq):
     use_term_structure: bool = True   # interpolate real CBOE vol-index term structure to the option tenor
 
 
+class ScanReq(BaseModel):
+    """Run the linear (shares) campaign across the whole instrument catalog. Same knobs as
+    BacktestReq minus `ticker` (the scan iterates every catalog ticker itself)."""
+    start: str = settings.default_start
+    atr_period: int = Field(14, ge=2, le=200)
+    mult: float = Field(1.0, gt=0, le=20)
+    base_bet: float = Field(100.0, gt=0)
+    target_streak: int = Field(10, ge=1, le=settings.max_target_streak)
+    commission_pct: float = Field(0.035, ge=0, le=50)
+    slippage_pct: float = Field(0.01, ge=0, le=50)
+    starting_bank: float = Field(10_000.0)
+    cap_mult: float | None = Field(None, gt=0)
+    mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

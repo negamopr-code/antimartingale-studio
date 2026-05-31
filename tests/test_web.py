@@ -79,6 +79,23 @@ def test_backtest_modes(client):
         assert len(r.json()["table"]) > 0
 
 
+def test_scan_all(client):
+    r = client.post("/api/scan", json={"atr_period": 5, "base_bet": 100,
+                                       "target_streak": 10, "starting_bank": 10000})
+    assert r.status_code == 200
+    d = r.json()
+    from antimg import instruments
+    # one row per catalog instrument (^VIX gets flat data → ATR 0 → legitimately no trials)
+    assert len(d["results"]) == len(instruments.flat_with_group())
+    assert d["summary"]["ok"] >= d["summary"]["total"] - 1
+    row = next(x for x in d["results"] if x["ticker"] == "SPY")
+    assert row["ok"] and row["n_campaigns"] > 0
+    assert "ret_pct" in row and "profit_factor" in row and "group" in row
+    # every instrument that resolved trades a synthetic uptrend → all profitable
+    assert d["summary"]["profitable"] == d["summary"]["ok"]
+    assert d["summary"]["best"]["ticker"] and d["summary"]["worst"]["ticker"]
+
+
 def test_webhook_and_from_signals(client):
     # bad secret rejected
     assert client.post("/api/webhook/tradingview",

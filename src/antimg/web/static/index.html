@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=14"/>
+  <link rel="stylesheet" href="/style.css?v=15"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -17,6 +17,7 @@
       <button class="tab" data-tab="linear">2 · ATR backtest</button>
       <button class="tab" data-tab="options">3 · Options (auto Δ)</button>
       <button class="tab" data-tab="signals">4 · TradingView</button>
+      <button class="tab" data-tab="scan">5 · Scan all</button>
     </nav>
   </header>
 
@@ -107,6 +108,30 @@
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <script src="/app.js?v=14"></script>
+  <!-- TAB 5 -->
+  <section id="scan" class="panel">
+    <p class="hint">One click runs the <b>linear (shares)</b> campaign on <b>every catalog instrument</b>
+      with identical params — to see whether the edge holds across a broad panel or rides on a few
+      outliers. Options aren't scanned (too heavy). <b>First run is slow</b> (it fetches each ticker;
+      Yahoo may rate-limit — failures are listed, not fatal). Re-runs are fast (cached).</p>
+    <form class="controls" id="form-scan">
+      <label>Start <input name="start" value="2005-01-01"></label>
+      <label>ATR period <input name="atr_period" type="number" value="14"></label>
+      <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
+      <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
+      <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label>Mode <select name="mode"><option value="pyramid">pyramid (scale-in)</option><option value="scalp">scalp (book each step)</option></select></label>
+      <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0.035"></label>
+      <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <button type="submit">Scan all instruments</button>
+    </form>
+    <div class="results"><div class="plots"><div id="scan-bar"></div></div>
+      <pre class="stats" id="scan-stats"></pre></div>
+    <div class="tradetable" id="scan-table"></div>
+  </section>
+
+  <script src="/app.js?v=15"></script>
 </body>
 </html>

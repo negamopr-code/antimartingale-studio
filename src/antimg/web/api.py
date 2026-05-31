@@ -22,7 +22,7 @@ from .. import instruments, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
-from .schemas import BacktestReq, CoinFlipReq, FromSignalsReq, OptionsReq
+from .schemas import BacktestReq, CoinFlipReq, FromSignalsReq, OptionsReq, ScanReq
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -177,6 +177,78 @@ def backtest_options(req: OptionsReq):
     payload["stats"]["skew_beta"] = vm.skew_beta
     payload["stats"]["vol_class"] = volmod.classify(req.ticker)
     return payload
+
+
+# ----------------------------------------------------------------- tab 5: scan all instruments
+def _campaign_summary(res, starting_bank: float) -> dict:
+    """Bottom-line stats for one instrument's linear campaign, computed from the per-campaign
+    P&L the same way the UI verdict does (sum of `table[].pnl`)."""
+    pnls = [r["pnl"] for r in res.table]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    net = sum(pnls)
+    win_sum, loss_sum = sum(wins), sum(losses)
+    pf = (win_sum / abs(loss_sum)) if loss_sum else None      # None = no losing campaigns
+    return {
+        "n_campaigns": len(pnls), "wins": len(wins), "losses": len(losses),
+        "net": round(net, 2),
+        "ret_pct": round(100.0 * net / max(1e-9, starting_bank), 4),
+        "profit_factor": (round(pf, 3) if pf is not None else None),
+        "final_bank": round(res.final_bank, 2), "max_drawdown": round(res.max_drawdown, 2),
+        "avg_win": round(win_sum / len(wins), 2) if wins else 0.0,
+        "avg_loss": round(loss_sum / len(losses), 2) if losses else 0.0,
+    }
+
+
+@app.post("/api/scan")
+def scan_all(req: ScanReq):
+    """One-click robustness sweep: run the linear (shares) campaign on every catalog
+    instrument with identical params and return a per-instrument bottom-line summary.
+
+    Sequential by design — yfinance/Yahoo rate-limits a server IP (429), so we do NOT
+    fan out. Per-ticker failures are captured (ok=False) instead of aborting the sweep.
+    First run on a cold cache is slow (it fetches each ticker); subsequent runs are fast.
+    """
+    rows = []
+    for ticker, label, group in instruments.flat_with_group():
+        try:
+            daily, weekly, watr = _load(ticker, req.start, req.atr_period)
+            res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                                     target_streak=req.target_streak, mult=req.mult,
+                                     instrument="shares", mode=req.mode,
+                                     commission_pct=req.commission_pct,
+                                     slippage_pct=req.slippage_pct,
+                                     starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+            if not res.table:
+                rows.append({"ticker": ticker, "label": label, "group": group,
+                             "ok": False, "error": "no campaigns resolved"})
+                continue
+            rows.append({"ticker": ticker, "label": label, "group": group, "ok": True,
+                         **_campaign_summary(res, req.starting_bank)})
+        except HTTPException as ex:
+            rows.append({"ticker": ticker, "label": label, "group": group,
+                         "ok": False, "error": str(ex.detail)})
+        except Exception as ex:                              # never let one ticker kill the sweep
+            rows.append({"ticker": ticker, "label": label, "group": group,
+                         "ok": False, "error": f"{type(ex).__name__}: {ex}"})
+
+    ok = [r for r in rows if r["ok"]]
+    profitable = [r for r in ok if r["net"] > 0]
+    rets = sorted(r["ret_pct"] for r in ok)
+    median_ret = rets[len(rets) // 2] if rets else 0.0
+    return {
+        "params": req.model_dump(),
+        "results": rows,
+        "summary": {
+            "total": len(rows), "ok": len(ok), "failed": len(rows) - len(ok),
+            "profitable": len(profitable),
+            "profitable_pct": round(100.0 * len(profitable) / len(ok), 1) if ok else 0.0,
+            "median_ret_pct": round(median_ret, 2),
+            "mean_ret_pct": round(sum(rets) / len(rets), 2) if rets else 0.0,
+            "best": max(ok, key=lambda r: r["ret_pct"], default=None),
+            "worst": min(ok, key=lambda r: r["ret_pct"], default=None),
+        },
+    }
 
 
 # ----------------------------------------------------------------- TradingView ingest

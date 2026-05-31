@@ -284,6 +284,84 @@ $("#form-signals").onsubmit = (e) => {
   });
 };
 
+// ---- tab 5 scan all instruments
+let _scan = { rows: [], sort: "ret_pct", desc: true };   // table sort state
+
+function renderScanTable() {
+  const el = $("#scan-table");
+  const dir = _scan.desc ? -1 : 1;
+  // failed rows always sink to the bottom; ok rows sort by the chosen numeric column
+  const rows = [..._scan.rows].sort((a, b) => {
+    if (a.ok !== b.ok) return a.ok ? -1 : 1;
+    if (!a.ok) return 0;
+    const av = a[_scan.sort] ?? -Infinity, bv = b[_scan.sort] ?? -Infinity;
+    return (av - bv) * dir;
+  });
+  const cols = [
+    ["ticker", "ticker"], ["group", "group"], ["n_campaigns", "camps"],
+    ["wins", "W"], ["losses", "L"], ["net", "net $"], ["ret_pct", "return %"],
+    ["profit_factor", "PF"], ["max_drawdown", "max DD"],
+  ];
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const head = "<tr>" + cols.map(([k, lbl]) =>
+    `<th data-sort="${k}" style="cursor:pointer">${lbl}${_scan.sort === k ? (_scan.desc ? " ▼" : " ▲") : ""}</th>`).join("") + "</tr>";
+  const body = rows.map((r) => {
+    if (!r.ok) return `<tr class="l"><td>${r.ticker}</td><td>${r.group}</td>`
+      + `<td colspan="7" style="color:#8b949e">⚠ ${r.error}</td></tr>`;
+    const cls = r.net > 0 ? "w" : "l";
+    return `<tr class="${cls}"><td>${r.ticker}</td><td>${r.group}</td>`
+      + `<td>${r.n_campaigns}</td><td>${r.wins}</td><td>${r.losses}</td>`
+      + `<td>${f(r.net)}</td><td>${f(r.ret_pct)}</td><td>${r.profit_factor == null ? "∞" : f(r.profit_factor)}</td>`
+      + `<td>${f(r.max_drawdown)}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
+    + `<div class="tt-note">${rows.length} instruments · click a header to sort</div>`;
+  $$("#scan-table th[data-sort]").forEach((th) => th.onclick = () => {
+    const k = th.dataset.sort;
+    if (_scan.sort === k) _scan.desc = !_scan.desc; else { _scan.sort = k; _scan.desc = true; }
+    renderScanTable();
+  });
+}
+
+async function renderScan(d) {
+  _scan.rows = d.results; _scan.sort = "ret_pct"; _scan.desc = true;
+  const s = d.summary;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const verdict =
+    `${s.profitable_pct >= 50 ? "✅ BROADLY ROBUST" : "⚠ NARROW / FRAGILE"}   `
+    + `${s.profitable}/${s.ok} instruments profitable (${f(s.profitable_pct)}%)\n`
+    + `median return : ${f(s.median_ret_pct)}%   ·   mean return : ${f(s.mean_ret_pct)}%\n`
+    + (s.best ? `best  : ${s.best.ticker}  ${f(s.best.ret_pct)}%  (net ${f(s.best.net)})\n` : "")
+    + (s.worst ? `worst : ${s.worst.ticker}  ${f(s.worst.ret_pct)}%  (net ${f(s.worst.net)})\n` : "")
+    + (s.failed ? `failed to fetch : ${s.failed}\n` : "")
+    + `\n(mean ≫ median ⇒ a few outliers carry the result — the strategy is NOT broadly sound,\n`
+    + ` it depends on rare large wins. Median near/below 0 confirms most instruments lose.)`;
+  $("#scan-stats").textContent = verdict;
+
+  // horizontal bar of return % per instrument, sorted; green=profit, red=loss.
+  // one extreme winner squashing the rest IS the headline — that's the robustness verdict.
+  const ok = d.results.filter((r) => r.ok).sort((a, b) => a.ret_pct - b.ret_pct);
+  await plot("scan-bar", [{
+    type: "bar", orientation: "h",
+    x: ok.map((r) => r.ret_pct), y: ok.map((r) => r.ticker),
+    marker: { color: ok.map((r) => (r.net > 0 ? "#3fb950" : "#f85149")) },
+    hovertemplate: "%{y}: %{x:.1f}%<extra></extra>",
+  }], layout("Return % per instrument  (identical params across the panel)", {
+    height: Math.max(420, 16 * ok.length),
+    margin: { t: 36, r: 20, b: 36, l: 70 },
+    xaxis: { gridcolor: "#2a3340", title: { text: "return % on starting bank" },
+             zeroline: true, zerolinecolor: "#8b949e", zerolinewidth: 1 },
+    yaxis: { gridcolor: "transparent", automargin: true, tickfont: { size: 9 } },
+  }));
+  renderScanTable();
+}
+
+$("#form-scan").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () =>
+    renderScan(await post("/api/scan", formData(e.target))));
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

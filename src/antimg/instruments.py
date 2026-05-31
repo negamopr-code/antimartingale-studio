@@ -82,5 +82,12 @@ def flat() -> list[tuple[str, str]]:
     return out
 
 
+def flat_with_group() -> list[tuple[str, str, str]]:
+    """[(ticker, label, group), ...] — for the cross-instrument scan."""
+    return [(tk, label, group)
+            for group, items in CATALOG.items()
+            for tk, label in items]
+
+
 def tickers() -> list[str]:
     return [tk for items in CATALOG.values() for tk, _ in items]
