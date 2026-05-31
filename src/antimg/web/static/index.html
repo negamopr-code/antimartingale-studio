@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=13"/>
+  <link rel="stylesheet" href="/style.css?v=14"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -53,7 +53,7 @@
       <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
       <button type="submit">Run backtest</button>
     </form>
-    <div class="results"><div class="plots"><div id="lin-price"></div><div id="lin-equity"></div></div>
+    <div class="results"><div class="plots"><div id="lin-price"></div><div id="lin-equity"></div><div id="lin-hist"></div></div>
       <pre class="stats" id="lin-stats"></pre></div>
     <div class="tradetable" id="lin-table"></div>
   </section>
@@ -82,7 +82,7 @@
       <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
       <button type="submit">Run backtest</button>
     </form>
-    <div class="results"><div class="plots"><div id="opt-price"></div><div id="opt-equity"></div></div>
+    <div class="results"><div class="plots"><div id="opt-price"></div><div id="opt-equity"></div><div id="opt-hist"></div></div>
       <pre class="stats" id="opt-stats"></pre></div>
     <div class="tradetable" id="opt-table"></div>
   </section>
@@ -107,6 +107,6 @@
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <script src="/app.js?v=13"></script>
+  <script src="/app.js?v=14"></script>
 </body>
 </html>

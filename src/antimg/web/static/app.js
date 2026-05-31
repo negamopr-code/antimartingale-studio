@@ -209,6 +209,26 @@ async function renderBacktest(prefix, d, isOptions) {
       fill: "tonexty", fillcolor: "rgba(248,81,73,0.15)" },
   ], layout("Equity: net vs gross" + dp));
 
+  // per-campaign P&L histogram — shows the SKEW directly: many small −b losses on the left,
+  // a few large convex wins far to the right. The bottom-line net is the area-weighted balance.
+  // wins/losses split by colour (reuses W/L computed for the verdict above).
+  const nbins = Math.min(60, Math.max(12, Math.ceil(Math.sqrt(pnls.length || 1))));
+  const xbins = pnls.length
+    ? (() => { const lo = Math.min(...pnls), hi = Math.max(...pnls);
+               return { start: lo, end: hi, size: (hi - lo) / nbins || 1 }; })()
+    : undefined;
+  await plot(`${prefix}-hist`, [
+    { x: L, type: "histogram", name: `losses (${L.length})`, xbins,
+      marker: { color: "rgba(248,81,73,0.75)" } },
+    { x: W, type: "histogram", name: `wins (${W.length})`, xbins,
+      marker: { color: "rgba(63,185,80,0.8)" } },
+  ], layout(`Per-campaign P&L distribution  (mean ${f(pnls.length ? net / pnls.length : 0)})`, {
+    barmode: "overlay",
+    xaxis: { gridcolor: "#2a3340", title: { text: "P&L per campaign ($)" },
+             zeroline: true, zerolinecolor: "#8b949e", zerolinewidth: 1 },
+    yaxis: { gridcolor: "#2a3340", title: { text: "# campaigns" } },
+  }));
+
   renderTable(`${prefix}-table`, d.table);
 }
 
