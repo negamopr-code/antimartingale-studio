@@ -126,6 +126,11 @@ def test_explain_trace_invariant_direct():
     adds = [e for e in trace if e["t"] == "add" and e["camp"] == 1]
     assert [a["lots_added"] for a in adds] == [2, 4, 8, 16]    # doubling ladder
     assert all(abs(a["risk"] - 100) < 1e-6 for a in adds)
+    # molecular money: entry deploys b/h units = $2000 notional to risk $100; notional grows
+    entry = next(e for e in trace if e["t"] == "entry" and e["camp"] == 1)
+    assert abs(entry["units"] - 20) < 1e-6 and abs(entry["notional"] - 2000) < 1e-6
+    assert [a["notional"] for a in adds] == sorted(a["notional"] for a in adds)  # monotone up
+    assert [a["unreal"] for a in adds] == [100, 400, 1100, 2600]
 
 
 def test_webhook_and_from_signals(client):

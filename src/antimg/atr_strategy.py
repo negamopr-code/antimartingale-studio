@@ -528,7 +528,11 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                           "date": entry_day.date().isoformat(), "price": round(R0, 4),
                           "atr": round(atr, 4), "h": round(h, 4), "per_pt": round(per_pt, 6),
                           "lots": 1.0, "Q": 1.0, "avg": round(R0, 4), "stop": round(stop, 4),
-                          "risk": round(1.0 * (R0 - stop) * per_pt, 2)})
+                          "risk": round(1.0 * (R0 - stop) * per_pt, 2),
+                          # molecular money view: units of underlying held, $ notional deployed,
+                          # and mark-to-market unrealised P&L at this instant.
+                          "units": round(per_pt, 4), "notional": round(per_pt * R0, 2),
+                          "unreal": 0.0})
 
         for d, row in future.iterrows():
             hi, lo = float(row["High"]), float(row["Low"])
@@ -578,12 +582,16 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 peak_step = step
                 if trace is not None:
                     a_ = avg_price()
+                    unreal = sum(lots * (level - L) * per_pt for L, _, lots in batches)
                     trace.append({"t": "add", "camp": n_cycles + 1, "step": step,
                                   "date": d.date().isoformat(),
                                   "trigger": round(R0 + step * h, 4), "level": round(level, 4),
                                   "lots_added": add, "Q": round(Q, 1), "avg": round(a_, 4),
                                   "stop": round(stop, 4),
-                                  "risk": round(Q * (a_ - stop) * per_pt, 2)})
+                                  "risk": round(Q * (a_ - stop) * per_pt, 2),
+                                  "units": round(Q * per_pt, 4),
+                                  "notional": round(Q * per_pt * level, 2),
+                                  "unreal": round(unreal, 2)})
                 if step >= target_streak:
                     exit_px, exit_date, reason = level, d, "target"
                     break
@@ -654,7 +662,9 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                               "price": round(float(exit_px), 4), "steps": int(peak_step),
                               "Q": round(Q, 1), "avg": round(a, 4), "stop": round(stop, 4),
                               "gross": round(gross, 2), "cost": round(cost, 2),
-                              "pnl": round(pnl, 2), "bank": round(bank, 2)})
+                              "pnl": round(pnl, 2), "bank": round(bank, 2),
+                              "units": round(Q * per_pt, 4),
+                              "notional": round(Q * per_pt * float(exit_px), 2)})
 
         # entry marker for the price chart (green=target win, red=stop/expiry loss)
         res.trials.append(Trial(entry_day, exit_date, entry_price0, float(exit_px),

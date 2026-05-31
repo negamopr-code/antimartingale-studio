@@ -427,16 +427,55 @@ async function renderExplain(d) {
   const x = d.exit;
   if (won) {
     L.push(`${n}) ЦЕЛЬ ${x.date}: достигнут шаг N=${x.steps} на уровне ${f(x.price)}.`);
-    L.push(`   Закрываю весь стек (Q=${f(x.Q)} лотов). Брутто = +$${f(x.gross)} = ${f(x.gross / b)}×b.`);
+    L.push(`   Закрываю весь стек (Q=${f(x.Q)} лотов = ${f(x.units)} ед.). Брутто = +$${f(x.gross)} = ${f(x.gross / b)}×b.`);
     L.push(`   Это и есть редкий «выпуклый» выигрыш. Банк: ${f(x.bank)}.`);
   } else {
     L.push(`${n}) СТОП ${x.date} на ${f(x.price)}: весь стек закрыт.`);
     L.push(`   Убыток = −$${f(-x.pnl)} = −b. Сколько бы лотов ни долилось — стоп всегда отдаёт ровно b.`);
     L.push(`   Банк: ${f(x.bank)}.`);
   }
-  L.push(`\nИТОГ: проигрыш стоит всегда −b; выигрыш длинной серии — большой кратник b.`);
-  L.push(`Поэтому распределение скошено: много мелких −b, изредка один крупный +. (Вкладка 5 показывает, что на большинстве реальных инструментов крупный + так и не наступает.)`);
+
+  // ----- ДЕНЬГИ НА МОЛЕКУЛЯРНОМ УРОВНЕ -----
+  const e = d.entry;
+  L.push(`\n— ДЕНЬГИ (units = реальные единицы актива, delta=1 для акций) —`);
+  L.push(`Чтобы рисковать ровно b=$${f(b)} на стопе −1·ATR ($${f(e.h)}), нужно держать`);
+  L.push(`  units = b/h = ${f(e.units)} ед. → нотионал на входе = ${f(e.units)}×$${f(e.price)} = $${f(e.notional)}.`);
+  L.push(`Т.е. «заходит» НЕ $${f(b)}, а $${f(e.notional)} позиции; $${f(b)} — это лишь сумма под стопом.`);
+  if (won) {
+    L.push(`При +1·ATR ($${f(e.h)}) первый лот даёт +$${f(b)} (= ${f(e.units)} ед. × $${f(e.h)}). Это +b, не +b/2.`);
+    L.push(`Нереализованная прибыль по шагам: ${[e, ...adds].map((s) => "$" + f(s.unreal)).join(" → ")} → реализ. +$${f(x.gross)}.`);
+    L.push(`НО нотионал раздувается: ${[e, ...adds, x].map((s) => "$" + f(s.notional)).join(" → ")}.`);
+    L.push(`⇒ чтобы взять +$${f(x.gross)}, в пике задействовано $${f(x.notional)} капитала (без cap_mult — неограниченно).`);
+  }
+
+  // ----- ответ на вопрос про дельту 0.5 -----
+  const dlt = 0.5, naive = b * dlt, units_norm = e.units / dlt;
+  L.push(`\n— ПРО ДЕЛЬТУ 0.5 (опционы, вкладка 3) —`);
+  L.push(`Если купить опцион Δ=0.5 на ТО ЖЕ число единиц (${f(e.units)}), то при +1·ATR он даст`);
+  L.push(`  ≈ Δ×h×units = 0.5×$${f(e.h)}×${f(e.units)} = +$${f(naive)} — да, ровно твои "+$50".`);
+  L.push(`Поэтому движок дельта-нормирует: берёт units/Δ = ${f(e.units)}/0.5 = ${f(units_norm)} ед.,`);
+  L.push(`  тогда при +1·ATR: 0.5×$${f(e.h)}×${f(units_norm)} = +$${f(b)} = снова +b.`);
+  L.push(`Цена за это — вдвое больше уплаченной премии и тета-распад. Это НЕ потеря в расчёте,`);
+  L.push(`а сознательный выбор сайзинга (units=(b/h)/Δ). Хочешь — добавлю опционный режим в эту вкладку.`);
+
+  L.push(`\nИТОГ: проигрыш всегда −b; выигрыш серии — большой кратник b, но ценой раздувания капитала.`);
+  L.push(`Реальный «косяк» не в формуле прибыли, а в том, что нотионал ничем не ограничен (см. cap_mult).`);
   $("#expl-stats").textContent = L.join("\n");
+
+  // money ledger table (molecular)
+  const led = $("#expl-ledger");
+  const evs = [d.entry, ...adds, d.exit];
+  const cols = [["t", "событие"], ["price", "цена"], ["level", "ур."], ["Q", "Q лот"],
+    ["units", "units"], ["notional", "нотионал $"], ["unreal", "нереал. P&L"],
+    ["risk", "риск $"], ["stop", "стоп"]];
+  const head = "<tr>" + cols.map(([, l]) => `<th>${l}</th>`).join("") + "</tr>";
+  const body = evs.map((ev) => {
+    const cls = ev.t === "exit" ? (won ? "w" : "l") : "";
+    return `<tr class="${cls}">` + cols.map(([k]) =>
+      `<td>${ev[k] == null ? "" : (typeof ev[k] === "number" ? f(ev[k]) : ev[k])}</td>`).join("") + "</tr>";
+  }).join("");
+  led.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
+    + `<div class="tt-note">денежный леджер кампании · units = реальные единицы актива (delta=1)</div>`;
 }
 
 $("#form-explain").onsubmit = (e) => {
