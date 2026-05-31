@@ -34,6 +34,24 @@ def call_price(S, K, T, r, sigma, q=0.0):
             - K * np.exp(-r * T) * norm.cdf(d2))
 
 
+def price_for_value(target_value, K, T, r, sigma, q=0.0, S_lo=None, S_hi=None):
+    """Underlying price S at which a call is worth `target_value` (per 1 unit underlying).
+
+    Call price is strictly increasing in S, so bisection is exact. Used by the long-call
+    coin-flip to find the spot where the option DOUBLES (target_value = 2·premium) — i.e.
+    the dynamic '+m·ATR' win level, which depends on IV/DTE/strike, not a fixed 2·ATR.
+    """
+    lo = S_lo if S_lo is not None else max(K * 1e-3, 1e-6)
+    hi = S_hi if S_hi is not None else max(K * 10.0, target_value * 10.0 + K)
+    for _ in range(100):
+        mid = 0.5 * (lo + hi)
+        if float(call_price(mid, K, T, r, sigma, q)) < target_value:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
 def strike_for_delta(S, T, r, sigma, target_delta=0.95, q=0.0):
     """Solve for the call strike giving `target_delta` (bisection on K).
 

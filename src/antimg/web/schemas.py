@@ -66,8 +66,9 @@ class ExplainReq(BaseModel):
     atr_period: int = Field(4, ge=2, le=20)
     instrument: str = Field("shares", pattern="^(shares|calls)$")
     target_delta: float = Field(0.5, gt=0, lt=1)   # calls only
-    dte_days: int = Field(365, ge=7, le=3650)      # calls only (long → no roll in the demo window)
+    dte_days: int = Field(45, ge=7, le=3650)       # calls only
     iv: float = Field(0.20, gt=0, le=3)            # calls only: constant IV for a clean demo
+    double_target: float = Field(2.0, gt=1, le=10)  # calls coin-flip: value multiple that counts as a "win"
 
 
 class FromSignalsReq(BaseModel):

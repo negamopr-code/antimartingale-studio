@@ -263,19 +263,39 @@ def _jsonable(events: list[dict]) -> list[dict]:
 
 @app.post("/api/explain")
 def explain(req: ExplainReq):
-    """Run the REAL run_campaign on a deliberately simple synthetic path and return the
-    step-by-step trace of the first campaign — so the entry / scale-in / exit mechanics
-    (and the 'risk stays = b at every step' invariant) can be inspected directly."""
+    """Step-by-step trace of the first campaign on a synthetic flat/up/down path.
+
+    shares → the average-based pyramid (grid view); calls → the long-call COIN-FLIP
+    (premium = the bet, risk ≤ b by construction, dynamic doubling target). The trace
+    comes from the real engine so the money mechanics can be inspected directly.
+    """
     daily = scenarios.scenario(req.scenario, atr_period=req.atr_period,
                                target_streak=req.target_streak)
     weekly = datamod.weekly(daily)
     watr = datamod.atr(weekly, req.atr_period)
     trace: list[dict] = []
+
+    if req.instrument == "calls":
+        res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
+                                      target_streak=req.target_streak, mult=req.mult,
+                                      double_target=req.double_target, target_delta=req.target_delta,
+                                      dte_days=req.dte_days, iv=req.iv, r=0.045,
+                                      starting_bank=10_000.0, trace=trace)
+        camp1 = _jsonable([e for e in trace if e.get("camp") == 1])
+        cf_exit = next((e for e in camp1 if e["t"] == "cf_exit"), None)
+        end = (pd.Timestamp(cf_exit["date"]) + pd.Timedelta(days=10)) if cf_exit else daily.index[-1]
+        win = daily.loc[daily.index <= end]
+        return {
+            "scenario": req.scenario, "b": req.base_bet, "instrument": "calls",
+            "model": "coinflip", "double_target": req.double_target,
+            "price": ser.series_xy(win["Close"], MP),
+            "rounds": [e for e in camp1 if e["t"] == "cf_round"],
+            "cf_exit": cf_exit, "trace": camp1, "table": res.table[:1],
+        }
+
     res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
                              target_streak=req.target_streak, mult=req.mult,
-                             instrument=req.instrument, mode="pyramid", starting_bank=10_000.0,
-                             realized_vol=None, default_sigma=req.iv, r=0.045,
-                             dte_days=req.dte_days, target_delta=req.target_delta,
+                             instrument="shares", mode="pyramid", starting_bank=10_000.0,
                              trace=trace)
     camp1 = _jsonable([e for e in trace if e.get("camp") == 1])
     entry = next((e for e in camp1 if e["t"] == "entry"), None)
@@ -285,11 +305,10 @@ def explain(req: ExplainReq):
         R0, h = entry["price"], entry["h"]
         rungs = [{"k": k, "level": round(R0 + k * h, 4)}
                  for k in range(0, req.target_streak + 1)]
-    # trim the daily series to a tidy window: lead-in start .. a few days past the exit
     end = pd.Timestamp(exit_["date"]) + pd.Timedelta(days=7) if exit_ else daily.index[-1]
     win = daily.loc[daily.index <= end]
     return {
-        "scenario": req.scenario, "b": req.base_bet, "instrument": req.instrument,
+        "scenario": req.scenario, "b": req.base_bet, "instrument": "shares", "model": "grid",
         "price": ser.series_xy(win["Close"], MP),
         "high": ser.series_xy(win["High"], MP),
         "low": ser.series_xy(win["Low"], MP),

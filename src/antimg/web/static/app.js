@@ -364,6 +364,7 @@ $("#form-scan").onsubmit = (e) => {
 
 // ---- tab 6 explain (step-by-step trace of the real engine)
 async function renderExplain(d) {
+  if (d.model === "coinflip") return renderExplainCoinflip(d);
   const b = d.b, isCalls = d.instrument === "calls";
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const adds = d.trace.filter((t) => t.t === "add");
@@ -500,6 +501,72 @@ async function renderExplain(d) {
   }).join("");
   led.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
     + `<div class="tt-note">${note}</div>`;
+}
+
+// long-call coin-flip view: premium = the bet, risk ≤ b, dynamic doubling target
+async function renderExplainCoinflip(d) {
+  const b = d.b, f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const rounds = d.rounds, x = d.cf_exit, won = x && x.reason === "target";
+
+  const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена (close)",
+                  line: { color: "#c9d1d9", width: 1.5 } };
+  const entries = { x: rounds.map((r) => r.date), y: rounds.map((r) => r.entry),
+                    mode: "markers", name: "вход в раунд (купили коллы)",
+                    text: rounds.map((r) => `R${r.round}: $${f(r.stake)} премии`),
+                    marker: { color: "#5b9dff", symbol: "triangle-up", size: 13,
+                              line: { color: "#0f1419", width: 1 } } };
+  const winR = rounds.filter((r) => r.win), lossR = rounds.filter((r) => !r.win);
+  const wins = { x: winR.map((r) => r.sell_date), y: winR.map((r) => r.double_at),
+                 mode: "markers", name: "удвоился (×2) → ролл",
+                 text: winR.map((r) => `+${f(r.m_atr)}·ATR`), textposition: "top center",
+                 textfont: { size: 9, color: "#f0c000" },
+                 marker: { color: "#f0c000", symbol: "star", size: 14, line: { color: "#0f1419", width: 1 } } };
+  const loss = { x: lossR.map((r) => r.sell_date), y: lossR.map((r) => r.sell),
+                 mode: "markers", name: "экспирация (≤ b)",
+                 marker: { color: "#f85149", symbol: "x", size: 14, line: { color: "#0f1419", width: 1 } } };
+  // each round's doubling level as a dotted segment entry→exit
+  const shapes = rounds.map((r) => ({
+    type: "line", xref: "x", yref: "y", x0: r.date, x1: r.sell_date,
+    y0: r.double_at, y1: r.double_at,
+    line: { color: r.win ? "#f0c000" : "#8b949e", width: 1, dash: "dot" } }));
+
+  await plot("expl-chart", [price, entries, wins, loss], layout(
+    `${d.scenario} (коллы, коин-флип) — премия = ставка, риск ≤ b`, {
+      height: 460, shapes, margin: { t: 36, r: 20, b: 36, l: 56 },
+      xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
+
+  const L = [];
+  L.push(`СЦЕНАРИЙ: ${d.scenario}  ·  КОЛЛЫ — коин-флип  ·  b = $${f(b)} (бюджет премии)\n`);
+  L.push(`Ставка = ПРЕМИЯ. Лонг-колл не теряет больше премии ⇒ риск ≤ b по построению, СТОП НЕ НУЖЕН.`);
+  L.push(`«Победа» = колл подорожал в ×${f(d.double_target)} (удвоился) ⇒ катим всю выручку в следующий раунд (×2 контрактов).`);
+  L.push(`Уровень удвоения считается из Блэка-Шоулза ДИНАМИЧЕСКИ (не фикс 2·ATR — зависит от Δ/IV/DTE).\n`);
+  for (const r of rounds) {
+    L.push(`Раунд ${r.round} (${r.date}): купили коллов на $${f(r.stake)} премии — ${f(r.contracts)} контр., страйк ${f(r.strike)}, Δ=${f(r.delta)}, премия ${f(r.prem_per)}/ед.`);
+    L.push(`   Удвоение при цене ${f(r.double_at)} = вход +${f(r.m_atr)}·ATR (динамически).`);
+    if (r.win) L.push(`   → ✔ дошли: выручка $${f(r.proceeds)} = ×${f(d.double_target)}. Катим дальше.\n`);
+    else L.push(`   → ✕ не дошли до экспирации: выручка $${f(r.proceeds)} (≤ ставки). Цикл закрыт.\n`);
+  }
+  if (won) {
+    L.push(`ИТОГ: серия ${f(x.streak)} побед → P&L +$${f(x.pnl)} = b·(${f(d.double_target)}^${f(x.streak)}−1).`);
+    L.push(`Риск за цикл был ограничен $${f(b)} (премия 1-го раунда; дальше рисковали уже выигранным).`);
+  } else {
+    L.push(`ИТОГ: проигрыш цикла = −$${f(-x.pnl)} ≤ b. Колл просто истёк, не удвоившись.`);
+    L.push(`Максимум потерь = первоначальная премия b = $${f(b)}, как в коин-флипе.`);
+  }
+  $("#expl-stats").textContent = L.join("\n");
+
+  const led = $("#expl-ledger");
+  const cols = [["round", "раунд"], ["entry", "вход"], ["delta", "Δ"], ["prem_per", "премия/ед"],
+    ["contracts", "контр."], ["stake", "ставка$"], ["double_at", "удвоение@"], ["m_atr", "+ATR"],
+    ["proceeds", "выручка$"]];
+  const head = "<tr>" + cols.map(([, l]) => `<th>${l}</th>`).join("")
+    + "<th>итог</th></tr>";
+  const body = rounds.map((r) =>
+    `<tr class="${r.win ? "w" : "l"}">` + cols.map(([k]) =>
+      `<td>${typeof r[k] === "number" ? f(r[k]) : r[k]}</td>`).join("")
+    + `<td>${r.win ? "×2 ролл" : "экспирация"}</td></tr>`).join("");
+  led.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
+    + `<div class="tt-note">коин-флип на коллах · ставка=премия · риск≤b · +ATR до удвоения считается из BS динамически</div>`;
 }
 
 $("#form-explain").onsubmit = (e) => {

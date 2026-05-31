@@ -114,22 +114,39 @@ def test_explain_scenarios(client):
             assert abs(d["exit"]["pnl"] + 100) < 1e-6   # exactly −b
 
 
-def test_explain_calls_mode(client):
-    # options trace: delta-normalised contracts and the option ledger ties out to the grid P&L
+def test_explain_calls_coinflip(client):
+    # calls = long-call coin-flip: premium is the bet, risk ≤ b by construction, exact b(2^N−1)
     d = client.post("/api/explain", json={"scenario": "uptrend", "instrument": "calls",
-                                          "target_delta": 0.5, "base_bet": 100}).json()
-    assert d["instrument"] == "calls"
-    opt_adds = [e for e in d["trace"] if e["t"] == "opt_add"]
-    opt_exit = next(e for e in d["trace"] if e["t"] == "opt_exit")
-    assert opt_adds and opt_exit["rolls"] == 0       # DTE 365 → no roll in the demo window
-    # entry buys (b/h)/Δ contracts: per_pt=20, Δ≈0.5 → ~40 contracts
-    assert abs(opt_adds[0]["contracts_added"] - 40) < 1.0
-    # the option ledger's gross == the grid table's gross (single source of truth)
-    assert abs(opt_exit["gross"] - d["table"][0]["gross"]) < 1e-6
-    # convexity: a downtrend call loses LESS than the shares −b
-    dn = client.post("/api/explain", json={"scenario": "downtrend", "instrument": "calls",
-                                           "base_bet": 100}).json()
-    assert -100 < dn["exit"]["pnl"] < 0
+                                          "target_delta": 0.5, "base_bet": 100,
+                                          "target_streak": 4, "double_target": 2.0}).json()
+    assert d["model"] == "coinflip"
+    rounds = d["rounds"]
+    assert len(rounds) == 4 and all(r["win"] for r in rounds)
+    # stakes roll by the double_target each win: 100 → 200 → 400 → 800
+    assert [round(r["stake"]) for r in rounds] == [100, 200, 400, 800]
+    # each round reports a DYNAMICALLY-solved doubling level in ATR (not a fixed 2.0)
+    assert all(r["m_atr"] > 0 for r in rounds)
+    # win streak of N pays exactly b(2^N − 1)
+    assert abs(d["cf_exit"]["pnl"] - 100 * (2 ** 4 - 1)) < 1e-6
+    # losing scenarios: risk is capped at the premium b (loss ≥ −b)
+    for sc in ("downtrend", "flat"):
+        dd = client.post("/api/explain", json={"scenario": sc, "instrument": "calls",
+                                               "base_bet": 100}).json()
+        assert -100 <= dd["cf_exit"]["pnl"] < 0
+
+
+def test_call_coinflip_risk_capped_direct():
+    # the engine itself: no cycle ever loses more than the base bet b
+    from antimg import scenarios, data as datamod, atr_strategy as strat
+    for sc in ("uptrend", "downtrend", "flat"):
+        daily = scenarios.scenario(sc, atr_period=4, target_streak=4)
+        weekly = datamod.weekly(daily)
+        watr = datamod.atr(weekly, 4)
+        res = strat.run_call_coinflip(daily, weekly, watr, base_bet=100, target_streak=4,
+                                      mult=1.0, double_target=2.0, target_delta=0.5,
+                                      dte_days=45, iv=0.20)
+        for row in res.table:
+            assert row["pnl"] >= -100 - 1e-6, (sc, row)
 
 
 def test_explain_trace_invariant_direct():

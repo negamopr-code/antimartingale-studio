@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=20"/>
+  <link rel="stylesheet" href="/style.css?v=21"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -135,9 +135,10 @@
 
   <!-- TAB 6 -->
   <section id="explain" class="panel">
-    <p class="hint">Пошаговая трассировка <b>реального движка</b> (<code>run_campaign</code>) на простом
-      синтетическом отрезке — видно, где вход, где каждый долив по +1·ATR и где выход. Ключевой
-      инвариант: риск всего стека на стопе всегда ровно <code>b</code>, сколько бы лотов ни долилось.</p>
+    <p class="hint">Пошаговая трассировка <b>реального движка</b> на простом синтетическом отрезке.
+      <b>Акции</b> = усредняющая пирамида: стоп от средней, риск всего стека ровно <code>b</code> на любом шаге.
+      <b>Коллы</b> = коин-флип: ставка = премия (риск ≤ b по построению, без стопа), «победа» = премия удвоилась,
+      уровень удвоения в ATR считается из BS <b>динамически</b>; серия N побед = <code>b·(2^N−1)</code>.</p>
     <form class="controls" id="form-explain">
       <label>Сценарий
         <select name="scenario">
@@ -156,8 +157,9 @@
       <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
       <label title="Только для коллов">Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
-      <label title="Только для коллов">DTE дней <input name="dte_days" type="number" value="365"></label>
+      <label title="Только для коллов">DTE дней <input name="dte_days" type="number" value="45"></label>
       <label title="Только для коллов: постоянная IV для чистоты демо">IV <input name="iv" type="number" step="any" value="0.20"></label>
+      <label title="Коллы: во сколько раз растёт премия для «победы» (коин-флип = ×2)">«Победа» × <input name="double_target" type="number" step="any" value="2.0"></label>
       <button type="submit">Показать трассировку</button>
     </form>
     <div class="results"><div class="plots"><div id="expl-chart"></div></div>
@@ -165,6 +167,6 @@
     <div class="tradetable" id="expl-ledger"></div>
   </section>
 
-  <script src="/app.js?v=20"></script>
+  <script src="/app.js?v=21"></script>
 </body>
 </html>

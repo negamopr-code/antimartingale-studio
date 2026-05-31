@@ -753,3 +753,158 @@ def _finalize(res: BacktestResult, base_bet: float, target_streak: int,
         res.total_commission, n_cycles, base_bet, target_streak)[0]
     res.slippage_as_prob = cost_as_probability(
         res.total_slippage, n_cycles, base_bet, target_streak)[0]
+
+
+def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Series, *,
+                      base_bet: float, target_streak: int, mult: float = 1.0,
+                      double_target: float = 2.0, target_delta: float = 0.5,
+                      dte_days: int = 365, iv: float = 0.20, r: float = 0.045, qdiv: float = 0.0,
+                      commission_pct: float = 0.0, slippage_pct: float = 0.0,
+                      starting_bank: float = 0.0, trace: list | None = None) -> BacktestResult:
+    """Long-call COIN-FLIP: the bet is the PREMIUM, so risk is capped at b by construction.
+
+    A long call cannot lose more than its premium, so if each bet spends exactly the current
+    stake on premium and we RIDE the proceeds (never inject fresh capital mid-cycle), the whole
+    cycle can lose at most the initial b — a true coin-flip with risk ≡ 1 unit, no stop needed.
+
+    One ROUND: buy calls (strike at `target_delta`) for `stake` of premium. WIN = the call
+    reaches `double_target`× its premium (it doubled) before expiry → sell, roll ALL proceeds
+    into the next round (stake ×= double_target), streak++. The price level where it doubles is
+    solved from Black–Scholes (`price_for_value`) and reported as a DYNAMIC `m·ATR` — it is NOT
+    a fixed 2·ATR; a higher entry delta needs a different move. A streak of N wins ends the cycle
+    with ≈ b·(double_target^N − 1). If a round reaches expiry without doubling → cycle ends, sell
+    the salvage; since proceeds ≥ 0 and only b was ever injected, cycle P&L ≥ −b.
+    """
+    res = BacktestResult()
+    daily = daily.sort_index()
+    idx = daily.index
+    hi_s, cl_s = daily["High"].to_numpy(float), daily["Close"].to_numpy(float)
+    T0 = dte_days / 365.0
+    bank = starting_bank
+    n_cycles = wins = 0
+    cumc = 0.0
+    fee = (commission_pct + slippage_pct) / 100.0
+
+    def atr_at(date):
+        v = weekly_atr.asof(date)
+        return float(v) * mult if v is not None and np.isfinite(v) and float(v) > 0 else float("nan")
+
+    i = 0
+    while i < len(idx) and not np.isfinite(atr_at(idx[i])):
+        i += 1
+
+    while i < len(idx):
+        h = atr_at(idx[i])
+        if not np.isfinite(h) or h <= 0:
+            i += 1
+            continue
+        # ---- cycle ----
+        stake = base_bet
+        streak = 0
+        cycle_cost = 0.0
+        S = float(cl_s[i])
+        entry_date = idx[i]
+        cur = i
+        outcome = None
+        proceeds = 0.0
+        last_sell_i = i
+        while True:
+            K = float(opt.strike_for_delta(S, T0, r, iv, target_delta, qdiv))
+            prem_per = float(opt.call_price(S, K, T0, r, iv, qdiv))
+            if prem_per <= 1e-9:
+                outcome = "degenerate"
+                break
+            contracts = stake / prem_per
+            d0 = float(opt.call_delta(S, K, T0, r, iv, qdiv))
+            target_per = double_target * prem_per
+            S_star = float(opt.price_for_value(target_per, K, T0, r, iv, qdiv))
+            m_star = (S_star - S) / h
+            expiry = entry_date + pd.Timedelta(days=dte_days)
+            cycle_cost += fee * stake                       # buy fill
+
+            round_win = False
+            sell_S = float(cl_s[-1]); sell_date = idx[-1]; T_rem = 1e-6
+            j = cur
+            while j < len(idx):
+                d = idx[j]
+                if d < entry_date:
+                    j += 1
+                    continue
+                T_rem = max((expiry - d).days / 365.0, 1e-6)
+                if float(opt.call_price(hi_s[j], K, T_rem, r, iv, qdiv)) >= target_per:
+                    round_win, sell_S, sell_date = True, S_star, d
+                    break
+                if d >= expiry:
+                    sell_S, sell_date, T_rem = float(cl_s[j]), d, 1e-6
+                    break
+                j += 1
+
+            # WIN books exactly the doubling value (the win condition IS "worth ≥ 2× premium",
+            # so we conservatively realise 2× even if the bar overshot); LOSS books the real
+            # expiry/salvage value. Either way proceeds ≥ 0 ⇒ cycle P&L ≥ −b.
+            val_per = target_per if round_win else float(opt.call_price(sell_S, K, T_rem, r, iv, qdiv))
+            proceeds = contracts * val_per
+            cycle_cost += fee * proceeds                    # sell fill
+            last_sell_i = j if j < len(idx) else len(idx) - 1
+
+            if trace is not None:
+                trace.append({"t": "cf_round", "camp": n_cycles + 1, "round": streak + 1,
+                              "date": entry_date.date().isoformat(), "entry": round(S, 4),
+                              "atr": round(h, 4), "strike": round(K, 4), "iv": round(iv, 4),
+                              "delta": round(d0, 4), "prem_per": round(prem_per, 4),
+                              "contracts": round(contracts, 2), "stake": round(stake, 2),
+                              "double_at": round(S_star, 4), "m_atr": round(m_star, 3),
+                              "sell": round(sell_S, 4), "sell_date": sell_date.date().isoformat(),
+                              "val_per": round(val_per, 4), "proceeds": round(proceeds, 2),
+                              "win": round_win})
+
+            if round_win:
+                streak += 1
+                wins += 1
+                stake = proceeds                            # RIDE: reinvest all proceeds
+                S, entry_date, cur = sell_S, sell_date, last_sell_i
+                if streak >= target_streak:
+                    outcome = "target"
+                    break
+            else:
+                outcome = "expiry"
+                break
+
+        cycle_pnl = proceeds - base_bet - cycle_cost
+        bank += cycle_pnl
+        cumc += cycle_cost
+        n_cycles += 1
+        won = outcome == "target"
+        res.equity_dates.append(sell_date)
+        res.equity.append(bank)
+        res.cum_commission.append(cumc)
+        res.cum_slippage.append(0.0)
+        res.cum_cost.append(cumc)
+        res.table.append({"i": n_cycles, "entry": idx[i].date().isoformat(),
+                          "exit": sell_date.date().isoformat(), "streak": streak,
+                          "reason": outcome, "outcome": "win" if won else "loss",
+                          "premium_in": round(base_bet, 2), "proceeds": round(proceeds, 2),
+                          "cost": round(cycle_cost, 2), "pnl": round(cycle_pnl, 2),
+                          "bank": round(bank, 2)})
+        res.trials.append(Trial(idx[i], sell_date, float(cl_s[i]), float(sell_S),
+                                float(h), "win" if won else "loss",
+                                max((sell_date - idx[i]).days, 0), outcome or ""))
+        if trace is not None:
+            trace.append({"t": "cf_exit", "camp": n_cycles, "date": sell_date.date().isoformat(),
+                          "reason": outcome, "streak": streak, "pnl": round(cycle_pnl, 2),
+                          "proceeds": round(proceeds, 2), "bank": round(bank, 2)})
+
+        nxt = idx[idx > sell_date]
+        if len(nxt) == 0:
+            break
+        i = int(idx.get_loc(nxt[0]))
+
+    res.n_trials = n_cycles
+    res.wins = wins
+    res.n_cycles = n_cycles
+    res.final_bank = bank
+    res.empirical_p = wins / n_cycles if n_cycles else 0.0
+    res.max_drawdown = _drawdown(res.equity)
+    res.total_commission = cumc
+    res.total_cost = cumc
+    return res
