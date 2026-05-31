@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=17"/>
+  <link rel="stylesheet" href="/style.css?v=18"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -146,9 +146,18 @@
           <option value="downtrend">тренд вниз → стоп (−b)</option>
         </select>
       </label>
+      <label>Инструмент
+        <select name="instrument">
+          <option value="shares">акции (Δ=1)</option>
+          <option value="calls">коллы (auto-Δ)</option>
+        </select>
+      </label>
       <label>Целевая серия N <input name="target_streak" type="number" value="4" min="1" max="8"></label>
       <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
+      <label title="Только для коллов">Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
+      <label title="Только для коллов">DTE дней <input name="dte_days" type="number" value="365"></label>
+      <label title="Только для коллов: постоянная IV для чистоты демо">IV <input name="iv" type="number" step="any" value="0.20"></label>
       <button type="submit">Показать трассировку</button>
     </form>
     <div class="results"><div class="plots"><div id="expl-chart"></div></div>
@@ -156,6 +165,6 @@
     <div class="tradetable" id="expl-ledger"></div>
   </section>
 
-  <script src="/app.js?v=17"></script>
+  <script src="/app.js?v=18"></script>
 </body>
 </html>

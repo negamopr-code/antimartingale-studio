@@ -375,7 +375,8 @@ def _sigma_at(rv: pd.Series, date: pd.Timestamp, default: float) -> float:
 
 def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *,
                         r, dte_days, target_delta, qdiv, realized_vol, default_sigma,
-                        roll_buffer, commission_pct, slippage_pct, vol_model=None):
+                        roll_buffer, commission_pct, slippage_pct, vol_model=None,
+                        trace=None, camp=None):
     """Mark-to-market P&L of a long-call campaign WITH auto-rolling.
 
     Walks daily entry->exit. Buys delta-normalised calls at each ladder add (priced at the
@@ -435,7 +436,7 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
             fill(contracts, p2)                                       # open leg
             n_rolls += 1
         while bi < len(batches) and batches[bi][1] <= d:              # ladder adds on this bar
-            L, dt, lots = batches[bi]; bi += 1
+            L, dt, lots = batches[bi]; step_i = bi; bi += 1
             if K is None:                                             # entry add sets up the option
                 expiry = entry_day + pd.Timedelta(days=dte_days)
                 K, sig = pick(entry_day, L)
@@ -444,9 +445,36 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
             p = float(opt.call_price(L, K, trem(dt), r, sig, qdiv))
             contracts += addc; book += addc * p
             fill(addc, p)
+            if trace is not None:
+                mtm = contracts * p                                   # value of whole stack now
+                trace.append({"t": "opt_add", "camp": camp, "step": step_i,
+                              "date": dt.date().isoformat(), "level": round(L, 4),
+                              "strike": round(K, 4), "iv": round(sig, 4),
+                              "delta": round(dlt, 4), "premium_per": round(p, 4),
+                              "contracts_added": round(addc, 2),
+                              "premium_paid": round(addc * p, 2),
+                              "contracts": round(contracts, 2),
+                              "premium_book": round(book, 2),
+                              "stack_value": round(mtm, 2),
+                              "unreal": round(mtm - book, 2)})
+        if trace is not None and K is not None:                       # daily mark-to-market path
+            pm = float(opt.call_price(sclose, K, trem(d), r, sig, qdiv))
+            trace.append({"t": "opt_mark", "camp": camp, "date": d.date().isoformat(),
+                          "spot": round(sclose, 4), "premium_per": round(pm, 4),
+                          "delta": round(float(opt.call_delta(sclose, K, trem(d), r, sig, qdiv)), 4),
+                          "contracts": round(contracts, 2),
+                          "stack_value": round(contracts * pm, 2),
+                          "unreal": round(contracts * pm - book, 2)})
     p = float(opt.call_price(exit_px, K, trem(exit_date), r, sig, qdiv))  # final close
     realized += contracts * p - book
     fill(contracts, p)
+    if trace is not None:
+        trace.append({"t": "opt_exit", "camp": camp,
+                      "date": exit_date.date().isoformat(), "price": round(float(exit_px), 4),
+                      "premium_per": round(p, 4), "contracts": round(contracts, 2),
+                      "stack_value": round(contracts * p, 2),
+                      "premium_book": round(book, 2), "gross": round(realized, 2),
+                      "comm": round(comm, 2), "slip": round(slip, 2), "rolls": n_rolls})
     return realized, comm, slip, n_rolls
 
 
@@ -524,15 +552,15 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
         peak_step = 0
 
         if trace is not None:                       # step-by-step trace for the Explain tab
-            trace.append({"t": "entry", "camp": n_cycles + 1,
-                          "date": entry_day.date().isoformat(), "price": round(R0, 4),
-                          "atr": round(atr, 4), "h": round(h, 4), "per_pt": round(per_pt, 6),
-                          "lots": 1.0, "Q": 1.0, "avg": round(R0, 4), "stop": round(stop, 4),
-                          "risk": round(1.0 * (R0 - stop) * per_pt, 2),
-                          # molecular money view: units of underlying held, $ notional deployed,
-                          # and mark-to-market unrealised P&L at this instant.
-                          "units": round(per_pt, 4), "notional": round(per_pt * R0, 2),
-                          "unreal": 0.0})
+            ev = {"t": "entry", "camp": n_cycles + 1,
+                  "date": entry_day.date().isoformat(), "price": round(R0, 4),
+                  "atr": round(atr, 4), "h": round(h, 4), "per_pt": round(per_pt, 6),
+                  "lots": 1.0, "Q": 1.0, "avg": round(R0, 4), "stop": round(stop, 4),
+                  "risk": round(1.0 * (R0 - stop) * per_pt, 2)}
+            if not is_calls:                         # shares-only molecular money (calls use opt_* events)
+                ev.update({"units": round(per_pt, 4), "notional": round(per_pt * R0, 2),
+                           "unreal": 0.0})
+            trace.append(ev)
 
         for d, row in future.iterrows():
             hi, lo = float(row["High"]), float(row["Low"])
@@ -582,16 +610,18 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 peak_step = step
                 if trace is not None:
                     a_ = avg_price()
-                    unreal = sum(lots * (level - L) * per_pt for L, _, lots in batches)
-                    trace.append({"t": "add", "camp": n_cycles + 1, "step": step,
-                                  "date": d.date().isoformat(),
-                                  "trigger": round(R0 + step * h, 4), "level": round(level, 4),
-                                  "lots_added": add, "Q": round(Q, 1), "avg": round(a_, 4),
-                                  "stop": round(stop, 4),
-                                  "risk": round(Q * (a_ - stop) * per_pt, 2),
-                                  "units": round(Q * per_pt, 4),
-                                  "notional": round(Q * per_pt * level, 2),
-                                  "unreal": round(unreal, 2)})
+                    ev = {"t": "add", "camp": n_cycles + 1, "step": step,
+                          "date": d.date().isoformat(),
+                          "trigger": round(R0 + step * h, 4), "level": round(level, 4),
+                          "lots_added": add, "Q": round(Q, 1), "avg": round(a_, 4),
+                          "stop": round(stop, 4),
+                          "risk": round(Q * (a_ - stop) * per_pt, 2)}
+                    if not is_calls:
+                        unreal = sum(lots * (level - L) * per_pt for L, _, lots in batches)
+                        ev.update({"units": round(Q * per_pt, 4),
+                                   "notional": round(Q * per_pt * level, 2),
+                                   "unreal": round(unreal, 2)})
+                    trace.append(ev)
                 if step >= target_streak:
                     exit_px, exit_date, reason = level, d, "target"
                     break
@@ -627,7 +657,8 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                     r=r, dte_days=dte_days, target_delta=target_delta, qdiv=qdiv,
                     realized_vol=realized_vol, default_sigma=default_sigma,
                     roll_buffer=roll_buffer_days, commission_pct=commission_pct,
-                    slippage_pct=slippage_pct, vol_model=vol_model)
+                    slippage_pct=slippage_pct, vol_model=vol_model,
+                    trace=trace, camp=(n_cycles + 1))
             else:
                 gross = sum(lots * (exit_px - L) * per_pt for L, _, lots in batches)
                 notional = sum(lots * per_pt * (L + exit_px) for L, _, lots in batches)
@@ -657,14 +688,16 @@ def run_campaign(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.Serie
                 row["rolls"] = n_rolls
             res.table.append(row)
             if trace is not None:
-                trace.append({"t": "exit", "camp": n_cycles,
-                              "date": exit_date.date().isoformat(), "reason": reason,
-                              "price": round(float(exit_px), 4), "steps": int(peak_step),
-                              "Q": round(Q, 1), "avg": round(a, 4), "stop": round(stop, 4),
-                              "gross": round(gross, 2), "cost": round(cost, 2),
-                              "pnl": round(pnl, 2), "bank": round(bank, 2),
-                              "units": round(Q * per_pt, 4),
-                              "notional": round(Q * per_pt * float(exit_px), 2)})
+                ev = {"t": "exit", "camp": n_cycles,
+                      "date": exit_date.date().isoformat(), "reason": reason,
+                      "price": round(float(exit_px), 4), "steps": int(peak_step),
+                      "Q": round(Q, 1), "avg": round(a, 4), "stop": round(stop, 4),
+                      "gross": round(gross, 2), "cost": round(cost, 2),
+                      "pnl": round(pnl, 2), "bank": round(bank, 2)}
+                if not is_calls:
+                    ev.update({"units": round(Q * per_pt, 4),
+                               "notional": round(Q * per_pt * float(exit_px), 2)})
+                trace.append(ev)
 
         # entry marker for the price chart (green=target win, red=stop/expiry loss)
         res.trials.append(Trial(entry_day, exit_date, entry_price0, float(exit_px),

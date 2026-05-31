@@ -114,6 +114,24 @@ def test_explain_scenarios(client):
             assert abs(d["exit"]["pnl"] + 100) < 1e-6   # exactly −b
 
 
+def test_explain_calls_mode(client):
+    # options trace: delta-normalised contracts and the option ledger ties out to the grid P&L
+    d = client.post("/api/explain", json={"scenario": "uptrend", "instrument": "calls",
+                                          "target_delta": 0.5, "base_bet": 100}).json()
+    assert d["instrument"] == "calls"
+    opt_adds = [e for e in d["trace"] if e["t"] == "opt_add"]
+    opt_exit = next(e for e in d["trace"] if e["t"] == "opt_exit")
+    assert opt_adds and opt_exit["rolls"] == 0       # DTE 365 → no roll in the demo window
+    # entry buys (b/h)/Δ contracts: per_pt=20, Δ≈0.5 → ~40 contracts
+    assert abs(opt_adds[0]["contracts_added"] - 40) < 1.0
+    # the option ledger's gross == the grid table's gross (single source of truth)
+    assert abs(opt_exit["gross"] - d["table"][0]["gross"]) < 1e-6
+    # convexity: a downtrend call loses LESS than the shares −b
+    dn = client.post("/api/explain", json={"scenario": "downtrend", "instrument": "calls",
+                                           "base_bet": 100}).json()
+    assert -100 < dn["exit"]["pnl"] < 0
+
+
 def test_explain_trace_invariant_direct():
     # the engine's own trace, not the API: risk stays = b through a full pyramid
     from antimg import scenarios, data as datamod, atr_strategy as strat

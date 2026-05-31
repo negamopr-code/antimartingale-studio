@@ -273,7 +273,9 @@ def explain(req: ExplainReq):
     trace: list[dict] = []
     res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
                              target_streak=req.target_streak, mult=req.mult,
-                             instrument="shares", mode="pyramid", starting_bank=10_000.0,
+                             instrument=req.instrument, mode="pyramid", starting_bank=10_000.0,
+                             realized_vol=None, default_sigma=req.iv, r=0.045,
+                             dte_days=req.dte_days, target_delta=req.target_delta,
                              trace=trace)
     camp1 = _jsonable([e for e in trace if e.get("camp") == 1])
     entry = next((e for e in camp1 if e["t"] == "entry"), None)
@@ -287,7 +289,7 @@ def explain(req: ExplainReq):
     end = pd.Timestamp(exit_["date"]) + pd.Timedelta(days=7) if exit_ else daily.index[-1]
     win = daily.loc[daily.index <= end]
     return {
-        "scenario": req.scenario, "b": req.base_bet,
+        "scenario": req.scenario, "b": req.base_bet, "instrument": req.instrument,
         "price": ser.series_xy(win["Close"], MP),
         "high": ser.series_xy(win["High"], MP),
         "low": ser.series_xy(win["Low"], MP),

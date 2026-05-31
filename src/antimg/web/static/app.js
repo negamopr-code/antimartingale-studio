@@ -364,12 +364,15 @@ $("#form-scan").onsubmit = (e) => {
 
 // ---- tab 6 explain (step-by-step trace of the real engine)
 async function renderExplain(d) {
-  const b = d.b;
+  const b = d.b, isCalls = d.instrument === "calls";
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const adds = d.trace.filter((t) => t.t === "add");
+  const optAdds = d.trace.filter((t) => t.t === "opt_add");
+  const optMarks = d.trace.filter((t) => t.t === "opt_mark");
+  const optExit = d.trace.find((t) => t.t === "opt_exit");
   const won = d.exit && d.exit.reason === "target";
 
-  // markers
+  // --- common chart: price, grid markers, trailing stop, rung lines ---
   const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена (close)",
                   line: { color: "#c9d1d9", width: 1.5 } };
   const entry = { x: [d.entry.date], y: [d.entry.price], mode: "markers", name: "вход (1 лот)",
@@ -382,100 +385,113 @@ async function renderExplain(d) {
                  marker: { color: "#3fb950", symbol: "circle", size: 11,
                            line: { color: "#0f1419", width: 1 } } };
   const exitT = { x: [d.exit.date], y: [d.exit.price], mode: "markers",
-                  name: won ? "ЦЕЛЬ (win)" : "СТОП (−b)",
+                  name: won ? "ЦЕЛЬ (win)" : "СТОП",
                   marker: { color: won ? "#f0c000" : "#f85149",
                             symbol: won ? "star" : "x", size: 16,
                             line: { color: "#0f1419", width: 1 } } };
-  // trailing stop as a step line over the event timeline
   const stopEv = [d.entry, ...adds, d.exit].filter((e) => e && e.stop != null);
   const stop = { x: stopEv.map((e) => e.date), y: stopEv.map((e) => e.stop), mode: "lines",
                  name: "трейлинг-стоп", line: { color: "#f85149", width: 1.5, shape: "hv", dash: "dash" } };
-
-  // rung levels as faint horizontal lines + right-edge labels
   const x0 = d.price.x[0], x1 = d.price.x[d.price.x.length - 1];
   const shapes = d.rungs.map((r) => ({
     type: "line", xref: "x", yref: "y", x0, x1, y0: r.level, y1: r.level,
     line: { color: r.k === 0 ? "#5b9dff" : "#39414d", width: 1, dash: "dot" },
   }));
-  const annos = d.rungs.map((r) => ({
-    xref: "paper", x: 1, y: r.level, yref: "y", xanchor: "left",
-    text: r.k === 0 ? " вход R0" : ` +${r.k}·h`, showarrow: false,
-    font: { size: 9, color: r.k === 0 ? "#5b9dff" : "#8b949e" },
-  }));
+  const traces = [price, stop, addT, entry, exitT];
+  const lay = layout(`${d.scenario} (${isCalls ? "коллы" : "акции"}) — пошаговый разбор`, {
+    height: 460, shapes,
+    margin: { t: 36, r: isCalls ? 64 : 64, b: 36, l: 56 },
+    xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } },
+  });
+  if (isCalls && optMarks.length) {     // overlay option-stack unrealised P&L on the right axis
+    traces.push({ x: optMarks.map((m) => m.date), y: optMarks.map((m) => m.unreal), mode: "lines",
+                  name: "нереализ. P&L опциона", yaxis: "y2",
+                  line: { color: "#f0c000", width: 1.5 } });
+    lay.yaxis2 = { overlaying: "y", side: "right", title: { text: "$ P&L опциона" },
+                   gridcolor: "transparent", zeroline: false };
+  } else {                              // share rung labels (no 2nd axis to collide with)
+    lay.annotations = d.rungs.map((r) => ({
+      xref: "paper", x: 1, y: r.level, yref: "y", xanchor: "left",
+      text: r.k === 0 ? " вход R0" : ` +${r.k}·h`, showarrow: false,
+      font: { size: 9, color: r.k === 0 ? "#5b9dff" : "#8b949e" } }));
+  }
+  await plot("expl-chart", traces, lay);
 
-  await plot("expl-chart", [price, stop, addT, entry, exitT], layout(
-    `${d.scenario} — пошаговый разбор кампании`, {
-      height: 460, shapes, annotations: annos,
-      margin: { t: 36, r: 64, b: 36, l: 56 },
-      xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } },
-    }));
-
-  // plain-language narration straight from the engine's own trace
+  // --- common grid narration (instrument-agnostic: where we enter/scale/exit) ---
   const L = [];
-  L.push(`СЦЕНАРИЙ: ${d.scenario}   ·   base bet b = $${f(b)}\n`);
-  const e0 = d.entry;
-  L.push(`1) ВХОД ${e0.date}: цена R0=${f(e0.price)}, ATR=${f(e0.atr)} ⇒ шаг сетки h=${f(e0.h)}.`);
-  L.push(`   Беру 1 лот (${f(e0.per_pt)} $/пункт). Стоп = R0−h = ${f(e0.stop)}.`);
-  L.push(`   Риск стека = Q·(avg−stop)·$/пункт = ${f(e0.risk)} = ровно b. ✔\n`);
+  const e0 = d.entry, x = d.exit;
+  L.push(`СЦЕНАРИЙ: ${d.scenario}  ·  инструмент: ${isCalls ? "коллы (auto-Δ)" : "акции (Δ=1)"}  ·  b = $${f(b)}\n`);
+  L.push(`СЕТКА (одинакова для акций и коллов):`);
+  L.push(`1) ВХОД ${e0.date}: R0=${f(e0.price)}, ATR=${f(e0.atr)} ⇒ шаг h=${f(e0.h)}. Стоп сетки = R0−h = ${f(e0.stop)}.`);
   let n = 2;
   for (const a of adds) {
-    L.push(`${n}) ШАГ ${a.step} (${a.date}): цена дошла до R0+${a.step}·h = ${f(a.trigger)}.`);
-    L.push(`   Удваиваю: доливаю 2^${a.step}=${f(a.lots_added)} лота → всего Q=${f(a.Q)} лотов, средняя=${f(a.avg)}.`);
-    L.push(`   Стоп подтягивается к avg−h/Q = ${f(a.stop)}. Риск стека снова = $${f(a.risk)} = b. ✔\n`);
+    L.push(`${n}) ШАГ ${a.step} (${a.date}): цена на R0+${a.step}·h = ${f(a.trigger)} → долив 2^${a.step}=${f(a.lots_added)} лота, Q=${f(a.Q)}, стоп→${f(a.stop)}.`);
     n++;
   }
-  const x = d.exit;
-  if (won) {
-    L.push(`${n}) ЦЕЛЬ ${x.date}: достигнут шаг N=${x.steps} на уровне ${f(x.price)}.`);
-    L.push(`   Закрываю весь стек (Q=${f(x.Q)} лотов = ${f(x.units)} ед.). Брутто = +$${f(x.gross)} = ${f(x.gross / b)}×b.`);
-    L.push(`   Это и есть редкий «выпуклый» выигрыш. Банк: ${f(x.bank)}.`);
+  L.push(`${n}) ${won ? "ЦЕЛЬ" : "СТОП"} ${x.date} на ${f(x.price)}.\n`);
+
+  if (!isCalls) {
+    // ----- shares money -----
+    const e = d.entry;
+    L.push(`— ДЕНЬГИ (акции, units = реальные единицы, Δ=1) —`);
+    L.push(`Чтобы рисковать b=$${f(b)} на стопе −1·ATR ($${f(e.h)}): units = b/h = ${f(e.units)} ед.`);
+    L.push(`Нотионал на входе = ${f(e.units)}×$${f(e.price)} = $${f(e.notional)}. «Заходит» НЕ $${f(b)}, а $${f(e.notional)}; $${f(b)} — лишь сумма под стопом.`);
+    if (won) {
+      L.push(`+1·ATR: первый лот даёт +$${f(b)} (= ${f(e.units)}×$${f(e.h)}) = +b, не +b/2.`);
+      L.push(`Нереализ. P&L: ${[e, ...adds].map((s) => "$" + f(s.unreal)).join(" → ")} → реализ. +$${f(x.gross)} = ${f(x.gross / b)}×b.`);
+      L.push(`Нотионал раздувается: ${[e, ...adds, x].map((s) => "$" + f(s.notional)).join(" → ")} ⇒ ради +$${f(x.gross)} в пике $${f(x.notional)} капитала.`);
+    } else {
+      L.push(`Убыток на стопе = −$${f(-x.pnl)} = −b (ровно, при любом Q).`);
+    }
   } else {
-    L.push(`${n}) СТОП ${x.date} на ${f(x.price)}: весь стек закрыт.`);
-    L.push(`   Убыток = −$${f(-x.pnl)} = −b. Сколько бы лотов ни долилось — стоп всегда отдаёт ровно b.`);
-    L.push(`   Банк: ${f(x.bank)}.`);
+    // ----- options money (from the SAME function that computes the P&L) -----
+    const oe = optAdds[0], step1 = optAdds[1];
+    L.push(`— ДЕНЬГИ (коллы, дельта-нормированный сайзинг units=(b/h)/Δ) —`);
+    if (oe) {
+      L.push(`ВХОД: страйк K=${f(oe.strike)}, IV=${f(oe.iv)}, Δ=${f(oe.delta)}, премия ${f(oe.premium_per)}/ед.`);
+      L.push(`Чтобы держать b/h=${f(e0.per_pt)} $/пункт при Δ=${f(oe.delta)}, беру ${f(oe.contracts_added)} контрактов (=(b/h)/Δ).`);
+      L.push(`Уплачено премии = ${f(oe.contracts_added)}×$${f(oe.premium_per)} = $${f(oe.premium_paid)}. Это и есть макс. убыток (стопа на опционе нет — выпуклость).`);
+    }
+    if (step1) {
+      L.push(`\nПРО ТВОИ "+$50": при +1·ATR опцион на входных ${f(oe.contracts_added)} контрактах дал +$${f(step1.unreal)} ≈ +b.`);
+      L.push(`Если бы взяли как акции (${f(e0.per_pt)} ед., НЕ делённые на Δ) — было бы ≈Δ×h×units = ${f(oe.delta)}×$${f(e0.h)}×${f(e0.per_pt)} = +$${f(oe.delta * e0.h * e0.per_pt)} — те самые "+$50".`);
+      L.push(`Деление на Δ (взяли ${f(oe.contracts_added)}, а не ${f(e0.per_pt)}) восстанавливает +b. Чуть больше $${f(b)} — это гамма (Δ растёт по ходу).`);
+    }
+    L.push(`\nПо шагам (Δ растёт ⇒ опцион всё «прямее»):`);
+    for (const a of optAdds) {
+      L.push(`  шаг ${a.step} @${f(a.level)}: Δ=${f(a.delta)}, премия ${f(a.premium_per)}/ед, +${f(a.contracts_added)} контр → ${f(a.contracts)} всего, премии в сумме $${f(a.premium_book)}, нереализ. $${f(a.unreal)}.`);
+    }
+    if (optExit) {
+      L.push(`\n${won ? "ЦЕЛЬ" : "СТОП/выход"}: закрытие по ${f(optExit.premium_per)}/ед × ${f(optExit.contracts)} = $${f(optExit.stack_value)}; премии вложено $${f(optExit.premium_book)}.`);
+      L.push(`БРУТТО опциона = $${f(optExit.gross)}${won ? ` = ${f(optExit.gross / b)}×b` : ""}. ${won ? `Больше акций (${f(d.table[0] ? d.table[0].gross : 0)} было бы линейно) за счёт гаммы.` : "Выпуклость смягчает убыток vs −b у акций."}`);
+    }
   }
-
-  // ----- ДЕНЬГИ НА МОЛЕКУЛЯРНОМ УРОВНЕ -----
-  const e = d.entry;
-  L.push(`\n— ДЕНЬГИ (units = реальные единицы актива, delta=1 для акций) —`);
-  L.push(`Чтобы рисковать ровно b=$${f(b)} на стопе −1·ATR ($${f(e.h)}), нужно держать`);
-  L.push(`  units = b/h = ${f(e.units)} ед. → нотионал на входе = ${f(e.units)}×$${f(e.price)} = $${f(e.notional)}.`);
-  L.push(`Т.е. «заходит» НЕ $${f(b)}, а $${f(e.notional)} позиции; $${f(b)} — это лишь сумма под стопом.`);
-  if (won) {
-    L.push(`При +1·ATR ($${f(e.h)}) первый лот даёт +$${f(b)} (= ${f(e.units)} ед. × $${f(e.h)}). Это +b, не +b/2.`);
-    L.push(`Нереализованная прибыль по шагам: ${[e, ...adds].map((s) => "$" + f(s.unreal)).join(" → ")} → реализ. +$${f(x.gross)}.`);
-    L.push(`НО нотионал раздувается: ${[e, ...adds, x].map((s) => "$" + f(s.notional)).join(" → ")}.`);
-    L.push(`⇒ чтобы взять +$${f(x.gross)}, в пике задействовано $${f(x.notional)} капитала (без cap_mult — неограниченно).`);
-  }
-
-  // ----- ответ на вопрос про дельту 0.5 -----
-  const dlt = 0.5, naive = b * dlt, units_norm = e.units / dlt;
-  L.push(`\n— ПРО ДЕЛЬТУ 0.5 (опционы, вкладка 3) —`);
-  L.push(`Если купить опцион Δ=0.5 на ТО ЖЕ число единиц (${f(e.units)}), то при +1·ATR он даст`);
-  L.push(`  ≈ Δ×h×units = 0.5×$${f(e.h)}×${f(e.units)} = +$${f(naive)} — да, ровно твои "+$50".`);
-  L.push(`Поэтому движок дельта-нормирует: берёт units/Δ = ${f(e.units)}/0.5 = ${f(units_norm)} ед.,`);
-  L.push(`  тогда при +1·ATR: 0.5×$${f(e.h)}×${f(units_norm)} = +$${f(b)} = снова +b.`);
-  L.push(`Цена за это — вдвое больше уплаченной премии и тета-распад. Это НЕ потеря в расчёте,`);
-  L.push(`а сознательный выбор сайзинга (units=(b/h)/Δ). Хочешь — добавлю опционный режим в эту вкладку.`);
-
-  L.push(`\nИТОГ: проигрыш всегда −b; выигрыш серии — большой кратник b, но ценой раздувания капитала.`);
-  L.push(`Реальный «косяк» не в формуле прибыли, а в том, что нотионал ничем не ограничен (см. cap_mult).`);
+  L.push(`\nИТОГ: проигрыши малы и часты, выигрыш серии — крупный, но требует раздувания капитала/премии (см. cap_mult, скан вкладки 5).`);
   $("#expl-stats").textContent = L.join("\n");
 
-  // money ledger table (molecular)
+  // --- money ledger table ---
   const led = $("#expl-ledger");
-  const evs = [d.entry, ...adds, d.exit];
-  const cols = [["t", "событие"], ["price", "цена"], ["level", "ур."], ["Q", "Q лот"],
-    ["units", "units"], ["notional", "нотионал $"], ["unreal", "нереал. P&L"],
-    ["risk", "риск $"], ["stop", "стоп"]];
+  let cols, rows, note;
+  if (!isCalls) {
+    cols = [["t", "событие"], ["price", "цена"], ["level", "ур."], ["Q", "Q лот"],
+      ["units", "units"], ["notional", "нотионал $"], ["unreal", "нереал.$"], ["risk", "риск$"], ["stop", "стоп"]];
+    rows = [d.entry, ...adds, d.exit];
+    note = "денежный леджер (акции) · units = реальные единицы, Δ=1";
+  } else {
+    cols = [["step", "шаг"], ["level", "цена"], ["delta", "Δ"], ["premium_per", "премия/ед"],
+      ["contracts_added", "+контр"], ["contracts", "контр всего"], ["premium_book", "премия Σ$"],
+      ["stack_value", "стоимость$"], ["unreal", "нереал.$"]];
+    rows = [...optAdds, optExit].filter(Boolean);
+    note = "опционный леджер · контрактов=(b/h)/Δ на каждом доливе · цена закрытия в строке выхода";
+  }
   const head = "<tr>" + cols.map(([, l]) => `<th>${l}</th>`).join("") + "</tr>";
-  const body = evs.map((ev) => {
-    const cls = ev.t === "exit" ? (won ? "w" : "l") : "";
+  const body = rows.map((ev) => {
+    const cls = (ev.t === "exit" || ev.t === "opt_exit") ? (won ? "w" : "l") : "";
     return `<tr class="${cls}">` + cols.map(([k]) =>
       `<td>${ev[k] == null ? "" : (typeof ev[k] === "number" ? f(ev[k]) : ev[k])}</td>`).join("") + "</tr>";
   }).join("");
   led.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
-    + `<div class="tt-note">денежный леджер кампании · units = реальные единицы актива (delta=1)</div>`;
+    + `<div class="tt-note">${note}</div>`;
 }
 
 $("#form-explain").onsubmit = (e) => {

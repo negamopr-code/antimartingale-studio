@@ -64,6 +64,10 @@ class ExplainReq(BaseModel):
     mult: float = Field(1.0, gt=0, le=20)
     base_bet: float = Field(100.0, gt=0)
     atr_period: int = Field(4, ge=2, le=20)
+    instrument: str = Field("shares", pattern="^(shares|calls)$")
+    target_delta: float = Field(0.5, gt=0, lt=1)   # calls only
+    dte_days: int = Field(365, ge=7, le=3650)      # calls only (long → no roll in the demo window)
+    iv: float = Field(0.20, gt=0, le=3)            # calls only: constant IV for a clean demo
 
 
 class FromSignalsReq(BaseModel):
