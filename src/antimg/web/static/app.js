@@ -390,14 +390,19 @@ async function renderExplain(d) {
                             symbol: won ? "star" : "x", size: 16,
                             line: { color: "#0f1419", width: 1 } } };
   const stopEv = [d.entry, ...adds, d.exit].filter((e) => e && e.stop != null);
+  // weighted-average entry of the whole stack — the stop is defined RELATIVE to this line
+  const avgEv = [d.entry, ...adds, d.exit].filter((e) => e && e.avg != null);
+  const avgLine = { x: avgEv.map((e) => e.date), y: avgEv.map((e) => e.avg),
+                    mode: "lines", name: "средняя цена позиции (avg)",
+                    line: { color: "#d29922", width: 1.5, shape: "hv" } };
   const stop = { x: stopEv.map((e) => e.date), y: stopEv.map((e) => e.stop), mode: "lines",
-                 name: "стоп от средней (риск = b)", line: { color: "#f85149", width: 1.5, shape: "hv", dash: "dash" } };
+                 name: "стоп = avg − h/Q (риск = b)", line: { color: "#f85149", width: 1.5, shape: "hv", dash: "dash" } };
   const x0 = d.price.x[0], x1 = d.price.x[d.price.x.length - 1];
   const shapes = d.rungs.map((r) => ({
     type: "line", xref: "x", yref: "y", x0, x1, y0: r.level, y1: r.level,
     line: { color: r.k === 0 ? "#5b9dff" : "#39414d", width: 1, dash: "dot" },
   }));
-  const traces = [price, stop, addT, entry, exitT];
+  const traces = [price, avgLine, stop, addT, entry, exitT];
   const lay = layout(`${d.scenario} (${isCalls ? "коллы" : "акции"}) — пошаговый разбор`, {
     height: 460, shapes,
     margin: { t: 36, r: isCalls ? 64 : 64, b: 36, l: 56 },
@@ -430,7 +435,8 @@ async function renderExplain(d) {
   }
   L.push(`${n}) ${won ? "ЦЕЛЬ" : "СТОП"} ${x.date} на ${f(x.price)}.\n`);
   L.push(`СТОП = СРЕДНЯЯ − h/Q (НЕ классический трейлинг от пика!). Дистанция до стопа сжимается (h/Q),`);
-  L.push(`но убыток ОТ СРЕДНЕЙ при выносе = Q·(avg−stop)·$/пункт = h·$/пункт = РОВНО начальный b на любом шаге.\n`);
+  L.push(`но убыток ОТ СРЕДНЕЙ при выносе = Q·(avg−stop)·$/пункт = h·$/пункт = РОВНО начальный b на любом шаге.`);
+  L.push(`На графике: оранжевая линия = средняя позиции (avg), красный пунктир = стоп; зазор между ними = h/Q.\n`);
 
   if (!isCalls) {
     // ----- shares money -----
