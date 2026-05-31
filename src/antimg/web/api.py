@@ -156,9 +156,44 @@ def _build_vol(req: "OptionsReq", daily):
     return vm, realized
 
 
+def _coinflip_payload(daily, res, double_target):
+    """Minimal backtest payload for the long-call coin-flip model (run_call_coinflip)."""
+    pnls = [r["pnl"] for r in res.table]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    pf = (sum(wins) / abs(sum(losses))) if losses else None
+    return {
+        "price": ser.series_xy(daily["Close"], MP),
+        "entries": ser.entries_payload(res.trials),
+        "equity": ser.list_xy(res.equity_dates, res.equity, MP),
+        "cum_cost": ser.list_xy(res.equity_dates, res.cum_cost, MP),
+        "table": res.table,
+        "stats": {
+            "n_trials": res.n_trials, "wins": res.wins, "empirical_p": res.empirical_p,
+            "final_bank": res.final_bank, "max_drawdown": res.max_drawdown,
+            "n_cycles": res.n_cycles, "total_cost": res.total_cost,
+            "profit_factor": (round(pf, 3) if pf is not None else None),
+            "double_target": double_target,
+            "model": "long-call coin-flip (premium=bet, risk≤b)",
+        },
+    }
+
+
 @app.post("/api/backtest/options")
 def backtest_options(req: OptionsReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
+    if req.opt_model == "coinflip":
+        # long-call coin-flip: premium is the bet (risk ≤ b), real per-date realized vol as IV
+        realized = datamod.realized_vol(daily["Close"], req.iv_window)
+        res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
+                                      target_streak=req.target_streak, mult=req.mult,
+                                      double_target=req.double_target, target_delta=req.target_delta,
+                                      dte_days=req.dte_days, iv=req.iv_const, r=req.r,
+                                      commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                                      starting_bank=req.starting_bank, realized_vol=realized)
+        if not res.table:
+            raise HTTPException(status_code=422, detail="no cycles resolved for these params")
+        return _coinflip_payload(daily, res, req.double_target)
     vm, realized = _build_vol(req, daily)
     # same campaign, but each lot is a delta-normalised long call (no -1ATR stop on the option;
     # the trailing stop caps risk at the initial b, convexity softens losses). IV from the

@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=21"/>
+  <link rel="stylesheet" href="/style.css?v=22"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -69,6 +69,8 @@
       <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
       <label>Target streak <input name="target_streak" type="number" value="10"></label>
+      <label title="pyramid = долив в одну позицию по сетке (дельта-норм.); coinflip = лонг-колл коин-флип (ставка=премия, риск≤b, удвоил-или-ролл)">Option model <select name="opt_model"><option value="pyramid">pyramid (scale-in)</option><option value="coinflip">coin-flip (premium=bet)</option></select></label>
+      <label title="coin-flip: во сколько раз растёт премия для «победы» (×2)">«Win» × <input name="double_target" type="number" step="any" value="2.0"></label>
       <label>DTE days <input name="dte_days" type="number" value="365"></label>
       <label>Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
@@ -167,6 +169,6 @@
     <div class="tradetable" id="expl-ledger"></div>
   </section>
 
-  <script src="/app.js?v=21"></script>
+  <script src="/app.js?v=22"></script>
 </body>
 </html>

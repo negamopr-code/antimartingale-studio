@@ -40,6 +40,10 @@ class OptionsReq(BacktestReq):
     iv_const: float = Field(0.20, gt=0, le=3)       # used when iv_source=constant
     skew_beta: float | None = Field(None, ge=-2, le=2)  # additive IV per unit ln-moneyness; None=asset-class default
     use_term_structure: bool = True   # interpolate real CBOE vol-index term structure to the option tenor
+    # option model: 'pyramid' = scale-into-one-position on the ATR grid (delta-normalised);
+    # 'coinflip' = long-call coin-flip (premium IS the bet, risk ≤ b, double-or-roll)
+    opt_model: str = Field("pyramid", pattern="^(pyramid|coinflip)$")
+    double_target: float = Field(2.0, gt=1, le=10)   # coinflip: value multiple that counts as a win
 
 
 class ScanReq(BaseModel):

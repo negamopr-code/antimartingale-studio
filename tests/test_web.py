@@ -71,6 +71,19 @@ def test_backtest_options_campaign(client):
     assert "delta_entry" in d["table"][0] and "strike" in d["table"][0]
 
 
+def test_backtest_options_coinflip(client):
+    # the long-call coin-flip model is selectable on the options backtest endpoint
+    r = client.post("/api/backtest/options", json={"ticker": "SPY", "atr_period": 5,
+                                                   "opt_model": "coinflip", "double_target": 2.0,
+                                                   "target_streak": 4, "base_bet": 100})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["stats"]["model"].startswith("long-call coin-flip")
+    assert len(d["table"]) > 0 and "pnl" in d["table"][0]
+    # risk-capped by construction: no cycle loses more than the base bet
+    assert all(row["pnl"] >= -100 - 1e-6 for row in d["table"])
+
+
 def test_backtest_modes(client):
     for mode in ("pyramid", "scalp"):
         r = client.post("/api/backtest/linear", json={"ticker": "SPY", "atr_period": 5,

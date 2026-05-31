@@ -760,7 +760,8 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
                       double_target: float = 2.0, target_delta: float = 0.5,
                       dte_days: int = 365, iv: float = 0.20, r: float = 0.045, qdiv: float = 0.0,
                       commission_pct: float = 0.0, slippage_pct: float = 0.0,
-                      starting_bank: float = 0.0, trace: list | None = None) -> BacktestResult:
+                      starting_bank: float = 0.0, realized_vol: "pd.Series | None" = None,
+                      trace: list | None = None) -> BacktestResult:
     """Long-call COIN-FLIP: the bet is the PREMIUM, so risk is capped at b by construction.
 
     A long call cannot lose more than its premium, so if each bet spends exactly the current
@@ -809,15 +810,17 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
         proceeds = 0.0
         last_sell_i = i
         while True:
-            K = float(opt.strike_for_delta(S, T0, r, iv, target_delta, qdiv))
-            prem_per = float(opt.call_price(S, K, T0, r, iv, qdiv))
+            # IV per round: real per-date volatility if provided (backtest), else the constant (demo)
+            iv_r = _sigma_at(realized_vol, entry_date, iv) if realized_vol is not None else iv
+            K = float(opt.strike_for_delta(S, T0, r, iv_r, target_delta, qdiv))
+            prem_per = float(opt.call_price(S, K, T0, r, iv_r, qdiv))
             if prem_per <= 1e-9:
                 outcome = "degenerate"
                 break
             contracts = stake / prem_per
-            d0 = float(opt.call_delta(S, K, T0, r, iv, qdiv))
+            d0 = float(opt.call_delta(S, K, T0, r, iv_r, qdiv))
             target_per = double_target * prem_per
-            S_star = float(opt.price_for_value(target_per, K, T0, r, iv, qdiv))
+            S_star = float(opt.price_for_value(target_per, K, T0, r, iv_r, qdiv))
             m_star = (S_star - S) / h
             expiry = entry_date + pd.Timedelta(days=dte_days)
             cycle_cost += fee * stake                       # buy fill
@@ -831,7 +834,7 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
                     j += 1
                     continue
                 T_rem = max((expiry - d).days / 365.0, 1e-6)
-                if float(opt.call_price(hi_s[j], K, T_rem, r, iv, qdiv)) >= target_per:
+                if float(opt.call_price(hi_s[j], K, T_rem, r, iv_r, qdiv)) >= target_per:
                     round_win, sell_S, sell_date = True, S_star, d
                     break
                 if d >= expiry:
@@ -842,7 +845,7 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
             # WIN books exactly the doubling value (the win condition IS "worth ≥ 2× premium",
             # so we conservatively realise 2× even if the bar overshot); LOSS books the real
             # expiry/salvage value. Either way proceeds ≥ 0 ⇒ cycle P&L ≥ −b.
-            val_per = target_per if round_win else float(opt.call_price(sell_S, K, T_rem, r, iv, qdiv))
+            val_per = target_per if round_win else float(opt.call_price(sell_S, K, T_rem, r, iv_r, qdiv))
             proceeds = contracts * val_per
             cycle_cost += fee * proceeds                    # sell fill
             last_sell_i = j if j < len(idx) else len(idx) - 1
@@ -850,7 +853,7 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
             if trace is not None:
                 trace.append({"t": "cf_round", "camp": n_cycles + 1, "round": streak + 1,
                               "date": entry_date.date().isoformat(), "entry": round(S, 4),
-                              "atr": round(h, 4), "strike": round(K, 4), "iv": round(iv, 4),
+                              "atr": round(h, 4), "strike": round(K, 4), "iv": round(iv_r, 4),
                               "delta": round(d0, 4), "prem_per": round(prem_per, 4),
                               "contracts": round(contracts, 2), "stake": round(stake, 2),
                               "double_at": round(S_star, 4), "m_atr": round(m_star, 3),
