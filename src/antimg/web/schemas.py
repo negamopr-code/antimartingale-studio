@@ -60,6 +60,15 @@ class ScanReq(BaseModel):
     starting_bank: float = Field(10_000.0)
     cap_mult: float | None = Field(None, gt=0)
     mode: str = Field("pyramid", pattern="^(pyramid|scalp)$")
+    # which strategy to sweep: 'shares' = linear ATR pyramid (default); 'coinflip' = long-call coin-flip
+    model: str = Field("shares", pattern="^(shares|coinflip)$")
+    # coin-flip params (used when model='coinflip')
+    target_delta: float = Field(0.5, gt=0, lt=1)
+    dte_days: int = Field(45, ge=7, le=3650)
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_markup: float = Field(1.25, ge=1, le=3)
+    double_target: float = Field(2.0, gt=1, le=10)
+    r: float = Field(0.045, ge=-0.05, le=0.5)
 
 
 class ExplainReq(BaseModel):

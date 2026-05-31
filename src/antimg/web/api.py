@@ -238,26 +238,37 @@ def _campaign_summary(res, starting_bank: float) -> dict:
 
 @app.post("/api/scan")
 def scan_all(req: ScanReq):
-    """One-click robustness sweep: run the linear (shares) campaign on every catalog
-    instrument with identical params and return a per-instrument bottom-line summary.
+    """One-click robustness sweep across the whole catalog with identical params.
 
-    Sequential by design — yfinance/Yahoo rate-limits a server IP (429), so we do NOT
-    fan out. Per-ticker failures are captured (ok=False) instead of aborting the sweep.
-    First run on a cold cache is slow (it fetches each ticker); subsequent runs are fast.
+    `model='shares'` runs the linear ATR pyramid; `model='coinflip'` runs the long-call
+    coin-flip (premium = bet, real per-date IV × markup). Per-instrument bottom-line summary.
+    Sequential by design — yfinance/Yahoo rate-limits a server IP (429), so we do NOT fan out.
+    Per-ticker failures are captured (ok=False) instead of aborting the sweep.
     """
     rows = []
     for ticker, label, group in instruments.flat_with_group():
         try:
             daily, weekly, watr = _load(ticker, req.start, req.atr_period)
-            res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
-                                     target_streak=req.target_streak, mult=req.mult,
-                                     instrument="shares", mode=req.mode,
-                                     commission_pct=req.commission_pct,
-                                     slippage_pct=req.slippage_pct,
-                                     starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+            if req.model == "coinflip":
+                realized = datamod.realized_vol(daily["Close"], req.iv_window)
+                res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
+                                              target_streak=req.target_streak, mult=req.mult,
+                                              double_target=req.double_target,
+                                              target_delta=req.target_delta, dte_days=req.dte_days,
+                                              iv=0.20, r=req.r, commission_pct=req.commission_pct,
+                                              slippage_pct=req.slippage_pct,
+                                              starting_bank=req.starting_bank,
+                                              realized_vol=realized, iv_markup=req.iv_markup)
+            else:
+                res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                                         target_streak=req.target_streak, mult=req.mult,
+                                         instrument="shares", mode=req.mode,
+                                         commission_pct=req.commission_pct,
+                                         slippage_pct=req.slippage_pct,
+                                         starting_bank=req.starting_bank, cap_mult=req.cap_mult)
             if not res.table:
                 rows.append({"ticker": ticker, "label": label, "group": group,
-                             "ok": False, "error": "no campaigns resolved"})
+                             "ok": False, "error": "no cycles resolved"})
                 continue
             rows.append({"ticker": ticker, "label": label, "group": group, "ok": True,
                          **_campaign_summary(res, req.starting_bank)})

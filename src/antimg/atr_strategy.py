@@ -827,24 +827,28 @@ def run_call_coinflip(daily: pd.DataFrame, weekly: pd.DataFrame, weekly_atr: pd.
             expiry = entry_date + pd.Timedelta(days=dte_days)
 
             round_win = False
-            sell_S = float(cl_s[-1]); sell_date = idx[-1]; T_rem = 1e-6
+            sell_S = float(cl_s[-1]); sell_date = idx[-1]
             j = cur
             while j < len(idx):
                 d = idx[j]
                 if d < entry_date:
                     j += 1
                     continue
-                T_rem = max((expiry - d).days / 365.0, 1e-6)
-                if float(opt.call_price(hi_s[j], K, T_rem, r, iv_r, qdiv)) >= target_per:
-                    round_win, sell_S, sell_date = True, S_star, d
-                    break
+                # value rises with price and (with less time) needs ≥ S_star to double, so the
+                # expensive BS call is skipped unless the high has reached the doubling level.
+                if hi_s[j] >= S_star:
+                    T_rem = max((expiry - d).days / 365.0, 1e-6)
+                    if float(opt.call_price(hi_s[j], K, T_rem, r, iv_r, qdiv)) >= target_per:
+                        round_win, sell_S, sell_date = True, S_star, d
+                        break
                 if d >= expiry:
-                    sell_S, sell_date, T_rem = float(cl_s[j]), d, 1e-6
+                    sell_S, sell_date = float(cl_s[j]), d
                     break
                 j += 1
 
-            # WIN books exactly the doubling value; LOSS books the real expiry/salvage value.
-            val_per = target_per if round_win else float(opt.call_price(sell_S, K, T_rem, r, iv_r, qdiv))
+            # WIN books exactly the doubling value; LOSS books the real value at the sell date.
+            t_sell = max((expiry - sell_date).days / 365.0, 1e-6)
+            val_per = target_per if round_win else float(opt.call_price(sell_S, K, t_sell, r, iv_r, qdiv))
             proceeds = contracts * val_per                  # gross from selling the calls
             net_proceeds = proceeds * (1.0 - fee)           # after sell-side spread/commission
             fee_paid += fee * proceeds

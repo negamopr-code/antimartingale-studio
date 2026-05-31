@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=23"/>
+  <link rel="stylesheet" href="/style.css?v=24"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -114,11 +114,13 @@
 
   <!-- TAB 5 -->
   <section id="scan" class="panel">
-    <p class="hint">One click runs the <b>linear (shares)</b> campaign on <b>every catalog instrument</b>
-      with identical params — to see whether the edge holds across a broad panel or rides on a few
-      outliers. Options aren't scanned (too heavy). <b>First run is slow</b> (it fetches each ticker;
-      Yahoo may rate-limit — failures are listed, not fatal). Re-runs are fast (cached).</p>
+    <p class="hint">One click runs the chosen strategy on <b>every catalog instrument</b> with identical
+      params — to see whether the edge holds across a broad panel or rides on a few outliers.
+      <b>shares</b> = linear ATR pyramid; <b>coin-flip</b> = long-call (premium=bet, real IV×markup).
+      <b>First run is slow</b> (fetches each ticker; coin-flip is heavier still). Failures are listed,
+      not fatal. Re-runs are fast (cached).</p>
     <form class="controls" id="form-scan">
+      <label title="shares = линейная ATR-пирамида; coinflip = лонг-колл коин-флип (ставка=премия, риск≤b)">Strategy <select name="model"><option value="shares">shares (ATR pyramid)</option><option value="coinflip">coin-flip (long calls)</option></select></label>
       <label>Start <input name="start" value="2005-01-01"></label>
       <label>ATR period <input name="atr_period" type="number" value="14"></label>
       <label>ATR mult <input name="mult" type="number" step="any" value="1.0"></label>
@@ -129,6 +131,10 @@
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0.01"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label>Cap mult <input name="cap_mult" type="number" step="any" placeholder="none"></label>
+      <label title="coin-flip only">Target Δ <input name="target_delta" type="number" step="any" value="0.5"></label>
+      <label title="coin-flip only">DTE дней <input name="dte_days" type="number" value="45"></label>
+      <label title="coin-flip only: IV = realized × markup">IV markup <input name="iv_markup" type="number" step="any" value="1.25"></label>
+      <label title="coin-flip only: премия растёт в ×N = победа">«Win» × <input name="double_target" type="number" step="any" value="2.0"></label>
       <button type="submit">Scan all instruments</button>
     </form>
     <div class="results"><div class="plots"><div id="scan-bar"></div></div>
@@ -170,6 +176,6 @@
     <div class="tradetable" id="expl-ledger"></div>
   </section>
 
-  <script src="/app.js?v=23"></script>
+  <script src="/app.js?v=24"></script>
 </body>
 </html>

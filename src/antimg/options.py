@@ -43,7 +43,7 @@ def price_for_value(target_value, K, T, r, sigma, q=0.0, S_lo=None, S_hi=None):
     """
     lo = S_lo if S_lo is not None else max(K * 1e-3, 1e-6)
     hi = S_hi if S_hi is not None else max(K * 10.0, target_value * 10.0 + K)
-    for _ in range(100):
+    for _ in range(64):
         mid = 0.5 * (lo + hi)
         if float(call_price(mid, K, T, r, sigma, q)) < target_value:
             lo = mid

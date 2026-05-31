@@ -181,6 +181,26 @@ def test_explain_trace_invariant_direct():
     assert [a["unreal"] for a in adds] == [100, 400, 1100, 2600]
 
 
+def test_scan_coinflip(client, monkeypatch):
+    # the scan can sweep the long-call coin-flip model too. Use a tiny catalog + short series
+    # (the synthetic monotone uptrend would otherwise spawn hundreds of winning cycles).
+    from antimg import data, instruments
+    monkeypatch.setattr(instruments, "CATALOG", {"t": [("AAA", "x"), ("BBB", "y")]})
+    dates = pd.bdate_range("2018-01-01", periods=90)
+    price = pd.Series(np.linspace(100, 140, len(dates)), index=dates)
+    df = pd.DataFrame({"Open": price, "High": price * 1.01, "Low": price * 0.995,
+                       "Close": price, "Volume": 0}, index=dates)
+    monkeypatch.setattr(data, "fetch", lambda *a, **k: df)
+    r = client.post("/api/scan", json={"model": "coinflip", "atr_period": 4, "target_streak": 2,
+                                       "dte_days": 30, "double_target": 2.0, "iv_markup": 1.25,
+                                       "base_bet": 100, "starting_bank": 10000})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["params"]["model"] == "coinflip"
+    ok = [x for x in d["results"] if x["ok"]]
+    assert ok and all("ret_pct" in x and "profit_factor" in x for x in ok)
+
+
 def test_webhook_and_from_signals(client):
     # bad secret rejected
     assert client.post("/api/webhook/tradingview",
