@@ -735,13 +735,20 @@ async function renderInspect(d) {
         { step: "month", count: 3, label: "3m", stepmode: "backward" },
         { step: "year", count: 1, label: "1y", stepmode: "backward" }, { step: "all", label: "all" }] } } }));
   const net = d.table.reduce((a, r) => a + (r.pnl || 0), 0);
-  const wins = d.table.filter((r) => r.outcome === "win").length;
+  const targetHits = d.table.filter((r) => r.outcome === "win").length;       // rode the FULL target streak
+  const profitable = d.table.filter((r) => (r.pnl || 0) > 0).length;          // P&L > 0 (incl. profitable stop-outs)
+  const losing = d.table.filter((r) => (r.pnl || 0) < 0).length;
+  const isCalls = d.instrument === "calls";
   const totRolls = d.trace.filter((e) => e.t === "opt_roll").length;
   const modelLbl = d.model === "coinflip" ? "coin-flip (коллы)"
-    : (d.instrument === "calls" ? "calls — пирамида с авто-роллом" : "shares (ATR-пирамида)");
+    : (isCalls ? "calls — пирамида с авто-роллом" : "shares (ATR-пирамида)");
   $("#insp-summary").textContent =
-    `${d.ticker} · ${modelLbl} · кампаний ${d.table.length} (вин ${wins})${totRolls ? ` · роллов ${totRolls} 🔁` : ""}\n`
+    `${d.ticker} · ${modelLbl} · кампаний ${d.table.length}${totRolls ? ` · роллов ${totRolls} 🔁` : ""}\n`
+    + `🎯 дошли до target-серии: ${targetHits}   ·   прибыльных: ${profitable}   ·   убыточных: ${losing}\n`
     + `итоговый банк ${f(d.final_bank)}   net P&L ${net >= 0 ? "+" : ""}${f(net)}\n`
+    + `(«дошли до target» ≠ «прибыльных»: ${isCalls ? "колл-кампания может выйти по стопу ВЫШЕ входа — прибыльный стоп-аут (выпуклость)" : "стоп-аут = −b"}; `
+    + `net = немного крупных выигрышей vs много мелких проигрышей — коин-флип скос.)\n`
+    + (isCalls ? `⚠ опционы оценены по realized-vol БЕЗ надбавки → P&L ОПТИМИСТИЧЕН (вкладка 5 → breakeven IV markup даёт честную картину).\n` : "")
     + `↓ клик по строке таблицы — пошаговый разбор входов и наращиваний этой кампании`;
   renderInspList(d);
   if (d.table.length) inspShowCamp(d.table[0].i);
