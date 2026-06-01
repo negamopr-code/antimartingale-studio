@@ -8,7 +8,11 @@ deep-ITM call really sits from the delta=1 linear assumption.
 from __future__ import annotations
 
 import numpy as np
-from scipy.stats import norm
+from scipy.special import ndtr  # standard-normal CDF; identical to scipy.stats.norm.cdf
+
+# scipy.stats.norm.cdf carries frozen-distribution overhead (~38 us/scalar call); ndtr is the
+# bare CDF (~0.1 us) and numerically identical. BS here runs inside 64-80-iteration bisection
+# loops called per-bar, so this swap is the dominant speedup (see options speed benchmark).
 
 
 def d1_d2(S, K, T, r, sigma, q=0.0):
@@ -23,15 +27,15 @@ def d1_d2(S, K, T, r, sigma, q=0.0):
 def call_delta(S, K, T, r, sigma, q=0.0):
     """Δ = e^{-qT} N(d1) for a European call. Deep ITM -> ~1."""
     d1, _ = d1_d2(S, K, T, r, sigma, q)
-    return np.exp(-q * np.asarray(T, dtype=float)) * norm.cdf(d1)
+    return np.exp(-q * np.asarray(T, dtype=float)) * ndtr(d1)
 
 
 def call_price(S, K, T, r, sigma, q=0.0):
     """European call price (per 1 unit underlying; multiply by contract multiplier)."""
     d1, d2 = d1_d2(S, K, T, r, sigma, q)
     T = np.maximum(np.asarray(T, dtype=float), 1e-9)
-    return (np.asarray(S, dtype=float) * np.exp(-q * T) * norm.cdf(d1)
-            - K * np.exp(-r * T) * norm.cdf(d2))
+    return (np.asarray(S, dtype=float) * np.exp(-q * T) * ndtr(d1)
+            - K * np.exp(-r * T) * ndtr(d2))
 
 
 def price_for_value(target_value, K, T, r, sigma, q=0.0, S_lo=None, S_hi=None):

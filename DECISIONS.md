@@ -136,3 +136,16 @@ Not implemented; documented as a rejected tactic.
   (verdict block vs chart trace) broke the whole page; renamed to winSum/lossSum.
   **Lesson: always check the real API payload keys before binding the UI to them, and
   `node --check` app.js after every edit.**
+
+## Black-Scholes speedup (2026-06-01)
+- **D29** — Swapped `scipy.stats.norm.cdf` → `scipy.special.ndtr` in `options.py` (`call_delta`,
+  `call_price`). `ndtr` IS the standard-normal CDF without the frozen-distribution object
+  overhead: `norm.cdf` ≈ 37.7 µs/scalar call vs `ndtr` ≈ 0.1 µs (**377×**). Because every BS
+  primitive runs inside 64–80-iteration bisection loops (`strike_for_delta`, `price_for_value`)
+  called per round/per bar, this is the dominant cost. **Numerically identical** — max |Δprice|
+  and |Δdelta| over a 500-point random grid = exactly 0.0; solver residuals at 1e-15.
+  Micro: `call_price` 84→5.7 µs (14.8×), `strike_for_delta` 3.7→0.37 ms (10×),
+  `price_for_value` 5.5→0.38 ms (14.5×). End-to-end coin-flip engine on synthetic trend
+  (54 cycles): **0.98s → 0.10s, 9.5×, identical final_bank** ⇒ the ~2-min 81-ticker coin-flip
+  scan should drop to ~12–15s. 51 tests green, no behaviour change. Motivates the next-step
+  p-sweep (which re-runs the engine many times — now affordable).
