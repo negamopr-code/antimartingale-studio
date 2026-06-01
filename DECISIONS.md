@@ -190,3 +190,22 @@ Not implemented; documented as a rejected tactic.
     alpha. Confirms the original verdict; the drift-check "not changing" was the control being broken.
   - assets ?v=28. 54 tests (+shuffle surrogate props + additive-identity check). Verdict text now
     splits the median headline into trend/drift/floor with interpretation.
+
+## Make option rolling visible + add rolling model to Tab 7 (2026-06-01)
+- **D32** — User: «I don't see option rolling in Tab 7; I only see the loss when it expires.» Correct on
+  both counts. (a) Tab 7 Inspect only offered shares + coinflip; the coinflip model has NO within-round
+  roll by design (hold to double-or-expiry) so a losing round books its loss only AT expiry — exactly
+  what they saw. (b) The auto-roll (re-strike to target-Δ within roll_buffer_days of expiry, keep
+  exposure, ride the trend) lives ONLY in the pyramid-calls model (`run_campaign instrument='calls'` →
+  `_calls_campaign_pnl`), which Inspect didn't expose; and even where it ran (Tab 3) the roll was never
+  emitted as a trace event — only counted in `row['rolls']`, hence invisible.
+  - Engine: `_calls_campaign_pnl` now emits a distinct **`opt_roll`** trace event (camp, n, date, spot,
+    old→new strike, old→new expiry, prem_close/open, contracts, roll_cost).
+  - API: `InspectReq.model` gains **`calls`** (pyramid + auto-roll, realized-vol IV) + `roll_buffer_days`;
+    `/api/inspect` runs it (instrument='calls') and returns roll_buffer_days.
+  - Frontend: Inspect Strategy dropdown gets «calls — pyramid + auto-roll 🔁» + a Roll-buffer input;
+    `_inspCampGrid` passes instrument through so calls campaigns render the options path; roll markers
+    (cyan diamonds, old→new strike labels) on both the window overview and the per-campaign chart; a
+    «🔁 АВТО-РОЛЛ» narration block + roll rows in the options ledger; roll count in the window summary.
+  - Verified real SPY 2020-22 DTE45: 8 opt_roll events = the 8 campaign rolls; rolled strikes re-struck
+    to spot, expiry +~6 weeks. assets ?v=29. 55 tests (+calls-inspect roll test, +calls case in inspect test).

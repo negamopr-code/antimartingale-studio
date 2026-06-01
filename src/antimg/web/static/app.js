@@ -412,6 +412,7 @@ async function renderExplain(d, ids = { chart: "expl-chart", stats: "expl-stats"
   const adds = d.trace.filter((t) => t.t === "add");
   const optAdds = d.trace.filter((t) => t.t === "opt_add");
   const optMarks = d.trace.filter((t) => t.t === "opt_mark");
+  const optRolls = d.trace.filter((t) => t.t === "opt_roll");
   const optExit = d.trace.find((t) => t.t === "opt_exit");
   const won = d.exit && d.exit.reason === "target";
 
@@ -451,13 +452,20 @@ async function renderExplain(d, ids = { chart: "expl-chart", stats: "expl-stats"
     margin: { t: 36, r: isCalls ? 64 : 64, b: 36, l: 56 },
     xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } },
   });
+  if (isCalls && optRolls.length) {     // auto-roll markers (re-strike near expiry) on the price axis
+    traces.push({ x: optRolls.map((rr) => rr.date), y: optRolls.map((rr) => rr.spot),
+                  mode: "markers+text", name: "🔁 ролл (ре-страйк)",
+                  text: optRolls.map((rr) => `ролл${rr.n}: ${f(rr.old_strike)}→${f(rr.new_strike)}`),
+                  textposition: "bottom center", textfont: { size: 9, color: "#39d0d8" },
+                  marker: { color: "#39d0d8", symbol: "diamond", size: 13, line: { color: "#0f1419", width: 1 } } });
+  }
   if (isCalls && optMarks.length) {     // overlay option-stack unrealised P&L on the right axis
     traces.push({ x: optMarks.map((m) => m.date), y: optMarks.map((m) => m.unreal), mode: "lines",
                   name: "нереализ. P&L опциона", yaxis: "y2",
                   line: { color: "#f0c000", width: 1.5 } });
     lay.yaxis2 = { overlaying: "y", side: "right", title: { text: "$ P&L опциона" },
                    gridcolor: "transparent", zeroline: false };
-  } else {                              // share rung labels (no 2nd axis to collide with)
+  } else if (!isCalls) {                              // share rung labels (no 2nd axis to collide with)
     lay.annotations = d.rungs.map((r) => ({
       xref: "paper", x: 1, y: r.level, yref: "y", xanchor: "left",
       text: r.k === 0 ? " вход R0" : ` +${r.k}·h`, showarrow: false,
@@ -512,6 +520,11 @@ async function renderExplain(d, ids = { chart: "expl-chart", stats: "expl-stats"
     for (const a of optAdds) {
       L.push(`  шаг ${a.step} @${f(a.level)}: Δ=${f(a.delta)}, премия ${f(a.premium_per)}/ед, +${f(a.contracts_added)} контр → ${f(a.contracts)} всего, премии в сумме $${f(a.premium_book)}, нереализ. $${f(a.unreal)}.`);
     }
+    if (optRolls.length) {
+      L.push(`\n🔁 АВТО-РОЛЛ (${optRolls.length}): за ${d.roll_buffer_days || 5} дн до экспирации позиция перекрывается в новый страйк (та же экспозиция, свежий DTE) — так короткий DTE едет по тренду, а не гибнет на экспирации.`);
+      for (const rr of optRolls)
+        L.push(`  ролл ${rr.n} (${rr.date}, цена ${f(rr.spot)}): страйк ${f(rr.old_strike)}→${f(rr.new_strike)}, экспирация ${rr.old_expiry}→${rr.new_expiry}; закрыли по ${f(rr.prem_close)}/ед, открыли по ${f(rr.prem_open)}/ед, ${f(rr.contracts)} контр., издержки ролла $${f(rr.roll_cost)}.`);
+    }
     if (optExit) {
       L.push(`\n${won ? "ЦЕЛЬ" : "СТОП/выход"}: закрытие по ${f(optExit.premium_per)}/ед × ${f(optExit.contracts)} = $${f(optExit.stack_value)}; премии вложено $${f(optExit.premium_book)}.`);
       L.push(`БРУТТО опциона = $${f(optExit.gross)}${won ? ` = ${f(optExit.gross / b)}×b` : ""}. ${won ? `Больше акций (${f(d.table[0] ? d.table[0].gross : 0)} было бы линейно) за счёт гаммы.` : "Выпуклость смягчает убыток vs −b у акций."}`);
@@ -532,8 +545,13 @@ async function renderExplain(d, ids = { chart: "expl-chart", stats: "expl-stats"
     cols = [["step", "шаг"], ["level", "цена"], ["delta", "Δ"], ["premium_per", "премия/ед"],
       ["contracts_added", "+контр"], ["contracts", "контр всего"], ["premium_book", "премия Σ$"],
       ["stack_value", "стоимость$"], ["unreal", "нереал.$"]];
-    rows = [...optAdds, optExit].filter(Boolean);
-    note = "опционный леджер · контрактов=(b/h)/Δ на каждом доливе · цена закрытия в строке выхода";
+    const rollRows = optRolls.map((rr) => ({ t: "opt_roll", date: rr.date, step: `🔁ролл${rr.n}`,
+      level: rr.spot, delta: "", premium_per: rr.prem_close, contracts_added: "",
+      contracts: rr.contracts, premium_book: rr.roll_cost,
+      stack_value: `${f(rr.old_strike)}→${f(rr.new_strike)}`, unreal: "" }));
+    rows = [...optAdds, ...rollRows, optExit].filter(Boolean)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    note = "опционный леджер · контрактов=(b/h)/Δ · 🔁ролл = ре-страйк страйка у экспирации (издержки в «премия Σ$») · цена закрытия в строке выхода";
   }
   const head = "<tr>" + cols.map(([, l]) => `<th>${l}</th>`).join("") + "</tr>";
   const body = rows.map((ev) => {
@@ -626,13 +644,15 @@ function _sliceWin(px, d0, d1, pad = 3) {
   hi = Math.min(px.x.length - 1, hi + pad);
   return { x: px.x.slice(lo, hi + 1), y: px.y.slice(lo, hi + 1) };
 }
-function _inspCampShares(d, camp) {
+function _inspCampGrid(d, camp) {
+  // shares OR pyramid-calls campaign — same grid; renderExplain branches on instrument.
   const ev = d.trace.filter((e) => e.camp === camp);
   const entry = ev.find((e) => e.t === "entry"), exit_ = ev.find((e) => e.t === "exit");
   const rungs = [];
   for (let k = 0; k <= d.target_streak; k++) rungs.push({ k, level: +(entry.price + k * entry.h).toFixed(4) });
-  return { model: "grid", instrument: "shares", b: d.b, scenario: `${d.ticker} · кампания ${camp}`,
-           price: _sliceWin(d.price, entry.date, exit_.date), trace: ev, rungs, entry, exit: exit_ };
+  return { model: "grid", instrument: d.instrument, b: d.b, scenario: `${d.ticker} · кампания ${camp}`,
+           roll_buffer_days: d.roll_buffer_days, price: _sliceWin(d.price, entry.date, exit_.date),
+           trace: ev, rungs, entry, exit: exit_ };
 }
 function _inspCampCF(d, camp) {
   const ev = d.trace.filter((e) => e.camp === camp);
@@ -645,7 +665,7 @@ function _inspCampCF(d, camp) {
 const INSP_IDS = { chart: "insp-chart", stats: "insp-stats", ledger: "insp-ledger" };
 function inspShowCamp(camp) {
   const d = _inspect; if (!d) return;
-  const payload = d.model === "coinflip" ? _inspCampCF(d, camp) : _inspCampShares(d, camp);
+  const payload = d.model === "coinflip" ? _inspCampCF(d, camp) : _inspCampGrid(d, camp);
   renderExplain(payload, INSP_IDS);
   $$("#insp-list tr[data-camp]").forEach((tr) =>
     tr.classList.toggle("sel", +tr.dataset.camp === camp));
@@ -688,6 +708,10 @@ async function renderInspect(d) {
                   marker: { color: "#f0c000", symbol: "star", size: 11, line: { color: "#0f1419", width: 1 } } });
     traces.push({ x: l.map((e) => e.date), y: l.map((e) => e.price), mode: "markers", name: "стоп",
                   marker: { color: "#f85149", symbol: "x", size: 8, opacity: 0.7 } });
+    const rl = d.trace.filter((e) => e.t === "opt_roll");      // option auto-rolls (calls model)
+    if (rl.length) traces.push({ x: rl.map((e) => e.date), y: rl.map((e) => e.spot), mode: "markers",
+                  name: `🔁 ролл (${rl.length})`,
+                  marker: { color: "#39d0d8", symbol: "diamond", size: 8, line: { color: "#0f1419", width: 1 } } });
   }
   await plot("insp-overview", traces, layout(`${d.ticker} (${d.instrument}) — обзор окна, ${d.table.length} кампаний`, {
     height: 400, xaxis: { gridcolor: "#2a3340", rangeselector: {
@@ -696,8 +720,11 @@ async function renderInspect(d) {
         { step: "year", count: 1, label: "1y", stepmode: "backward" }, { step: "all", label: "all" }] } } }));
   const net = d.table.reduce((a, r) => a + (r.pnl || 0), 0);
   const wins = d.table.filter((r) => r.outcome === "win").length;
+  const totRolls = d.trace.filter((e) => e.t === "opt_roll").length;
+  const modelLbl = d.model === "coinflip" ? "coin-flip (коллы)"
+    : (d.instrument === "calls" ? "calls — пирамида с авто-роллом" : "shares (ATR-пирамида)");
   $("#insp-summary").textContent =
-    `${d.ticker} · ${d.model === "coinflip" ? "coin-flip (коллы)" : "shares (ATR-пирамида)"} · кампаний ${d.table.length} (вин ${wins})\n`
+    `${d.ticker} · ${modelLbl} · кампаний ${d.table.length} (вин ${wins})${totRolls ? ` · роллов ${totRolls} 🔁` : ""}\n`
     + `итоговый банк ${f(d.final_bank)}   net P&L ${net >= 0 ? "+" : ""}${f(net)}\n`
     + `↓ клик по строке таблицы — пошаговый разбор входов и наращиваний этой кампании`;
   renderInspList(d);

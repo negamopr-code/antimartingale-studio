@@ -110,13 +110,16 @@ class InspectReq(BaseModel):
     slippage_pct: float = Field(0.0, ge=0, le=50)
     starting_bank: float = Field(10_000.0)
     cap_mult: float | None = Field(8.0, gt=0)
-    model: str = Field("shares", pattern="^(shares|coinflip)$")
-    # coin-flip params
+    # shares = linear ATR pyramid; coinflip = long-call premium=bet; calls = pyramid of
+    # delta-normalised long calls WITH auto-roll near expiry (the only model that rolls).
+    model: str = Field("shares", pattern="^(shares|coinflip|calls)$")
+    # coin-flip / calls params
     target_delta: float = Field(0.5, gt=0, lt=1)
     dte_days: int = Field(45, ge=7, le=3650)
     iv_window: int = Field(20, ge=2, le=500)
     iv_markup: float = Field(1.25, ge=1, le=3)
     double_target: float = Field(2.0, gt=1, le=10)
+    roll_buffer_days: int = Field(5, ge=1, le=120)   # calls: re-strike within this many days of expiry
     r: float = Field(0.045, ge=-0.05, le=0.5)
 
 

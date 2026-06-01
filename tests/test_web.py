@@ -264,17 +264,42 @@ def test_shuffle_surrogate_props():
 
 def test_inspect_window(client):
     # Inspect runs the real engine over a window and returns ALL campaigns' trace + table
-    for model, ev in (("shares", "entry"), ("coinflip", "cf_round")):
+    for model, ev in (("shares", "entry"), ("coinflip", "cf_round"), ("calls", "opt_add")):
         r = client.post("/api/inspect", json={"ticker": "SPY", "start": "2015-01-02",
                                               "model": model, "atr_period": 5, "target_streak": 4})
         assert r.status_code == 200, model
         d = r.json()
         assert d["model"] == ("coinflip" if model == "coinflip" else "grid")
+        assert d["instrument"] == ("calls" if model in ("coinflip", "calls") else "shares")
         assert len(d["table"]) > 0 and len(d["trace"]) > 0
         # trace covers multiple campaigns, keyed to table rows by camp == i
         camps = {e["camp"] for e in d["trace"]}
         assert {row["i"] for row in d["table"]} <= camps
         assert any(e["t"] == ev for e in d["trace"])
+
+
+def test_inspect_calls_emits_rolls(client):
+    # the pyramid-calls model must auto-roll near expiry on a long-held campaign, and the roll
+    # must now be a VISIBLE, well-formed trace event (the user couldn't see rolls before).
+    r = client.post("/api/inspect", json={"ticker": "SPY", "start": "2015-01-02", "model": "calls",
+                                          "atr_period": 5, "target_streak": 8, "dte_days": 20,
+                                          "roll_buffer_days": 5})
+    assert r.status_code == 200
+    d = r.json()
+    rolls = [e for e in d["trace"] if e["t"] == "opt_roll"]
+    assert rolls, "expected at least one opt_roll on a long-held short-DTE campaign"
+    rr = rolls[0]
+    for k in ("camp", "n", "date", "spot", "old_strike", "new_strike", "old_expiry",
+              "new_expiry", "contracts", "roll_cost"):
+        assert k in rr
+    assert rr["new_expiry"] > rr["old_expiry"]          # rolled to a later expiry
+    # the campaign row's rolls count matches the number of opt_roll events for that campaign
+    by_camp = {}
+    for e in rolls:
+        by_camp[e["camp"]] = by_camp.get(e["camp"], 0) + 1
+    for row in d["table"]:
+        if "rolls" in row:
+            assert row["rolls"] == by_camp.get(row["i"], 0)
 
 
 def test_webhook_and_from_signals(client):

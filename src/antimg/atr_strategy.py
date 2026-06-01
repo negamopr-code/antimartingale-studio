@@ -424,6 +424,8 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
     for d, row in seg.iterrows():
         sclose = float(row["Close"])
         if K is not None and (expiry - d).days <= roll_buffer:        # roll near expiry
+            old_K, old_exp, contracts_old = K, expiry, contracts
+            comm0, slip0 = comm, slip
             p = float(opt.call_price(sclose, K, trem(d), r, sig, qdiv))
             realized += contracts * p - book
             fill(contracts, p)                                        # close leg
@@ -435,6 +437,16 @@ def _calls_campaign_pnl(daily, entry_day, exit_date, exit_px, batches, per_pt, *
             book = contracts * p2
             fill(contracts, p2)                                       # open leg
             n_rolls += 1
+            if trace is not None:                                     # make the roll a VISIBLE event
+                trace.append({"t": "opt_roll", "camp": camp, "n": n_rolls,
+                              "date": d.date().isoformat(), "spot": round(sclose, 4),
+                              "old_strike": round(old_K, 4), "new_strike": round(K, 4),
+                              "old_expiry": old_exp.date().isoformat(),
+                              "new_expiry": expiry.date().isoformat(), "iv": round(sig, 4),
+                              "prem_close": round(p, 4), "prem_open": round(p2, 4),
+                              "contracts_before": round(contracts_old, 2),
+                              "contracts": round(contracts, 2),
+                              "roll_cost": round((comm - comm0) + (slip - slip0), 2)})
         while bi < len(batches) and batches[bi][1] <= d:              # ladder adds on this bar
             L, dt, lots = batches[bi]; step_i = bi; bi += 1
             if K is None:                                             # entry add sets up the option

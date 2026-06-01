@@ -543,6 +543,18 @@ def inspect(req: InspectReq):
                                       starting_bank=req.starting_bank, realized_vol=realized,
                                       iv_markup=req.iv_markup, trace=trace)
         model, instrument = "coinflip", "calls"
+    elif req.model == "calls":
+        # pyramid of delta-normalised long calls WITH auto-roll near expiry — the model whose
+        # roll mechanic is otherwise invisible. Uses realized vol as IV (no surface), like coinflip.
+        realized = datamod.realized_vol(daily["Close"], req.iv_window)
+        res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                                 target_streak=req.target_streak, mult=req.mult,
+                                 instrument="calls", mode=req.mode, realized_vol=realized, r=req.r,
+                                 dte_days=req.dte_days, target_delta=req.target_delta,
+                                 commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                                 starting_bank=req.starting_bank, cap_mult=req.cap_mult,
+                                 roll_buffer_days=req.roll_buffer_days, trace=trace)
+        model, instrument = "grid", "calls"
     else:
         res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
                                  target_streak=req.target_streak, mult=req.mult,
@@ -555,6 +567,7 @@ def inspect(req: InspectReq):
     return {
         "ticker": req.ticker, "model": model, "instrument": instrument, "b": req.base_bet,
         "target_streak": req.target_streak, "double_target": req.double_target,
+        "roll_buffer_days": req.roll_buffer_days,
         "final_bank": res.final_bank, "n_cycles": res.n_cycles,
         "price": ser.series_xy(daily["Close"], MP),
         "high": ser.series_xy(daily["High"], MP),
