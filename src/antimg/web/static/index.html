@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=30"/>
+  <link rel="stylesheet" href="/style.css?v=31"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -192,7 +192,7 @@
       леджер). <b>shares</b> = ATR-пирамида, <b>coin-flip</b> = лонг-колл.</p>
     <form class="controls" id="form-inspect">
       <label>Instrument <select name="ticker" class="instr"></select></label>
-      <label>Strategy <select name="model"><option value="shares">shares (ATR pyramid)</option><option value="coinflip">coin-flip (long calls)</option><option value="calls">calls — pyramid + auto-roll 🔁</option></select></label>
+      <label title="ТОЛЬКО «calls — auto-roll 🔁» роллит. coin-flip держит до удвоения-или-экспирации (НЕ роллит).">Strategy <select name="model"><option value="shares">shares (ATR pyramid — без опционов)</option><option value="coinflip">coin-flip (премия=ставка, БЕЗ ролла)</option><option value="calls">⭐ calls — pyramid + auto-roll 🔁 (роллит!)</option></select></label>
       <label>Start <input name="start" value="2020-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
       <label>ATR period <input name="atr_period" type="number" value="14"></label>
@@ -218,6 +218,6 @@
     <div class="tradetable" id="insp-ledger"></div>
   </section>
 
-  <script src="/app.js?v=30"></script>
+  <script src="/app.js?v=31"></script>
 </body>
 </html>
