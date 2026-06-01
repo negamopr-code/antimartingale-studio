@@ -231,12 +231,35 @@ def test_scan_stress_fields(client, monkeypatch):
     monkeypatch.setattr(data, "fetch", lambda *a, **k: df)
     r = client.post("/api/scan", json={"model": "coinflip", "atr_period": 4, "target_streak": 2,
                                        "dte_days": 30, "iv_markup": 1.25, "base_bet": 100,
-                                       "starting_bank": 10000, "stress": True})
+                                       "starting_bank": 10000, "stress": True, "shuffle_n": 3})
     assert r.status_code == 200
     d = r.json()
     ok = [x for x in d["results"] if x["ok"]]
-    assert ok and all("control_ret_pct" in x and "be_markup" in x and "be_markup_flag" in x for x in ok)
-    assert "control_median_ret_pct" in d["summary"] and "be_markup_median" in d["summary"]
+    # 3-way decomposition fields + breakeven markup per row; aggregate medians in summary
+    assert ok and all(k in x for x in ok for k in
+                      ("trend_ret_pct", "drift_ret_pct", "floor_ret_pct", "be_markup", "detrend_ret_pct"))
+    for x in ok:                                          # additive identity: net ≈ trend+drift+floor
+        recon = x["trend_ret_pct"] + x["drift_ret_pct"] + x["floor_ret_pct"]
+        assert abs(recon - x["ret_pct"]) < 0.5
+    assert "trend_median_ret_pct" in d["summary"] and "floor_median_ret_pct" in d["summary"]
+    assert "be_markup_median" in d["summary"]
+
+
+def test_shuffle_surrogate_props():
+    # the IID surrogate must preserve length/start price and (zero-drift mode) strip the drift,
+    # while the sorted return distribution is preserved (only the ORDER changes).
+    from antimg.web.api import _shuffle_surrogate
+    dates = pd.bdate_range("2015-01-01", periods=400)
+    price = pd.Series(100 * np.exp(np.linspace(0, 0.9, len(dates))), index=dates)  # uptrend
+    df = pd.DataFrame({"Open": price, "High": price * 1.01, "Low": price * 0.99,
+                       "Close": price, "Volume": 1.0}, index=dates)
+    z = _shuffle_surrogate(df, 0, keep_drift=False)
+    assert len(z) == len(df) and abs(z["Close"].iloc[0] - df["Close"].iloc[0]) < 1e-6
+    assert abs(np.diff(np.log(z["Close"].to_numpy(float))).mean()) < 1e-9       # drift stripped
+    k = _shuffle_surrogate(df, 0, keep_drift=True)
+    g_real = np.sort(np.diff(np.log(df["Close"].to_numpy(float))))
+    g_keep = np.sort(np.diff(np.log(k["Close"].to_numpy(float))))
+    assert np.allclose(g_real, g_keep)                  # same return distribution, only reordered
 
 
 def test_inspect_window(client):

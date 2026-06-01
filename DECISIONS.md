@@ -169,3 +169,24 @@ Not implemented; documented as a rejected tactic.
     the user's ~67%/+28% scan ONLY when +10%/yr drift was injected; at markup 1.25 a fair coin LOSES
     (−33% median). The broad positivity was drift + fill/IV optimism, not a structural edge. These
     controls surface that in the tool itself.
+
+## Scan control fix: drift/trend/floor decomposition via IID shuffle (2026-06-01)
+- **D31** — The drift-strip control (D30) was shown to be a BAD test: it removes only the mean
+  log-return, leaving the path order (so trends survive) AND over-correcting trending series into a
+  back-half reversal (SPY detrend −16k < shuffle +9k — nonsensical). Replaced it with an IID SHUFFLE
+  surrogate (`_shuffle_surrogate`: permute per-day bar shapes — logret + hi/lo/open wicks in lockstep
+  — destroying serial structure, keeping the exact bar distribution; `keep_drift` toggles zeroing the
+  mean). `stress=True` now runs `shuffle_n` (default 8) shuffles in two modes and reports an ADDITIVE
+  3-way split per instrument that telescopes to base net:
+    floor = E[net | IID, zero drift]            (noise/fill-artifact; doctrine says ≈0)
+    drift = E[net | IID, real drift] − floor     (1st-moment directional component)
+    trend = base − E[net | IID, real drift]      (serial structure: momentum/trend persistence)
+  Naive detrend kept as a labelled reference (over-corrects — don't trust it). Aggregate medians +
+  floor-profitable% + be_markup_median in summary. gunicorn timeout 600→900.
+  - **Result on real SPY/QQQ/GLD (12 shuffles):** profit is DRIFT-dominated (SPY drift +38k of +70k;
+    QQQ +52k of +46k; GLD +70k of +13.5k). Trend/momentum is INCONSISTENT (SPY +20k but QQQ −16k,
+    GLD −56k — time-ordering HURTS gold/nasdaq). Floor ≈ 0 within ~1 sd everywhere (GLD +205). ⇒ the
+    structure manufactures no edge; the scan's headline is a levered directional long, not structural
+    alpha. Confirms the original verdict; the drift-check "not changing" was the control being broken.
+  - assets ?v=28. 54 tests (+shuffle surrogate props + additive-identity check). Verdict text now
+    splits the median headline into trend/drift/floor with interpretation.

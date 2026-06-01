@@ -297,12 +297,14 @@ function renderScanTable() {
     const av = a[_scan.sort] ?? -Infinity, bv = b[_scan.sort] ?? -Infinity;
     return (av - bv) * dir;
   });
-  const stressed = rows.some((r) => r.ok && r.control_ret_pct != null);
+  const stressed = rows.some((r) => r.ok && r.floor_ret_pct != null);
+  const coinflip = rows.some((r) => r.ok && r.be_markup != null);
   const cols = [
     ["ticker", "ticker"], ["group", "group"], ["n_campaigns", "camps"],
     ["wins", "W"], ["losses", "L"], ["net", "net $"], ["ret_pct", "return %"],
     ["profit_factor", "PF"], ["max_drawdown", "max DD"],
-    ...(stressed ? [["control_ret_pct", "ctrl % (no drift)"], ["be_markup", "be IVx"]] : []),
+    ...(stressed ? [["trend_ret_pct", "trend %"], ["drift_ret_pct", "drift %"], ["floor_ret_pct", "floor %"]] : []),
+    ...(stressed && coinflip ? [["be_markup", "be IVx"]] : []),
   ];
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const head = "<tr>" + cols.map(([k, lbl]) =>
@@ -313,11 +315,15 @@ function renderScanTable() {
     const cls = r.net > 0 ? "w" : "l";
     const beTxt = r.be_markup == null ? "—"
       : (r.be_markup_flag === "lo" ? `<${f(r.be_markup)}` : r.be_markup_flag === "hi" ? `>${f(r.be_markup)}` : f(r.be_markup));
+    const sgn = (v) => (v > 0 ? "#3fb950" : "#f85149");
     return `<tr class="${cls}"><td>${r.ticker}</td><td>${r.group}</td>`
       + `<td>${r.n_campaigns}</td><td>${r.wins}</td><td>${r.losses}</td>`
       + `<td>${f(r.net)}</td><td>${f(r.ret_pct)}</td><td>${r.profit_factor == null ? "∞" : f(r.profit_factor)}</td>`
       + `<td>${f(r.max_drawdown)}</td>`
-      + (stressed ? `<td style="color:${r.control_net > 0 ? "#3fb950" : "#f85149"}">${f(r.control_ret_pct)}</td><td>${beTxt}</td>` : "")
+      + (stressed ? `<td style="color:${sgn(r.trend_ret_pct)}">${f(r.trend_ret_pct)}</td>`
+        + `<td style="color:${sgn(r.drift_ret_pct)}">${f(r.drift_ret_pct)}</td>`
+        + `<td style="color:${sgn(r.floor_ret_pct)}">${f(r.floor_ret_pct)}</td>` : "")
+      + (stressed && coinflip ? `<td>${beTxt}</td>` : "")
       + `</tr>`;
   }).join("");
   el.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
@@ -349,16 +355,24 @@ async function renderScan(d) {
     verdict += `\n(⚠ mean ≫ median ⇒ a few outliers carry the result — depends on rare large wins.)`;
   if (s.median_ret_pct <= 0)
     verdict += `\n(⚠ median ≤ 0 ⇒ most instruments lose; any headline profit is a few outliers.)`;
-  // drift-stripped control + breakeven markup (stress mode) — the honest read
-  if (s.control_median_ret_pct != null) {
-    verdict += `\n\n── DRIFT-STRIPPED CONTROL (detrended, zero net drift = fair coin) ──\n`
-      + `control median : ${f(s.control_median_ret_pct)}%   ·   control profitable : ${f(s.control_profitable_pct)}%\n`;
-    const driftGap = s.median_ret_pct - s.control_median_ret_pct;
-    if (s.control_median_ret_pct <= 0)
-      verdict += `→ with NO drift the strategy LOSES (median ${f(s.control_median_ret_pct)}%). `
-        + `The ${f(s.median_ret_pct)}% headline is ~${f(driftGap)}pp of pure directional drift, NOT a structural edge.\n`;
-    else
-      verdict += `→ still profitable with no drift (median ${f(s.control_median_ret_pct)}%) — a genuine structural component.\n`;
+  // drift / trend / floor decomposition (stress mode) — the honest read via IID shuffle surrogates
+  if (s.floor_median_ret_pct != null) {
+    const T = s.trend_median_ret_pct, D = s.drift_median_ret_pct, F = s.floor_median_ret_pct;
+    verdict += `\n\n── WHERE THE RETURN COMES FROM (median across instruments, ${s.shuffle_n} IID shuffles) ──\n`
+      + `  trend / momentum (serial structure) : ${f(T)}%\n`
+      + `  directional drift (1st moment)      : ${f(D)}%\n`
+      + `  noise / fill-artifact floor (shuffle): ${f(F)}%   (survives even with NO time-order ⇒ not edge)\n`
+      + `  floor profitable across shuffles    : ${f(s.floor_profitable_pct)}%\n`;
+    // doctrine: on a driftless IID series the structure is EV≈0, so the floor SHOULD be ~0.
+    if (F > 0.2 * Math.max(s.median_ret_pct, 1))
+      verdict += `⚠ a large floor means the engine books optimistic stop/rung fills — that part is artifact, not skill.\n`;
+    verdict += `→ ${(T > Math.abs(D) && T > F)
+      ? "most of the result is TREND/MOMENTUM harvesting — real but regime-dependent, crowded, in-sample-on-survivors; NOT from the antimartingale structure."
+      : (Math.abs(D) >= T ? "most of the result is plain DIRECTIONAL DRIFT (long a 20-year bull) — strip it and little remains."
+        : "the result is dominated by the shuffle floor — i.e. a backtest fill artifact, not a real edge.")}\n`;
+    if (s.detrend_median_ret_pct != null)
+      verdict += `(naive drift-strip control = ${f(s.detrend_median_ret_pct)}% — kept for reference; it OVER-corrects on `
+        + `trending series by forcing a back-half reversal, so trust the shuffle split above, not this number.)\n`;
   }
   if (s.be_markup_median != null)
     verdict += `breakeven IV markup (median) : ${f(s.be_markup_median)}× realized vol`

@@ -263,6 +263,52 @@ def _detrend(daily: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _shuffle_surrogate(daily: pd.DataFrame, seed: int, keep_drift: bool) -> pd.DataFrame:
+    """IID surrogate: randomly permute the per-day bar shapes (logret + intraday hi/lo/open
+    ratios in lockstep), destroying ALL serial structure (trends/momentum/vol-clustering) while
+    keeping the exact marginal bar distribution. `keep_drift=False` also zeroes the mean log-return.
+
+    This is the control the drift-strip should have been: a stop-and-pyramid on a driftless series
+    with INDEPENDENT increments is EV≈0 by the martingale-free identity, so any profit that survives
+    the shuffle is a fill/barrier artifact, not edge. Comparing base vs shuffle-with-drift vs
+    shuffle-zero-drift cleanly splits net into trend / drift / floor without the detrend reversal artifact.
+    """
+    import numpy as np
+    c = daily["Close"].to_numpy(float); o = daily["Open"].to_numpy(float)
+    h = daily["High"].to_numpy(float); l = daily["Low"].to_numpy(float)
+    if len(c) < 4:
+        return daily
+    g = np.diff(np.log(c))                                   # day-to-day log-return (len n-1)
+    u = np.log(np.maximum(h[1:], c[1:]) / c[1:])             # intraday up-wick of each day
+    dn = np.log(np.minimum(l[1:], c[1:]) / c[1:])            # intraday down-wick
+    op = np.log(o[1:] / c[1:])                               # open vs close
+    perm = np.random.default_rng(seed).permutation(len(g))
+    gp = g[perm] - (0.0 if keep_drift else g.mean())
+    nc = np.empty(len(c)); nc[0] = c[0]; nc[1:] = c[0] * np.exp(np.cumsum(gp))
+    nh = nc.copy(); nl = nc.copy(); no = nc.copy()
+    nh[1:] = nc[1:] * np.exp(u[perm]); nl[1:] = nc[1:] * np.exp(dn[perm]); no[1:] = nc[1:] * np.exp(op[perm])
+    return pd.DataFrame({"Open": no, "High": np.maximum(nh, nc), "Low": np.minimum(nl, nc),
+                         "Close": nc, "Volume": daily["Volume"].to_numpy()}, index=daily.index)
+
+
+def _shuffle_net_stats(req: ScanReq, daily, seed0: int, keep_drift: bool, k: int):
+    """Mean & sd of the strategy's net P&L over `k` IID shuffles. Returns (mean, sd) or (None,None)."""
+    import numpy as np
+    nets = []
+    for s in range(k):
+        try:
+            sur = _shuffle_surrogate(daily, seed0 + s, keep_drift)
+            w = datamod.weekly(sur); a = datamod.atr(w, req.atr_period)
+            r = _scan_run(req, sur, w, a)
+            nets.append(r.final_bank - req.starting_bank)
+        except Exception:
+            continue
+    if not nets:
+        return None, None
+    arr = np.array(nets, dtype=float)
+    return float(arr.mean()), float(arr.std())
+
+
 def _coinflip_net(daily, weekly, watr, req, iv_markup: float) -> float:
     """Net P&L of the coin-flip on (daily,weekly,watr) at a given IV markup. Used for the
     breakeven-markup search; net is monotonically DECREASING in markup (pricier calls)."""
@@ -338,15 +384,25 @@ def scan_all(req: ScanReq):
                 continue
             row = {"ticker": ticker, "label": label, "group": group, "ok": True,
                    **_campaign_summary(res, req.starting_bank)}
-            if req.stress:                                   # drift-stripped control + breakeven markup
+            if req.stress:                                   # drift / trend / floor decomposition
                 try:
-                    dd = _detrend(daily)
-                    dw = datamod.weekly(dd)
-                    dwatr = datamod.atr(dw, req.atr_period)
-                    cres = _scan_run(req, dd, dw, dwatr)
-                    cnet = cres.final_bank - req.starting_bank
-                    row["control_net"] = round(cnet, 2)
-                    row["control_ret_pct"] = round(100.0 * cnet / max(1e-9, req.starting_bank), 4)
+                    bank = max(1e-9, req.starting_bank)
+                    base_net = row["net"]
+                    floor_m, floor_sd = _shuffle_net_stats(req, daily, 1000, False, req.shuffle_n)
+                    driftk_m, _ = _shuffle_net_stats(req, daily, 5000, True, req.shuffle_n)
+                    if floor_m is not None and driftk_m is not None:
+                        # additive split: base = floor + drift + trend (telescopes exactly)
+                        drift_part = driftk_m - floor_m          # IID-drift minus IID-zero-drift
+                        trend_part = base_net - driftk_m         # real ordering on top of IID-drift
+                        row["floor_ret_pct"] = round(100.0 * floor_m / bank, 2)
+                        row["floor_sd_ret_pct"] = round(100.0 * floor_sd / bank, 2)
+                        row["drift_ret_pct"] = round(100.0 * drift_part / bank, 2)
+                        row["trend_ret_pct"] = round(100.0 * trend_part / bank, 2)
+                        row["floor_net"] = round(floor_m, 2)
+                    # naive detrend kept as a labelled REFERENCE (over-corrects on trends — see note)
+                    dd = _detrend(daily); dw = datamod.weekly(dd); dwatr = datamod.atr(dw, req.atr_period)
+                    row["detrend_ret_pct"] = round(
+                        100.0 * (_scan_run(req, dd, dw, dwatr).final_bank - req.starting_bank) / bank, 2)
                     if req.model == "coinflip":
                         be, flag = _breakeven_markup(daily, weekly, watr, req)
                         row["be_markup"] = be
@@ -374,14 +430,19 @@ def scan_all(req: ScanReq):
         "best": max(ok, key=lambda r: r["ret_pct"], default=None),
         "worst": min(ok, key=lambda r: r["ret_pct"], default=None),
     }
-    if req.stress:                                           # aggregate the drift-stripped control
-        ctrl = [r for r in ok if "control_ret_pct" in r]
-        crets = sorted(r["control_ret_pct"] for r in ctrl)
-        if crets:
-            summary["control_median_ret_pct"] = round(crets[len(crets) // 2], 2)
-            summary["control_mean_ret_pct"] = round(sum(crets) / len(crets), 2)
-            summary["control_profitable_pct"] = round(
-                100.0 * sum(1 for r in ctrl if r["control_net"] > 0) / len(ctrl), 1)
+    if req.stress:                                           # aggregate the drift/trend/floor split
+        def _med(key):
+            vals = sorted(r[key] for r in ok if r.get(key) is not None)
+            return round(vals[len(vals) // 2], 2) if vals else None
+        dec = [r for r in ok if "floor_ret_pct" in r]
+        if dec:
+            summary["floor_median_ret_pct"] = _med("floor_ret_pct")
+            summary["drift_median_ret_pct"] = _med("drift_ret_pct")
+            summary["trend_median_ret_pct"] = _med("trend_ret_pct")
+            summary["floor_profitable_pct"] = round(
+                100.0 * sum(1 for r in dec if r["floor_net"] > 0) / len(dec), 1)
+            summary["shuffle_n"] = req.shuffle_n
+        summary["detrend_median_ret_pct"] = _med("detrend_ret_pct")
         bes = sorted(r["be_markup"] for r in ok if r.get("be_markup") is not None)
         if bes:
             summary["be_markup_median"] = bes[len(bes) // 2]

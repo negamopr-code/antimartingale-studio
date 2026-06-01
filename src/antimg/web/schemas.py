@@ -72,10 +72,13 @@ class ScanReq(BaseModel):
     iv_markup: float = Field(1.25, ge=1, le=3)
     double_target: float = Field(2.0, gt=1, le=10)
     r: float = Field(0.045, ge=-0.05, le=0.5)
-    # stress test: also run a DRIFT-STRIPPED control (detrended prices, net drift = 0) and,
-    # for coinflip, the breakeven IV markup per instrument. Exposes how much of the "edge" is
-    # just directional drift vs the strategy structure. ~3-8x slower → opt-in.
+    # stress test: decompose each instrument's net into drift / trend / noise-floor via IID
+    # shuffle surrogates (destroy time-order, keep the bar distribution), plus the naive detrend
+    # (reference) and, for coinflip, the breakeven IV markup. Exposes how much of the "edge" is
+    # directional drift, how much is trend/momentum (serial structure), and how much is just a
+    # fill/artifact floor that survives even on shuffled data. ~10-30x slower → opt-in.
     stress: bool = Field(False)
+    shuffle_n: int = Field(8, ge=2, le=40)   # IID shuffle seeds per instrument (noisy → more = steadier)
 
 
 class ExplainReq(BaseModel):

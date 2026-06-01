@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=27"/>
+  <link rel="stylesheet" href="/style.css?v=28"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -136,7 +136,8 @@
       <label title="coin-flip only">DTE дней <input name="dte_days" type="number" value="45"></label>
       <label title="coin-flip only: IV = realized × markup">IV markup <input name="iv_markup" type="number" step="any" value="1.25"></label>
       <label title="coin-flip only: премия растёт в ×N = победа">«Win» × <input name="double_target" type="number" step="any" value="2.0"></label>
-      <label title="STRESS TEST (медленнее ~3–8×): прогнать ту же стратегию на ДЕТРЕНДОВАННЫХ ценах (нулевой дрейф = честная монета) + breakeven IV markup. Показывает, сколько «эджа» — это просто направленный дрейф 20-летнего бычьего рынка, а не структура.">Stress (drift-strip + be-IV) <input name="stress" type="checkbox" value="1"></label>
+      <label title="STRESS TEST (медленнее ~10–30×): разложить net каждого инструмента на TREND/MOMENTUM, DRIFT и NOISE-FLOOR через IID-перемешивание (рушит порядок дней, сохраняет распределение баров). Floor = что выживает даже без структуры времени = филл-артефакт, не эдж. Для coinflip ещё breakeven IV markup.">Stress (decompose) <input name="stress" type="checkbox" value="1"></label>
+      <label title="сколько IID-перемешиваний на инструмент (floor очень шумный → больше = стабильнее, но медленнее)">Shuffles <input name="shuffle_n" type="number" value="8" min="2" max="40"></label>
       <button type="submit">Scan all instruments</button>
     </form>
     <div class="results"><div class="plots"><div id="scan-bar"></div></div>
@@ -211,6 +212,6 @@
     <div class="tradetable" id="insp-ledger"></div>
   </section>
 
-  <script src="/app.js?v=27"></script>
+  <script src="/app.js?v=28"></script>
 </body>
 </html>
