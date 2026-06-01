@@ -72,6 +72,10 @@ class ScanReq(BaseModel):
     iv_markup: float = Field(1.25, ge=1, le=3)
     double_target: float = Field(2.0, gt=1, le=10)
     r: float = Field(0.045, ge=-0.05, le=0.5)
+    # stress test: also run a DRIFT-STRIPPED control (detrended prices, net drift = 0) and,
+    # for coinflip, the breakeven IV markup per instrument. Exposes how much of the "edge" is
+    # just directional drift vs the strategy structure. ~3-8x slower → opt-in.
+    stress: bool = Field(False)
 
 
 class ExplainReq(BaseModel):

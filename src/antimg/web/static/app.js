@@ -297,22 +297,28 @@ function renderScanTable() {
     const av = a[_scan.sort] ?? -Infinity, bv = b[_scan.sort] ?? -Infinity;
     return (av - bv) * dir;
   });
+  const stressed = rows.some((r) => r.ok && r.control_ret_pct != null);
   const cols = [
     ["ticker", "ticker"], ["group", "group"], ["n_campaigns", "camps"],
     ["wins", "W"], ["losses", "L"], ["net", "net $"], ["ret_pct", "return %"],
     ["profit_factor", "PF"], ["max_drawdown", "max DD"],
+    ...(stressed ? [["control_ret_pct", "ctrl % (no drift)"], ["be_markup", "be IVx"]] : []),
   ];
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const head = "<tr>" + cols.map(([k, lbl]) =>
     `<th data-sort="${k}" style="cursor:pointer">${lbl}${_scan.sort === k ? (_scan.desc ? " ▼" : " ▲") : ""}</th>`).join("") + "</tr>";
   const body = rows.map((r) => {
     if (!r.ok) return `<tr class="l"><td>${r.ticker}</td><td>${r.group}</td>`
-      + `<td colspan="7" style="color:#8b949e">⚠ ${r.error}</td></tr>`;
+      + `<td colspan="${cols.length - 2}" style="color:#8b949e">⚠ ${r.error}</td></tr>`;
     const cls = r.net > 0 ? "w" : "l";
+    const beTxt = r.be_markup == null ? "—"
+      : (r.be_markup_flag === "lo" ? `<${f(r.be_markup)}` : r.be_markup_flag === "hi" ? `>${f(r.be_markup)}` : f(r.be_markup));
     return `<tr class="${cls}"><td>${r.ticker}</td><td>${r.group}</td>`
       + `<td>${r.n_campaigns}</td><td>${r.wins}</td><td>${r.losses}</td>`
       + `<td>${f(r.net)}</td><td>${f(r.ret_pct)}</td><td>${r.profit_factor == null ? "∞" : f(r.profit_factor)}</td>`
-      + `<td>${f(r.max_drawdown)}</td></tr>`;
+      + `<td>${f(r.max_drawdown)}</td>`
+      + (stressed ? `<td style="color:${r.control_net > 0 ? "#3fb950" : "#f85149"}">${f(r.control_ret_pct)}</td><td>${beTxt}</td>` : "")
+      + `</tr>`;
   }).join("");
   el.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
     + `<div class="tt-note">${rows.length} instruments · click a header to sort</div>`;
@@ -327,15 +333,37 @@ async function renderScan(d) {
   _scan.rows = d.results; _scan.sort = "ret_pct"; _scan.desc = true;
   const s = d.summary;
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
-  const verdict =
-    `${s.profitable_pct >= 50 ? "✅ BROADLY ROBUST" : "⚠ NARROW / FRAGILE"}   `
+  // ROBUST requires BOTH most instruments profitable AND a healthy (positive) median — a >50%
+  // hit-rate with a near-zero/negative median is outlier-carried, not robust.
+  const robust = s.profitable_pct >= 50 && s.median_ret_pct > 0;
+  const outlierCarried = s.mean_ret_pct > 2 * Math.max(s.median_ret_pct, 0) + 5;  // mean ≫ median
+  let verdict =
+    `${robust ? "✅ BROADLY PROFITABLE (in-sample)" : "⚠ NARROW / FRAGILE"}   `
     + `${s.profitable}/${s.ok} instruments profitable (${f(s.profitable_pct)}%)\n`
     + `median return : ${f(s.median_ret_pct)}%   ·   mean return : ${f(s.mean_ret_pct)}%\n`
     + (s.best ? `best  : ${s.best.ticker}  ${f(s.best.ret_pct)}%  (net ${f(s.best.net)})\n` : "")
     + (s.worst ? `worst : ${s.worst.ticker}  ${f(s.worst.ret_pct)}%  (net ${f(s.worst.net)})\n` : "")
-    + (s.failed ? `failed to fetch : ${s.failed}\n` : "")
-    + `\n(mean ≫ median ⇒ a few outliers carry the result — the strategy is NOT broadly sound,\n`
-    + ` it depends on rare large wins. Median near/below 0 confirms most instruments lose.)`;
+    + (s.failed ? `failed to fetch : ${s.failed}\n` : "");
+  // conditional caveat — only when mean actually dwarfs the median (the old text was unconditional)
+  if (outlierCarried)
+    verdict += `\n(⚠ mean ≫ median ⇒ a few outliers carry the result — depends on rare large wins.)`;
+  if (s.median_ret_pct <= 0)
+    verdict += `\n(⚠ median ≤ 0 ⇒ most instruments lose; any headline profit is a few outliers.)`;
+  // drift-stripped control + breakeven markup (stress mode) — the honest read
+  if (s.control_median_ret_pct != null) {
+    verdict += `\n\n── DRIFT-STRIPPED CONTROL (detrended, zero net drift = fair coin) ──\n`
+      + `control median : ${f(s.control_median_ret_pct)}%   ·   control profitable : ${f(s.control_profitable_pct)}%\n`;
+    const driftGap = s.median_ret_pct - s.control_median_ret_pct;
+    if (s.control_median_ret_pct <= 0)
+      verdict += `→ with NO drift the strategy LOSES (median ${f(s.control_median_ret_pct)}%). `
+        + `The ${f(s.median_ret_pct)}% headline is ~${f(driftGap)}pp of pure directional drift, NOT a structural edge.\n`;
+    else
+      verdict += `→ still profitable with no drift (median ${f(s.control_median_ret_pct)}%) — a genuine structural component.\n`;
+  }
+  if (s.be_markup_median != null)
+    verdict += `breakeven IV markup (median) : ${f(s.be_markup_median)}× realized vol`
+      + ` — options must be priced BELOW this to profit. Real listed options ≈ 1.1–1.6× ⇒ `
+      + `${s.be_markup_median >= 1.3 ? "plausibly tradable" : "likely −EV after real option costs"}.\n`;
   $("#scan-stats").textContent = verdict;
 
   // horizontal bar of return % per instrument, sorted; green=profit, red=loss.

@@ -149,3 +149,23 @@ Not implemented; documented as a rejected tactic.
   (54 cycles): **0.98s → 0.10s, 9.5×, identical final_bank** ⇒ the ~2-min 81-ticker coin-flip
   scan should drop to ~12–15s. 51 tests green, no behaviour change. Motivates the next-step
   p-sweep (which re-runs the engine many times — now affordable).
+
+## Scan honesty: drift-stripped control + breakeven IV markup + fixed verdict (2026-06-01)
+- **D30** — Made Tab 5 (Scan) stop flattering the strategy. Three parts:
+  1. **Verdict fix (app.js):** the old footnote "mean ≫ median ⇒ NOT sound" printed UNCONDITIONALLY
+     (even when mean≈median, contradicting the "✅ BROADLY ROBUST" badge). Now: badge requires BOTH
+     ≥50% profitable AND median > 0; the mean≫median and median≤0 caveats are conditional.
+  2. **Drift-stripped control (`stress=True`):** `_detrend(daily)` removes the mean daily log-return
+     (zero net drift = a true fair coin) keeping vol/intraweek shape, and re-runs the SAME strategy.
+     Per-instrument `control_ret_pct` + aggregate `control_median_ret_pct`/`control_profitable_pct`.
+     The gap (real − control) is the part that's pure directional drift, not structure. Demo on a
+     +10%/yr synthetic: base −6.2% vs control −28.8% ⇒ 22.7pp was drift.
+  3. **Breakeven IV markup (coinflip, `stress=True`):** `_breakeven_markup` bisects (net is monotone-
+     decreasing in markup) the IV markup at which net=0, in [0.5,3.0], with lo/hi flags. "Options must
+     be priced below Nx realized to profit." Demo: 1.22× ⇒ real options (~1.1–1.6×) make it −EV.
+  - `ScanReq.stress` opt-in (~3–8× slower); gunicorn `--timeout 120→600` so the stress sweep isn't
+    killed. assets ?v=27. 53 tests (added `_detrend` zero-drift invariant + stress-fields test).
+  - **WHY:** answering "is 5-in-a-row calls profitable?" — a synthetic zero-drift fair coin reproduced
+    the user's ~67%/+28% scan ONLY when +10%/yr drift was injected; at markup 1.25 a fair coin LOSES
+    (−33% median). The broad positivity was drift + fill/IV optimism, not a structural edge. These
+    controls surface that in the tool itself.

@@ -201,6 +201,44 @@ def test_scan_coinflip(client, monkeypatch):
     assert ok and all("ret_pct" in x and "profit_factor" in x for x in ok)
 
 
+def test_detrend_zeroes_drift():
+    # _detrend must remove the net drift (mean log-return ~ 0) while keeping the series length
+    # and starting price; this is the control's whole correctness premise.
+    from antimg.web.api import _detrend
+    dates = pd.bdate_range("2018-01-01", periods=300)
+    price = pd.Series(100 * np.exp(np.linspace(0, 0.8, len(dates))), index=dates)  # strong uptrend
+    df = pd.DataFrame({"Open": price, "High": price * 1.01, "Low": price * 0.99,
+                       "Close": price, "Volume": 1.0}, index=dates)
+    out = _detrend(df)
+    assert len(out) == len(df) and abs(out["Close"].iloc[0] - df["Close"].iloc[0]) < 1e-6
+    mean_logret = np.diff(np.log(out["Close"].to_numpy(float))).mean()
+    assert abs(mean_logret) < 1e-9                    # drift stripped
+    # intraday range preserved (High/Low scaled by the same factor as Close)
+    assert np.allclose(out["High"] / out["Close"], df["High"] / df["Close"])
+
+
+def test_scan_stress_fields(client, monkeypatch):
+    # stress=True adds the drift-stripped control (+ breakeven markup for coinflip) per row
+    # and aggregate control stats in the summary.
+    from antimg import data, instruments
+    monkeypatch.setattr(instruments, "CATALOG", {"t": [("AAA", "x"), ("BBB", "y")]})
+    dates = pd.bdate_range("2016-01-01", periods=160)
+    rng = np.random.default_rng(3)
+    price = pd.Series(100 * np.exp(np.cumsum(0.0008 + 0.012 * rng.standard_normal(len(dates)))),
+                      index=dates)
+    df = pd.DataFrame({"Open": price, "High": price * 1.012, "Low": price * 0.988,
+                       "Close": price, "Volume": 1.0}, index=dates)
+    monkeypatch.setattr(data, "fetch", lambda *a, **k: df)
+    r = client.post("/api/scan", json={"model": "coinflip", "atr_period": 4, "target_streak": 2,
+                                       "dte_days": 30, "iv_markup": 1.25, "base_bet": 100,
+                                       "starting_bank": 10000, "stress": True})
+    assert r.status_code == 200
+    d = r.json()
+    ok = [x for x in d["results"] if x["ok"]]
+    assert ok and all("control_ret_pct" in x and "be_markup" in x and "be_markup_flag" in x for x in ok)
+    assert "control_median_ret_pct" in d["summary"] and "be_markup_median" in d["summary"]
+
+
 def test_inspect_window(client):
     # Inspect runs the real engine over a window and returns ALL campaigns' trace + table
     for model, ev in (("shares", "entry"), ("coinflip", "cf_round")):

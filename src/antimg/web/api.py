@@ -237,6 +237,83 @@ def _campaign_summary(res, starting_bank: float) -> dict:
     }
 
 
+def _detrend(daily: pd.DataFrame) -> pd.DataFrame:
+    """Strip the net drift from a price series, keeping its volatility/intraweek shape intact.
+
+    Remove the mean daily log-return from Close so the detrended path has ZERO net drift
+    (a true fair coin), then scale Open/High/Low by the same per-day factor so intraday ranges
+    are preserved. Running the strategy on this is the control: any profit here is NOT a
+    directional edge (there is no direction) — it's the option-pricing/fill floor. The gap
+    between the real result and this control is the part that's purely drift (regime-dependent).
+    """
+    import numpy as np
+    close = daily["Close"].to_numpy(float)
+    if len(close) < 3:
+        return daily
+    logret = np.diff(np.log(close))
+    mu = logret.mean()
+    new_close = np.empty_like(close)
+    new_close[0] = close[0]
+    new_close[1:] = close[0] * np.exp(np.cumsum(logret - mu))
+    factor = new_close / close
+    out = daily.copy()
+    for col in ("Open", "High", "Low", "Close"):
+        if col in out.columns:
+            out[col] = out[col].to_numpy(float) * factor
+    return out
+
+
+def _coinflip_net(daily, weekly, watr, req, iv_markup: float) -> float:
+    """Net P&L of the coin-flip on (daily,weekly,watr) at a given IV markup. Used for the
+    breakeven-markup search; net is monotonically DECREASING in markup (pricier calls)."""
+    realized = datamod.realized_vol(daily["Close"], req.iv_window)
+    res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
+                                  target_streak=req.target_streak, mult=req.mult,
+                                  double_target=req.double_target, target_delta=req.target_delta,
+                                  dte_days=req.dte_days, iv=0.20, r=req.r,
+                                  commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                                  starting_bank=req.starting_bank, realized_vol=realized,
+                                  iv_markup=iv_markup)
+    return res.final_bank - req.starting_bank
+
+
+def _breakeven_markup(daily, weekly, watr, req, lo=0.5, hi=3.0, iters=6):
+    """The IV markup at which this instrument's coin-flip net P&L = 0 (bisection; net is
+    decreasing in markup). Returns (value_in[lo,hi], flag) where flag is '' if it crossed,
+    'lo' if it loses even at the cheapest markup (be < lo ⇒ never profitable on real options),
+    or 'hi' if it stays profitable even at the richest (be > hi ⇒ robust to pricing)."""
+    nlo, nhi = _coinflip_net(daily, weekly, watr, req, lo), _coinflip_net(daily, weekly, watr, req, hi)
+    if nlo <= 0:
+        return lo, "lo"
+    if nhi > 0:
+        return hi, "hi"
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi)
+        if _coinflip_net(daily, weekly, watr, req, mid) > 0:
+            lo = mid
+        else:
+            hi = mid
+    return round(0.5 * (lo + hi), 3), ""
+
+
+def _scan_run(req: ScanReq, daily, weekly, watr):
+    """Run the requested model on one instrument's prepared frames; returns the result."""
+    if req.model == "coinflip":
+        realized = datamod.realized_vol(daily["Close"], req.iv_window)
+        return strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
+                                       target_streak=req.target_streak, mult=req.mult,
+                                       double_target=req.double_target, target_delta=req.target_delta,
+                                       dte_days=req.dte_days, iv=0.20, r=req.r,
+                                       commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                                       starting_bank=req.starting_bank, realized_vol=realized,
+                                       iv_markup=req.iv_markup)
+    return strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
+                              target_streak=req.target_streak, mult=req.mult,
+                              instrument="shares", mode=req.mode,
+                              commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+                              starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+
+
 @app.post("/api/scan")
 def scan_all(req: ScanReq):
     """One-click robustness sweep across the whole catalog with identical params.
@@ -245,34 +322,38 @@ def scan_all(req: ScanReq):
     coin-flip (premium = bet, real per-date IV × markup). Per-instrument bottom-line summary.
     Sequential by design — yfinance/Yahoo rate-limits a server IP (429), so we do NOT fan out.
     Per-ticker failures are captured (ok=False) instead of aborting the sweep.
+
+    `stress=True` adds, per instrument, a DRIFT-STRIPPED control (same strategy on detrended,
+    zero-drift prices) and — for coinflip — the breakeven IV markup. These separate a real
+    structural edge from "we were long things that went up in a 20-year bull market".
     """
     rows = []
     for ticker, label, group in instruments.flat_with_group():
         try:
             daily, weekly, watr = _load(ticker, req.start, req.atr_period)
-            if req.model == "coinflip":
-                realized = datamod.realized_vol(daily["Close"], req.iv_window)
-                res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
-                                              target_streak=req.target_streak, mult=req.mult,
-                                              double_target=req.double_target,
-                                              target_delta=req.target_delta, dte_days=req.dte_days,
-                                              iv=0.20, r=req.r, commission_pct=req.commission_pct,
-                                              slippage_pct=req.slippage_pct,
-                                              starting_bank=req.starting_bank,
-                                              realized_vol=realized, iv_markup=req.iv_markup)
-            else:
-                res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
-                                         target_streak=req.target_streak, mult=req.mult,
-                                         instrument="shares", mode=req.mode,
-                                         commission_pct=req.commission_pct,
-                                         slippage_pct=req.slippage_pct,
-                                         starting_bank=req.starting_bank, cap_mult=req.cap_mult)
+            res = _scan_run(req, daily, weekly, watr)
             if not res.table:
                 rows.append({"ticker": ticker, "label": label, "group": group,
                              "ok": False, "error": "no cycles resolved"})
                 continue
-            rows.append({"ticker": ticker, "label": label, "group": group, "ok": True,
-                         **_campaign_summary(res, req.starting_bank)})
+            row = {"ticker": ticker, "label": label, "group": group, "ok": True,
+                   **_campaign_summary(res, req.starting_bank)}
+            if req.stress:                                   # drift-stripped control + breakeven markup
+                try:
+                    dd = _detrend(daily)
+                    dw = datamod.weekly(dd)
+                    dwatr = datamod.atr(dw, req.atr_period)
+                    cres = _scan_run(req, dd, dw, dwatr)
+                    cnet = cres.final_bank - req.starting_bank
+                    row["control_net"] = round(cnet, 2)
+                    row["control_ret_pct"] = round(100.0 * cnet / max(1e-9, req.starting_bank), 4)
+                    if req.model == "coinflip":
+                        be, flag = _breakeven_markup(daily, weekly, watr, req)
+                        row["be_markup"] = be
+                        row["be_markup_flag"] = flag
+                except Exception as ex:
+                    row["control_error"] = f"{type(ex).__name__}: {ex}"
+            rows.append(row)
         except HTTPException as ex:
             rows.append({"ticker": ticker, "label": label, "group": group,
                          "ok": False, "error": str(ex.detail)})
@@ -284,19 +365,27 @@ def scan_all(req: ScanReq):
     profitable = [r for r in ok if r["net"] > 0]
     rets = sorted(r["ret_pct"] for r in ok)
     median_ret = rets[len(rets) // 2] if rets else 0.0
-    return {
-        "params": req.model_dump(),
-        "results": rows,
-        "summary": {
-            "total": len(rows), "ok": len(ok), "failed": len(rows) - len(ok),
-            "profitable": len(profitable),
-            "profitable_pct": round(100.0 * len(profitable) / len(ok), 1) if ok else 0.0,
-            "median_ret_pct": round(median_ret, 2),
-            "mean_ret_pct": round(sum(rets) / len(rets), 2) if rets else 0.0,
-            "best": max(ok, key=lambda r: r["ret_pct"], default=None),
-            "worst": min(ok, key=lambda r: r["ret_pct"], default=None),
-        },
+    summary = {
+        "total": len(rows), "ok": len(ok), "failed": len(rows) - len(ok),
+        "profitable": len(profitable),
+        "profitable_pct": round(100.0 * len(profitable) / len(ok), 1) if ok else 0.0,
+        "median_ret_pct": round(median_ret, 2),
+        "mean_ret_pct": round(sum(rets) / len(rets), 2) if rets else 0.0,
+        "best": max(ok, key=lambda r: r["ret_pct"], default=None),
+        "worst": min(ok, key=lambda r: r["ret_pct"], default=None),
     }
+    if req.stress:                                           # aggregate the drift-stripped control
+        ctrl = [r for r in ok if "control_ret_pct" in r]
+        crets = sorted(r["control_ret_pct"] for r in ctrl)
+        if crets:
+            summary["control_median_ret_pct"] = round(crets[len(crets) // 2], 2)
+            summary["control_mean_ret_pct"] = round(sum(crets) / len(crets), 2)
+            summary["control_profitable_pct"] = round(
+                100.0 * sum(1 for r in ctrl if r["control_net"] > 0) / len(ctrl), 1)
+        bes = sorted(r["be_markup"] for r in ok if r.get("be_markup") is not None)
+        if bes:
+            summary["be_markup_median"] = bes[len(bes) // 2]
+    return {"params": req.model_dump(), "results": rows, "summary": summary}
 
 
 # ----------------------------------------------------------------- tab 6: explain (step-by-step trace)
