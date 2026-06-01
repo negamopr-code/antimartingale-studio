@@ -273,6 +273,22 @@ async function refreshSignals() {
   });
 }
 $("#refresh-signals").onclick = (e) => withBusy(e.target, refreshSignals);
+$("#next-bet-btn").onclick = (e) => withBusy(e.target, async () => {
+  const g = (n) => $(`#form-signals [name=${n}]`).value.trim();
+  const sid = g("strategy_id") || "default";
+  const p = new URLSearchParams({ strategy_id: sid, base_bet: g("base_bet") || "100",
+    target_streak: g("target_streak") || "10" });
+  if (g("cap_mult")) p.set("cap_mult", g("cap_mult"));
+  const d = await api("/api/next-bet?" + p.toString());
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  $("#nextbet-stats").textContent =
+    `🎯 СЛЕДУЮЩАЯ СТАВКА (live, strategy=${d.strategy_id})\n`
+    + `next bet = ${f(d.next_bet)}  (= ${f(d.next_bet_mult)}× base ${f(d.base_bet)})\n`
+    + `текущая серия: ${d.streak} побед подряд  ·  последний исход: ${d.last_outcome ?? "—"}\n`
+    + `всего сделок ${d.n_trials} (W ${d.wins} / L ${d.losses}) · target ${d.target_streak} · полных серий ${d.target_streak_completions}\n`
+    + `→ ${d.note}\n`
+    + `\nPine alert читает это обратно: GET /api/next-bet?strategy_id=${d.strategy_id}&base_bet=…&target_streak=…`;
+});
 $("#form-signals").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () => {

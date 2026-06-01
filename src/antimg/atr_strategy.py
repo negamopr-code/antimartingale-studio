@@ -210,6 +210,34 @@ def _apply_pyramid(outcome: str, streak: int, bet: float, base_bet: float,
     return streak, bet
 
 
+def pyramid_state(outcomes: list[str], base_bet: float, target_streak: int,
+                  cap_mult: float | None = None) -> dict:
+    """Walk a win/loss sequence through the antimartingale state machine and return the LIVE
+    state — chiefly the bet to place NEXT. This is the read-back the TradingView Pine alert
+    queries (`GET /api/next-bet`): after recording the closed-trade stream, ask "given my
+    current streak, how big is the next order?". Pure replay of `_apply_pyramid`, no prices.
+
+    next_bet = base_bet after a loss or after a target-streak is booked; otherwise 2× the last
+    bet (capped at base_bet·cap_mult). `streak` = consecutive wins not yet booked.
+    """
+    streak, bet = 0, base_bet
+    wins = completions = 0
+    last = None
+    for o in outcomes:
+        if o not in ("win", "loss"):
+            continue
+        prev_streak = streak
+        streak, bet = _apply_pyramid(o, streak, bet, base_bet, target_streak, cap_mult)
+        wins += o == "win"
+        last = o
+        if o == "win" and prev_streak + 1 >= target_streak:   # this win booked a full streak
+            completions += 1
+    n = sum(o in ("win", "loss") for o in outcomes)
+    return {"next_bet": round(bet, 6), "streak": streak, "n_trials": n, "wins": wins,
+            "losses": n - wins, "last_outcome": last, "target_streak_completions": completions,
+            "just_reset": last is not None and streak == 0}
+
+
 def _trial_costs(bet: float, atr_entry: float, entry_price: float,
                  commission_pct: float, slippage_pct: float) -> tuple[float, float]:
     """Round-trip transaction costs for one trial (entry + exit = 2 fills).

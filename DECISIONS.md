@@ -209,3 +209,20 @@ Not implemented; documented as a rejected tactic.
     «🔁 АВТО-РОЛЛ» narration block + roll rows in the options ledger; roll count in the window summary.
   - Verified real SPY 2020-22 DTE45: 8 opt_roll events = the 8 campaign rolls; rolled strikes re-struck
     to spot, expiry +~6 weeks. assets ?v=29. 55 tests (+calls-inspect roll test, +calls case in inspect test).
+
+## TradingView closed loop: open/close pairing + GET /api/next-bet (2026-06-01)
+- **D33** — Implemented the documented TradingView extension (ARCHITECTURE.md «Future extension»):
+  the connection was ingest+replay only; now it's a **closed loop**.
+  1. **Open/close pairing** (`signals.signals_to_trials`): besides self-contained closed-trade alerts
+     (pnl/outcome → one Trial, unchanged), a buy/sell OPEN alert (price, no outcome) is now held and
+     PAIRED with the next close/exit/flat alert on the same (strategy_id, ticker) — outcome inferred
+     from the price move and side (long: close≥open ⇒ win; short inverted), entry/exit = the two prices.
+  2. **Live sizing** (`atr_strategy.pyramid_state` + `GET /api/next-bet`): replays the stored win/loss
+     stream through the antimartingale state machine (2× on a win capped at base·cap_mult, reset on a
+     loss or a booked target streak) and returns `next_bet` (+ streak/wins/losses/mult/note). A Pine
+     alert reads this back — `GET /api/next-bet?strategy_id=&base_bet=&target_streak=&cap_mult=` — to
+     size its next order from the running streak. Pure read, no mutation; fresh strategy → base_bet.
+  - Verified: 3 wins (cap 8) → next_bet 800 (8×); a loss → reset to base; open+close pair → win/loss.
+  - Tab 4 gets a «🎯 Next bet (live)» button + the hint documents pairing & the closed loop. assets ?v=30.
+  - 58 tests (+pyramid_state, +next-bet endpoint, +open/close pairing). ARCHITECTURE.md updated (status →
+    implemented incl. pairing + next-bet).

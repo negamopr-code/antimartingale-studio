@@ -36,7 +36,7 @@ where trials come from:
 | Source | Producer | Status |
 |--------|----------|--------|
 | Historical ATR | `atr_strategy.resolve_trials(price)` | implemented |
-| **TradingView** | alert → `tradingview.parse_alert` → `signals.SignalStore` → `signals.signals_to_trials` | implemented (ingest + replay) |
+| **TradingView** | alert → `tradingview.parse_alert` → `signals.SignalStore` → `signals.signals_to_trials` | implemented (ingest + replay + **open/close pairing** + live **`GET /api/next-bet`**) |
 
 So a TradingView Pine strategy is just a **signal generator**; our app is the
 **antimartingale money-management calculator** layered on top of its win/loss stream.
@@ -50,8 +50,12 @@ So a TradingView Pine strategy is just a **signal generator**; our app is the
 3. Closed-trade alerts accumulate in the `SignalStore`; the **4 · TradingView** tab (or
    `POST /api/backtest/from-signals`) replays them through the sizing engine.
 
-Future extension: pair separate open/close alerts into trials, and live-size the *next*
-bet from the running streak (a `GET /api/next-bet?strategy_id=` the Pine alert can read back).
+**Closed loop (implemented):** separate open/close alerts are paired into trials by
+`signals.signals_to_trials` (a buy/sell open + a later close on the same strategy+ticker →
+one win/loss from the price move), and `GET /api/next-bet?strategy_id=&base_bet=&target_streak=&cap_mult=`
+replays the stored outcomes through `atr_strategy.pyramid_state` and returns the next bet to
+place — the read-back a Pine alert (or any client) queries to live-size its next order from the
+running streak. Pure read (no mutation).
 
 ## Scalability
 

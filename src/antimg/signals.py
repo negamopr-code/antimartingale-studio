@@ -140,24 +140,48 @@ class SQLiteSignalStore:
             return n
 
 
-def signals_to_trials(signals: list[Signal]) -> list[Trial]:
-    """Turn outcome-bearing signals (e.g. TradingView closed-trade alerts) into Trials.
+def _ts(s: Signal) -> "pd.Timestamp":
+    return pd.Timestamp(s.signal_time or s.received_at or _utcnow())
 
-    Signals without a resolvable outcome are skipped. atr_entry falls back to |pnl| (or a
-    1% notional proxy) so the options sizing engine can still size `units = bet/atr_entry`.
-    Entry/exit *pairing* of separate open/close alerts is a future extension.
+
+def signals_to_trials(signals: list[Signal]) -> list[Trial]:
+    """Turn the signal stream into Trials, handling BOTH alert styles:
+
+    1. **Closed-trade alert** (carries `pnl` or `outcome`) → one Trial directly.
+    2. **Separate open + close alerts**: an OPEN (`action` buy/sell, a `price`, no outcome) is
+       held; the next CLOSE (`action` close/exit/flat, a `price`, no outcome) on the same
+       (strategy, ticker) is PAIRED with it — outcome inferred from the price move and side
+       (long: close≥open ⇒ win; short: close≤open ⇒ loss-inverted), entry/exit = the two prices.
+
+    Signals that resolve to neither are skipped. `atr_entry` falls back to |pnl|, then the
+    open→close move, then a 1% notional proxy, so `units = bet/atr_entry` stays sane.
     """
     trials: list[Trial] = []
+    open_pos: dict[tuple[str, str], Signal] = {}          # (strategy_id, ticker) -> open alert
     for s in signals:
+        key = (s.strategy_id, s.ticker)
         outcome = s.resolved_outcome()
-        if outcome is None:
+        if outcome is not None:                            # style 1: self-contained closed trade
+            t = _ts(s)
+            price = float(s.price) if s.price is not None else 0.0
+            atr = abs(s.pnl) if s.pnl else (price * 0.01 if price else 1.0)
+            trials.append(Trial(entry_date=t, exit_date=t, entry_price=price, exit_price=price,
+                                atr_entry=float(atr) or 1.0, outcome=outcome, days_held=0))
+            open_pos.pop(key, None)                         # any dangling open is now resolved
             continue
-        t = pd.Timestamp(s.signal_time or s.received_at or _utcnow())
-        price = float(s.price) if s.price is not None else 0.0
-        atr = abs(s.pnl) if s.pnl else (price * 0.01 if price else 1.0)
-        trials.append(Trial(entry_date=t, exit_date=t, entry_price=price,
-                            exit_price=price, atr_entry=float(atr) or 1.0,
-                            outcome=outcome, days_held=0))
+        act = (s.action or "").lower()
+        if act in ("buy", "sell", "long", "short") and s.price is not None:
+            open_pos[key] = s                              # style 2: remember the OPEN
+            continue
+        if act in ("close", "exit", "flat") and s.price is not None and key in open_pos:
+            o = open_pos.pop(key)                          # style 2: PAIR open→close
+            short = (o.action or "").lower() in ("sell", "short")
+            entry, exit_ = float(o.price), float(s.price)
+            move = (entry - exit_) if short else (exit_ - entry)
+            trials.append(Trial(entry_date=_ts(o), exit_date=_ts(s), entry_price=entry,
+                                exit_price=exit_, atr_entry=abs(move) or 1.0,
+                                outcome="win" if move > 0 else "loss",
+                                days_held=max((_ts(s) - _ts(o)).days, 0)))
     return trials
 
 

@@ -323,3 +323,44 @@ def test_webhook_disabled_when_no_secret(client):
     settings.webhook_secret = ""
     assert client.post("/api/webhook/tradingview", json={"ticker": "X"}).status_code == 503
     settings.webhook_secret = "testsecret"
+
+
+def test_pyramid_state():
+    # the live antimartingale state machine: 2x on a win, reset on a loss / booked streak.
+    from antimg.atr_strategy import pyramid_state
+    assert pyramid_state([], 100, 10)["next_bet"] == 100               # fresh -> base
+    s = pyramid_state(["win", "win"], 100, 10)                         # 2 wins -> 4x
+    assert s["next_bet"] == 400 and s["streak"] == 2 and s["wins"] == 2
+    assert pyramid_state(["win", "win", "loss"], 100, 10)["next_bet"] == 100   # loss resets
+    booked = pyramid_state(["win", "win", "win"], 100, 3)              # target=3 booked -> reset
+    assert booked["next_bet"] == 100 and booked["streak"] == 0 and booked["target_streak_completions"] == 1
+    capped = pyramid_state(["win", "win", "win", "win"], 100, 10, 4)   # cap_mult 4 -> bet<=400
+    assert capped["next_bet"] == 400
+
+
+def test_next_bet_endpoint(client):
+    # closed loop: stream closed trades, then read /api/next-bet back
+    base = client.get("/api/next-bet?strategy_id=nb").json()
+    assert base["next_bet"] == 100 and base["streak"] == 0            # nothing yet -> base
+    for pnl in (12, 7):                                               # two wins
+        client.post("/api/webhook/tradingview", json={"passphrase": "testsecret", "ticker": "ES",
+                                                      "action": "close", "pnl": pnl, "strategy": "nb"})
+    d = client.get("/api/next-bet?strategy_id=nb&base_bet=100&target_streak=10").json()
+    assert d["streak"] == 2 and d["next_bet"] == 400 and d["next_bet_mult"] == 4.0
+    client.post("/api/webhook/tradingview", json={"passphrase": "testsecret", "ticker": "ES",
+                                                  "action": "close", "pnl": -3, "strategy": "nb"})
+    assert client.get("/api/next-bet?strategy_id=nb").json()["next_bet"] == 100   # loss -> reset
+
+
+def test_signals_open_close_pairing():
+    # separate open + close alerts (no pnl) are paired into a win/loss by the price move
+    from antimg.signals import Signal, signals_to_trials
+    sigs = [
+        Signal(source="tv", ticker="ES", action="buy", price=100.0, strategy_id="p"),    # open long
+        Signal(source="tv", ticker="ES", action="close", price=105.0, strategy_id="p"),  # +5 -> win
+        Signal(source="tv", ticker="ES", action="sell", price=200.0, strategy_id="p"),   # open short
+        Signal(source="tv", ticker="ES", action="close", price=210.0, strategy_id="p"),  # +10 -> loss (short)
+    ]
+    trials = signals_to_trials(sigs)
+    assert [t.outcome for t in trials] == ["win", "loss"]
+    assert trials[0].entry_price == 100.0 and trials[0].exit_price == 105.0

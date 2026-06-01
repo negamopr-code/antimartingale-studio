@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=29"/>
+  <link rel="stylesheet" href="/style.css?v=30"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -97,7 +97,10 @@
   <section id="signals" class="panel">
     <p class="hint">TradingView strategy alerts POST to <code>/api/webhook/tradingview</code>
       (set <code>ANTIMG_WEBHOOK_SECRET</code> and include <code>"passphrase"</code> in the alert JSON).
-      Stored win/loss signals feed the antimartingale sizing engine below.</p>
+      Closed-trade alerts (with <code>pnl</code>/<code>outcome</code>) — or <b>separate open+close</b> alerts,
+      now auto-paired into win/loss — feed the sizing engine below. <b>Closed loop:</b> a Pine alert can
+      read back <code>GET /api/next-bet?strategy_id=…</code> to size the next order from the running streak
+      (🎯 button).</p>
     <form class="controls" id="form-signals">
       <label>Strategy id <input name="strategy_id" placeholder="all"></label>
       <label>Base bet $ <input name="base_bet" type="number" step="any" value="100"></label>
@@ -106,9 +109,11 @@
       <label>Cap mult <input name="cap_mult" type="number" step="any" value="8" title="кэп лотов на каждый долив: 1,2,4,8,8… (default 8). Стоп всё равно даёт −b. Большое число ≈ без кэпа (raw 2^N)."></label>
       <button type="submit">Run on stored signals</button>
       <button type="button" id="refresh-signals">Refresh list</button>
+      <button type="button" id="next-bet-btn" title="GET /api/next-bet — live antimartingale размер следующей ставки из текущей серии (это читает Pine-алерт обратно)">🎯 Next bet (live)</button>
     </form>
     <div class="results"><div class="plots"><div id="sig-equity"></div></div>
-      <pre class="stats" id="sig-stats"></pre></div>
+      <pre class="stats" id="sig-stats"></pre>
+      <pre class="stats" id="nextbet-stats"></pre></div>
     <table id="sig-table"><thead><tr><th>id</th><th>time</th><th>ticker</th>
       <th>action</th><th>outcome</th><th>pnl</th><th>strategy</th></tr></thead><tbody></tbody></table>
   </section>
@@ -213,6 +218,6 @@
     <div class="tradetable" id="insp-ledger"></div>
   </section>
 
-  <script src="/app.js?v=29"></script>
+  <script src="/app.js?v=30"></script>
 </body>
 </html>

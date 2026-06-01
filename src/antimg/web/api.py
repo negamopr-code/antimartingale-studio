@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -605,6 +605,32 @@ def get_signals(strategy_id: str | None = None, limit: int = 1000):
 @app.delete("/api/signals")
 def del_signals(strategy_id: str | None = None):
     return {"deleted": STORE.clear(strategy_id=strategy_id)}
+
+
+@app.get("/api/next-bet")
+def next_bet(strategy_id: str = "default",
+             base_bet: float = Query(100.0, gt=0),
+             target_streak: int = Query(10, ge=1, le=settings.max_target_streak),
+             cap_mult: float | None = Query(None, gt=0)):
+    """Live antimartingale sizing — the closed loop. A TradingView Pine alert (or any client)
+    reads this back AFTER its closed-trade alerts have streamed into the SignalStore to learn
+    how big the NEXT order should be, given the current win streak. Pure read (no mutation):
+    replays the stored win/loss outcomes through the pyramid state machine.
+
+    `next_bet` is in the SAME units as `base_bet` (dollars, or contracts, or risk-%). On a fresh
+    strategy with no signals it returns `base_bet` at streak 0.
+    """
+    rows = STORE.list(strategy_id=strategy_id, limit=5000)
+    outcomes = [t.outcome for t in signals.signals_to_trials(rows)]
+    st_ = strat.pyramid_state(outcomes, base_bet, target_streak, cap_mult)
+    mult = round(st_["next_bet"] / base_bet, 4) if base_bet else None
+    note = (f"{st_['streak']} consecutive win(s); place the next bet at "
+            f"{st_['next_bet']:g} (= {mult}×base)." if st_["streak"] > 0
+            else ("after a loss — reset to base." if st_["last_outcome"] == "loss"
+                  else ("target streak booked — reset to base." if st_["target_streak_completions"]
+                        else "no signals yet — start at base.")))
+    return {"strategy_id": strategy_id, "base_bet": base_bet, "target_streak": target_streak,
+            "cap_mult": cap_mult, "next_bet_mult": mult, **st_, "note": note}
 
 
 @app.post("/api/backtest/from-signals")
