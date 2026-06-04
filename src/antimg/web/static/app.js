@@ -765,28 +765,22 @@ async function renderHedged(d) {
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const net = s.net_pnl, up = net > 0;
 
-  // --- equity decomposition: total vs straddle (gamma−theta) vs scalp ---
-  // scalp goes on its OWN right axis: it's a cumulative running total but its amplitude is tiny
-  // next to the straddle, so on a shared axis it looks pinned to zero. Separate scale = visible
-  // SHAPE; the label says "своя ось/масштаб" so it's not misread as comparable in magnitude.
+  // --- equity decomposition: total vs straddle (gamma−theta) vs scalp — ONE shared $ axis ---
   await plot("hi-equity", [
     { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл P&L (гамма−тета)",
       line: { color: "#f0c000", width: 1.5 } },
+    { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines",
+      name: `скальп P&L (накоп.; итог ${s.scalp_pnl >= 0 ? "+" : ""}${f(s.scalp_pnl)})`,
+      line: { color: "#5b9dff", width: 1.5 } },
     { x: d.theta_path.x, y: d.theta_path.y, mode: "lines", name: "тета уплачено (накоп.)",
       line: { color: "#8b949e", width: 1, dash: "dot" } },
     { x: d.equity_total.x, y: d.equity_total.y, mode: "lines", name: "ИТОГО P&L счёта",
       line: { color: up ? "#3fb950" : "#f85149", width: 2.5 },
       fill: "tozeroy", fillcolor: up ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
-    { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", yaxis: "y2",
-      name: `скальп P&L (накоп., ПРАВАЯ ось — свой масштаб; итог ${s.scalp_pnl >= 0 ? "+" : ""}${f(s.scalp_pnl)})`,
-      line: { color: "#5b9dff", width: 1.5 } },
   ], layout("Разложение P&L: стреддл (гамма−тета) + скальп = ИТОГО", {
     height: 380, xaxis: { gridcolor: "#2a3340" },
-    yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L стреддл/итого (от 0)" },
-             zeroline: true, zerolinecolor: "#8b949e" },
-    yaxis2: { overlaying: "y", side: "right", title: { text: "$ скальп (накоп.)" },
-              gridcolor: "transparent", zeroline: false, tickfont: { color: "#5b9dff" },
-              titlefont: { color: "#5b9dff" } } }));
+    yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L (от 0)" },
+             zeroline: true, zerolinecolor: "#8b949e" } }));
 
   // --- price with roll markers ---
   const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена (close)",
@@ -988,11 +982,10 @@ async function renderHiExec(d) {
       height: 440, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
   await plot("hx-pnl", [
     { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл (гамма−тета)", line: { color: "#f0c000", width: 1.5 } },
-    { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп", yaxis: "y2", line: { color: "#5b9dff", width: 1.5 } },
+    { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп", line: { color: "#5b9dff", width: 1.5 } },
     { x: d.equity_total.x, y: d.equity_total.y, mode: "lines", name: "ИТОГО", line: { color: s.net_pnl >= 0 ? "#3fb950" : "#f85149", width: 2.5 }, fill: "tozeroy", fillcolor: s.net_pnl >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
-  ], layout("P&L: стреддл + скальп = ИТОГО", {
-    height: 300, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "$ стреддл/итого" }, zeroline: true, zerolinecolor: "#8b949e" },
-    yaxis2: { overlaying: "y", side: "right", title: { text: "$ скальп" }, gridcolor: "transparent", zeroline: false, tickfont: { color: "#5b9dff" }, titlefont: { color: "#5b9dff" } } }));
+  ], layout("P&L: стреддл + скальп = ИТОГО (одна ось)", {
+    height: 300, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L" }, zeroline: true, zerolinecolor: "#8b949e" } }));
   const up = s.net_pnl >= 0;
   $("#hx-stats").textContent =
     `${up ? "✅ ИТОГО ПЛЮС" : "❌ ИТОГО МИНУС"}  net ${up ? "+" : ""}${f(s.net_pnl)}  (CAGR ${f(s.ann_return_pct)}%, ${s.n_days} дн)\n`
