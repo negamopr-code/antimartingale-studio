@@ -351,3 +351,22 @@ Not implemented; documented as a rejected tactic.
   INTRADAY (many reversals WITHIN each day = large intraday path length) — exactly what a daily OHLC
   bar discards. So sub-part count can't recover the scalp edge from daily data; it's bounded by the
   path's mean-reversion content at the daily scale. Same conclusion, new angle.
+
+## Tab 8 — BUG FIX: re-centering destroyed the mean-reversion edge (2026-06-04)
+- **D41** — User challenged that ПИ has positive expectation yet the model loses, suspecting a rule
+  violation. Investigation found a REAL bug I introduced in D39: `scalp_recenter_days` force-closes
+  open scalp legs to market on a timer — which REALIZES the underwater counter-trend legs that were
+  about to mean-revert, converting the edge into losses (and violating the doctrine "carry/heal stuck
+  parts, never abandon"). Proof: a clean OU mean-reverter flips +933 (carry) → −602 (re-center);
+  detrended SPY −329→+77, detrended GLD −176→+80. **Fix: default scalp_recenter_days 21→0** (carry
+  stuck legs to the roll — the doctrine-faithful behavior that lets the grid capture mean-reversion);
+  re-centering kept as an opt-in but documented as edge-destroying. +OU regression test (69 tests).
+  - **Resolved the scale-invariance question honestly:** ПИ is NOT unconditional-positive-EV. The
+    scalp = gamma-scalping the straddle; its edge = capturing mean-reversion, which is SCALE- and
+    instrument-DEPENDENT. SPY daily returns mean-revert (lag-1 autocorr −0.13) so the edge EXISTS,
+    but at the daily scale it's small and competes with DRIFT (stuck-leg losses on the multi-week
+    trend). Detrended → scalp positive on SPY/GLD; with drift → ~0/negative. Crypto (ETH/BTC):
+    volatile but TRENDING (10x) → counter-trend scalp LOSES (−19k) while the straddle GAMMA WINS
+    (+72k) — opposite sides of the trend BY DESIGN (the straddle is the hedge of the scalp's trend
+    risk). So "volatile = back-and-forth = scalp profits" conflates volatility with mean-reversion.
+  - Live consults on gamma-scalping / trend behavior QUEUED (NotebookLM rate-limited).

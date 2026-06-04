@@ -106,6 +106,26 @@ def test_grid_step_timeframe_widens_grid():
     assert weekly_grid.n_days > 0 and weekly_grid.table
 
 
+def test_scalp_captures_mean_reversion_when_legs_carried():
+    """A counter-trend grid on a strongly MEAN-REVERTING (OU) zero-drift series MUST profit before
+    costs when stuck legs are carried (recenter=0). Re-centering force-closes underwater legs before
+    they revert and destroys the edge — this is the regression guard for that bug."""
+    rng = np.random.default_rng(1)
+    x, path = 100.0, []
+    for _ in range(3000):
+        x += 0.1 * (100.0 - x) + rng.normal(0, 2.0)       # Ornstein-Uhlenbeck: reverts to 100
+        path.append(x)
+    df = _frame(np.array(path), rng_pct=0.003)
+    rv = datamod.realized_vol(df["Close"], 20)
+    datr = datamod.atr_on_timeframe(df, "daily", 14)
+    carried = hi.run_hedged_intraday(df, datr, realized_vol=rv, scalp_model="grid", dte_days=365,
+                                     grid_atr_frac=0.3, grid_mult=1.25, n_parts=20, scalp_recenter_days=0)
+    recentered = hi.run_hedged_intraday(df, datr, realized_vol=rv, scalp_model="grid", dte_days=365,
+                                        grid_atr_frac=0.3, grid_mult=1.25, n_parts=20, scalp_recenter_days=21)
+    assert carried.scalp_pnl > 0, "carrying stuck legs must capture OU mean-reversion"
+    assert carried.scalp_pnl > recentered.scalp_pnl, "timer re-centering realizes legs early, hurting the edge"
+
+
 def test_rolls_happen():
     df = _frame(100.0 + np.random.default_rng(2).normal(0, 0.5, 400))
     res = hi.run_hedged_intraday(df, datamod.atr(df, 14),

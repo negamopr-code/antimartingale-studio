@@ -19,9 +19,11 @@ Construction (per the corpus, confirmed by live consult 2026-06-04):
         OHLC resolves faithfully. Each bar is walked along an OHLC path (green O→L→H→C / red
         O→H→L→C); resting limit orders fill when crossed; a short at a sell-level is bought back
         one step lower (and vice-versa); each working part holds ≤1 leg so total ≤ the intraday
-        limit (never naked). The grid RE-CENTERS to the current price every `scalp_recenter_days`
-        (realizing stuck legs), so it scalps the CURRENT range instead of sitting frozen at the
-        year-old strike — without this it stops scalping once price trends away. No
+        limit (never naked). **Stuck legs are CARRIED to the roll** (doctrine: heal injured parts,
+        never abandon the construction) — this is what lets the counter-trend grid actually capture
+        mean-reversion (an open underwater leg is a bet on the reversion). `scalp_recenter_days>0`
+        force-closes legs to the current price on a timer — but that REALIZES the not-yet-reverted
+        legs as losses and throws away the edge, so it defaults to 0 (OFF). No
         efficiency/round-trip/penalty fudge. ⚠ HONEST SCOPE: long-dated options make the THETA
         faithful, and the straddle GAMMA on big moves is faithful — but the SCALP is still a LOWER
         BOUND: a daily bar holds ~1 reversal, so this books only ~10–40 round-trips/yr vs live ПИ's
@@ -116,7 +118,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         dte_days: int = 365, roll_buffer_days: int = 10, r: float = 0.045,
                         qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 2.0,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
-                        scalp_model: str = "grid", scalp_recenter_days: int = 21,
+                        scalp_model: str = "grid", scalp_recenter_days: int = 0,
                         scalp_efficiency: float = 0.5,
                         max_rt_per_day: float = 10.0, stuck_penalty: float = 0.5,
                         commission_pct: float = 0.0, slippage_pct: float = 0.0, vol_model=None,
@@ -306,10 +308,11 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                 setup_grid(st["K"], atr_d, st["n_str"])
                 last_recenter = d
 
-        # ---- re-center the scalp grid to follow price (it scalps the CURRENT range, not the
-        # year-old strike): realize stuck legs and re-establish the grid around today's price every
-        # `scalp_recenter_days`. Without this the grid sits frozen at the strike and stops scalping
-        # once price trends away (the frozen-grid bug). ----
+        # ---- OPTIONAL grid re-centering (scalp_recenter_days>0, default OFF) ----
+        # Re-anchors the grid to the current price every N days. ⚠ It force-closes open legs at
+        # market — which REALIZES the underwater counter-trend legs that were about to mean-revert,
+        # destroying the edge (verified: flips a clean OU mean-reverter from +933 to −602). Default 0
+        # = carry stuck legs to the roll (doctrine-faithful, lets the grid capture mean-reversion).
         if (scalp_model == "grid" and scalp_recenter_days > 0
                 and (d - last_recenter).days >= scalp_recenter_days):
             scalp_close_all(op)                           # realize open legs at today's open

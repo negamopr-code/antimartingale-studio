@@ -147,7 +147,7 @@ class HedgedIntradayReq(BaseModel):
     # re-center the scalp grid to the CURRENT price every N calendar days (realizing stuck legs):
     # the grid follows price and scalps the current range instead of sitting frozen at the year-old
     # strike. 0 = never re-center (legacy frozen grid). ~21 ≈ monthly.
-    scalp_recenter_days: int = Field(21, ge=0, le=365)
+    scalp_recenter_days: int = Field(0, ge=0, le=365)
     # scalping grid (three-thirds + exponential spacing)
     n_parts: int = Field(5, ge=1, le=50)                         # working parts (modern universal = 5)
     grid_atr_frac: float = Field(2.0, gt=0, le=10)            # first grid step = this × the chosen-timeframe ATR (≈2× daily)
@@ -179,7 +179,7 @@ class HedgedIntradayScanReq(BaseModel):
     r: float = Field(0.045, ge=-0.05, le=0.5)
     scalp_model: str = Field("grid", pattern="^(grid|range)$")
     grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")
-    scalp_recenter_days: int = Field(21, ge=0, le=365)
+    scalp_recenter_days: int = Field(0, ge=0, le=365)
     n_parts: int = Field(5, ge=1, le=50)   
     grid_atr_frac: float = Field(2.0, gt=0, le=10)
     grid_mult: float = Field(2.0, ge=1.0, le=5)
