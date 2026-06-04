@@ -425,3 +425,14 @@ Not implemented; documented as a rejected tactic.
     conditional rolling (move≥call-cost + profit, not schedule). assets ?v=49. 71 tests.
   - LESSON: implement doctrine LITERALLY; substituting an "equivalent" mechanism (gamma for the
     unhedged reserve) changed the result and was wrong. Folded into the skill habit.
+
+## Tab 9 — show the ⅓-third split into N working parts + fix the first-step calibration (2026-06-04)
+- **D46** — User: "the ⅓ scalp third must then be split into 5 working parts — did you miss that?"
+  No — `setup_grid` already splits the intraday third into `n_parts` (default 5) working parts at
+  exponential offsets, part_lots = limit/n_parts. BUT the OLD default first step (grid_atr_frac=2.0,
+  mult=2) put the 5 parts at 2/6/14/30/62·ATR → parts 3-5 essentially never fired (only ~1-2 of 5
+  worked). Fixed the calibration to the doctrine ("ATR sets only the FIRST step", small): default
+  grid_atr_frac 2.0→0.5, so parts sit at 0.5/1.5/3.5/7.5/15.5·ATR — part 1 the workhorse, outer ones
+  the exponential emergency reserve (rarely hit, by design). Engine emits `grid_setup` trace events;
+  Tab 9 now DRAWS the N working-part levels (dotted, labelled ч.1..N) + center, so the split is
+  visible and you can see which parts are reachable. 71 tests. assets ?v=50.

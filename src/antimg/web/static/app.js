@@ -988,9 +988,20 @@ async function renderHiExec(d) {
   ((d.confident_flat || {}).x || []).forEach((x) => shapes.push({
     type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
     line: { color: "#3fb950", width: 1, dash: "dot" }, layer: "below" }));
+  // the n_parts working-part levels of the intraday third (first period): sell above / buy below
+  const annos = [];
+  if (d.grid_levels) {
+    const gl = d.grid_levels, x1 = d.price.x[d.price.x.length - 1];
+    gl.sell.forEach((lv, k) => { shapes.push({ type: "line", xref: "paper", yref: "y", x0: 0, x1: 1, y0: lv, y1: lv, line: { color: "#5a4a2a", width: 1, dash: "dot" }, layer: "below" });
+      annos.push({ xref: "paper", x: 1, y: lv, yref: "y", xanchor: "left", text: ` ч.${k + 1}`, showarrow: false, font: { size: 8, color: "#8b6d3a" } }); });
+    gl.buy.forEach((lv, k) => { shapes.push({ type: "line", xref: "paper", yref: "y", x0: 0, x1: 1, y0: lv, y1: lv, line: { color: "#2a3a5a", width: 1, dash: "dot" }, layer: "below" });
+      annos.push({ xref: "paper", x: 1, y: lv, yref: "y", xanchor: "left", text: ` ч.${k + 1}`, showarrow: false, font: { size: 8, color: "#3a557f" } }); });
+    shapes.push({ type: "line", xref: "paper", yref: "y", x0: 0, x1: 1, y0: gl.center, y1: gl.center, line: { color: "#f0c000", width: 1 }, layer: "below" });
+  }
   await plot("hx-exec", [ubT, lbT, price, strike, sh, lo, cl, heals, rolls], layout(
-    `${d.ticker} — ЛОГИКА ПИ: 🟥 тренд (вне BB → скальп в стороне) · бел.=флет (скальп) · 🟢┊=уверенный флет`, {
-      height: 460, shapes, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
+    `${d.ticker} — ЛОГИКА ПИ: ⅓-скальп = ${d.n_parts || 5} раб. частей (пунктир ч.1..N) · 🟥 тренд (вне BB) · 🟢┊ уверенный флет`, {
+      height: 480, shapes, annotations: annos,
+      xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
   await plot("hx-pnl", [
     { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл (гамма−тета)", line: { color: "#f0c000", width: 1.5 } },
     { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп", line: { color: "#5b9dff", width: 1.5 } },
@@ -1007,7 +1018,8 @@ async function renderHiExec(d) {
     + `── МОЯ ЛОГИКА НА ГРАФИКЕ (как определяю флет/тренд и когда бросать части) ──\n`
     + `🟥 красная заливка = ТРЕНД (цена ВНЕ полосы Боллинджера) → новые контр-трендовые части НЕ ставлю, стреддл бежит.\n`
     + `   белый фон (цена ВНУТРИ полосы) = ФЛЕТ → скальплю контр-тренд: 🔻шорт у верха / 🔺лонг у низа, ○ выход на возврате.\n`
-    + `🟢┊ зелёный пунктир = «УВЕРЕННЫЙ ФЛЕТ» (≥3 чистых круговых подряд без залипания) — доктрина разрешает наращивать лот.\n`
+    + `┊ горизонтальный пунктир = ${d.n_parts || 5} РАБОЧИХ ЧАСТЕЙ интрадейной трети (ч.1..${d.n_parts || 5}): ч.1 близко к центру (срабатывает часто), дальние — экспоненциальный аварийный резерв (редко). Жёлтая линия = центр/страйк.\n`
+    + `🟢┊ зелёный вертик. пунктир = «УВЕРЕННЫЙ ФЛЕТ» (≥3 чистых круговых подряд без залипания) — доктрина разрешает наращивать лот.\n`
     + `✚ оранжевый крест = «ЛЕЧЕНИЕ» залипшей части: цена ушла за всю сетку, но НАКОПЛЕННОЙ ПРИБЫЛИ хватает — закрываю и переношу сетку\n`
     + `   к текущей цене. Если прибыли НЕ хватает — НЕ трогаю (переношу до ролла, платит стреддл). Это и есть ответ «когда бросать часть».\n`
     + `◆ = ролл стреддла.\n`

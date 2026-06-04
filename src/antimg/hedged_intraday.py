@@ -118,7 +118,7 @@ def _drawdown(equity: list[float]) -> float:
 def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         starting_bank: float = 10_000.0, risk_pct: float = 0.20,
                         dte_days: int = 365, roll_buffer_days: int = 10, r: float = 0.045,
-                        qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 2.0,
+                        qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 0.5,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
                         scalp_model: str = "grid", scalp_recenter_days: int = 0,
                         heal_with_profit: bool = True, confident_flat_n: int = 3,
@@ -205,7 +205,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     clean_streak = 0              # consecutive clean round-trips with no stuck/heal → уверенный флет
     GRID: dict = {}
 
-    def setup_grid(center: float, atr_open: float, n_str: float):
+    def setup_grid(center: float, atr_open: float, n_str: float, date=None):
         step = grid_atr_frac * atr_open if atr_open > 0 else abs(center) * 0.01
         offs, acc = [], 0.0
         for k in range(n_parts):
@@ -221,6 +221,12 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                     inner_dn=[center] + buy_lv[:-1],      # sell target for a long at buy_lv[k]
                     part_lots=lim / max(1, n_parts),
                     sarm=[True] * n_parts, barm=[True] * n_parts, legs=[])
+        if trace is not None and date is not None:        # emit the 5 working-part levels for the chart
+            trace.append({"t": "grid_setup", "date": date.date().isoformat(),
+                          "center": round(center, 4),
+                          "sell": [round(x, 4) for x in sell_lv],
+                          "buy": [round(x, 4) for x in buy_lv],
+                          "part_lots": round(lim / max(1, n_parts), 3)})
 
     def _book_roundtrip(pnl):                             # уверенный флет / heal budget bookkeeping
         nonlocal heal_budget, clean_streak
@@ -303,7 +309,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     last_recenter = idx[i]
     if scalp_model == "grid":
         setup_grid(st["K"], atr_np[i] if np.isfinite(atr_np[i]) and atr_np[i] > 0 else st["S0"] * 0.01,
-                   st["n_str"])
+                   st["n_str"], date=idx[i])
 
     def straddle_unreal(S, d):
         T_rem = max((st["expiry"] - d).days / 365.0, 1e-6)
@@ -353,7 +359,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                               "spot": round(float(S), 4), "new_strike": round(st["K"], 4),
                               "iv": round(st["sig"], 4), "n_straddles": round(st["n_str"], 3)})
             if scalp_model == "grid":
-                setup_grid(st["K"], atr_d, st["n_str"])
+                setup_grid(st["K"], atr_d, st["n_str"], date=d)
                 last_recenter = d
 
         # ---- OPTIONAL grid re-centering (scalp_recenter_days>0, default OFF) ----
@@ -364,7 +370,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         if (scalp_model == "grid" and scalp_recenter_days > 0
                 and (d - last_recenter).days >= scalp_recenter_days):
             scalp_close_all(op)                           # realize open legs at today's open
-            setup_grid(op, atr_d, st["n_str"])            # re-anchor grid to current price
+            setup_grid(op, atr_d, st["n_str"], date=d)  # re-anchor grid to current price
             last_recenter = d
 
         # ---- straddle daily mark-to-market + modeled 1-day theta ----
@@ -387,7 +393,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                     scalp_close_all(S)
                     heal_budget -= loss
                     clean_streak = 0                      # a heal interrupts the уверенный-флет streak
-                    setup_grid(S, atr_d, st["n_str"])     # move the field hospital to the current range
+                    setup_grid(S, atr_d, st["n_str"], date=d)  # move the field hospital to the current range
                     res.scalp_heals += 1
                     if trace is not None:
                         trace.append({"t": "scalp_heal", "date": d.date().isoformat(),

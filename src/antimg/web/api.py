@@ -696,6 +696,8 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
     closes = [e for e in trace if e["t"] == "scalp_close"]
     heals = [e for e in trace if e["t"] == "scalp_heal"]
     cflat = [e for e in trace if e["t"] == "confident_flat"]
+    setups = [e for e in trace if e["t"] == "grid_setup"]
+    g0 = setups[0] if setups else None                   # the n_parts working-part levels (first period)
     mid = daily["Close"].rolling(req.bb_window).mean()
     sd = daily["Close"].rolling(req.bb_window).std()
     ub_s = mid + req.bb_k * sd
@@ -731,6 +733,9 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
                         "pnl": [e["pnl"] for e in closes]},
         "heals": {"x": [e["date"] for e in heals], "y": [e["spot"] for e in heals]},
         "confident_flat": {"x": [e["date"] for e in cflat]},
+        "grid_levels": {"sell": g0["sell"], "buy": g0["buy"], "center": g0["center"],
+                        "part_lots": g0["part_lots"]} if g0 else None,
+        "n_parts": req.n_parts,
         "trend_spans": trend_spans,
         "rolls": {"x": [rr["date"] for rr in res.rolls], "y": [rr["spot"] for rr in res.rolls]},
         "equity_total": ser.list_xy(res.equity_dates, res.equity_total, MP),

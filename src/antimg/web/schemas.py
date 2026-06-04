@@ -155,7 +155,7 @@ class HedgedIntradayReq(BaseModel):
     bb_k: float = Field(2.0, gt=0, le=5)
     # scalping grid (three-thirds + exponential spacing)
     n_parts: int = Field(5, ge=1, le=50)                         # working parts (modern universal = 5)
-    grid_atr_frac: float = Field(2.0, gt=0, le=10)            # first grid step = this × the chosen-timeframe ATR (≈2× daily)
+    grid_atr_frac: float = Field(0.5, gt=0, le=10)            # first grid step = this × the chosen-timeframe ATR (≈2× daily)
     grid_mult: float = Field(2.0, ge=1.0, le=5)               # exponential spacing between parts
     intraday_frac: float = Field(0.333, gt=0, le=1.0)         # ⅓ rule: scalp limit as a frac of futures
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)        # range model only: frac of reversed range booked
@@ -189,7 +189,7 @@ class HedgedIntradayScanReq(BaseModel):
     bb_window: int = Field(20, ge=2, le=200)
     bb_k: float = Field(2.0, gt=0, le=5)
     n_parts: int = Field(5, ge=1, le=50)
-    grid_atr_frac: float = Field(2.0, gt=0, le=10)
+    grid_atr_frac: float = Field(0.5, gt=0, le=10)
     grid_mult: float = Field(2.0, ge=1.0, le=5)
     intraday_frac: float = Field(0.333, gt=0, le=1.0)
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)
