@@ -587,8 +587,13 @@ def _intraday_feed(req):
     intraday DataFrame, or None to fall back to the daily bar (fetch failed / not requested)."""
     if getattr(req, "scalp_data", "daily") != "hourly":
         return None
+    # yfinance refuses hourly older than ~730d — clamp the start so the request succeeds; days before
+    # the cutoff just fall back to the daily bar (partial intraday coverage on the recent portion).
+    cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=725)).date().isoformat()
+    start = max(req.start, cutoff)
     try:
-        return datamod.fetch_intraday(req.ticker, "60m", start=req.start, end=getattr(req, "end", None))
+        df = datamod.fetch_intraday(req.ticker, "60m", start=start, end=getattr(req, "end", None))
+        return df if df is not None and not df.empty else None
     except Exception:
         return None
 
