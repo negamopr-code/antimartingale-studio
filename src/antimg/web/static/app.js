@@ -1028,7 +1028,36 @@ async function renderHiExec(d) {
         : s.scalp_pnl > 0
         ? `→ Флет/диапазон: контр-скальп собрал mean-reversion (+${f(s.scalp_pnl)}) и помог отбить тету.`
         : `→ Тихий/дрейфовый рынок: скальп около нуля, стреддл платит тету — характерно для не-целевого инструмента.`);
+  renderHiLedger(d, s);
   renderHiRules(d, s);
+}
+
+// per-part scalp ledger: every entry/exit in order, with a running cumulative P&L
+function renderHiLedger(d, s) {
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const led = d.ledger || [];
+  const head = "<tr><th>#</th><th>дата</th><th>событие</th><th>часть</th><th>сторона</th>"
+    + "<th>цена</th><th>лот</th><th>P&L</th><th>Σ накопл.</th></tr>";
+  const body = led.map((e, i) => {
+    const cls = e.kind === "выход" ? (e.pnl >= 0 ? "w" : "l") : "";
+    const pcol = e.pnl > 0 ? "#3fb950" : e.pnl < 0 ? "#f85149" : "#8b949e";
+    const ccol = e.cum >= 0 ? "#3fb950" : "#f85149";
+    return `<tr class="${cls}"><td>${i + 1}</td><td>${e.date}</td>`
+      + `<td>${e.kind === "вход" ? "▸ вход" : "◂ выход"}</td><td style="text-align:center">ч.${e.part}</td>`
+      + `<td>${e.side === "short" ? "🔻шорт" : "🔺лонг"}</td><td>${f(e.price)}</td><td>${f(e.lots)}</td>`
+      + `<td style="color:${pcol}">${e.kind === "выход" ? (e.pnl >= 0 ? "+" : "") + f(e.pnl) : "—"}</td>`
+      + `<td style="color:${ccol};font-weight:600">${e.cum >= 0 ? "+" : ""}${f(e.cum)}</td></tr>`;
+  }).join("");
+  // per-part subtotals (складываем части между собой) + grand total
+  const pp = (d.per_part || []).map((p) =>
+    `ч.${p.part}: ${p.round_trips} круговых, итог ${p.pnl >= 0 ? "+" : ""}${f(p.pnl)}`).join("   ·   ");
+  const tot = (d.per_part || []).reduce((a, p) => a + p.pnl, 0);
+  const note = `${led.length}${d.ledger_full > led.length ? ` из ${d.ledger_full}` : ""} событий · `
+    + `ПО ЧАСТЯМ: ${pp || "—"}   ·   ИТОГО реализованного скальпа: ${tot >= 0 ? "+" : ""}${f(tot)} `
+    + `(незакрытые залипшие части в Σ не входят — они в графике P&L «скальп»)`;
+  $("#hx-ledger").innerHTML = led.length
+    ? `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div><div class="tt-note">${note}</div>`
+    : `<div class="tt-note">в этом окне контр-трендовых сделок не было (цена всё время в тренде / вне полосы).</div>`;
 }
 
 // rule-by-rule doctrine compliance — so a skipped rule is VISIBLE, not silently missing

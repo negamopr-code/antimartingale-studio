@@ -259,7 +259,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         g["legs"].append({"side": "S", "k": k, "entry": lv,
                                           "target": g["inner_up"][k], "lots": pl})
                         g["sarm"][k] = False; scalp_cost_cum += fee * pl * lv
-                        _rec("scalp_open", side="short", price=round(lv, 4), lots=round(pl, 3))
+                        _rec("scalp_open", side="short", part=k + 1, price=round(lv, 4), lots=round(pl, 3))
                 for leg in g["legs"][:]:                  # close longs at their sell-target
                     if leg["side"] == "L" and a < leg["target"] <= b:
                         pnl = (leg["target"] - leg["entry"]) * leg["lots"]
@@ -267,8 +267,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
                         res.scalp_round_trips += 1; _book_roundtrip(pnl)
                         g["barm"][leg["k"]] = True; g["legs"].remove(leg)
-                        _rec("scalp_close", side="long", entry=round(leg["entry"], 4),
-                             exit=round(leg["target"], 4), pnl=round(pnl, 2))
+                        _rec("scalp_close", side="long", part=leg["k"] + 1, lots=round(leg["lots"], 3),
+                             entry=round(leg["entry"], 4), exit=round(leg["target"], 4), pnl=round(pnl, 2))
             elif b < a:                                   # falling segment
                 for k in range(n_parts):                  # enter longs at buy-levels crossed down
                     lv = g["buy_lv"][k]
@@ -276,7 +276,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         g["legs"].append({"side": "L", "k": k, "entry": lv,
                                           "target": g["inner_dn"][k], "lots": pl})
                         g["barm"][k] = False; scalp_cost_cum += fee * pl * lv
-                        _rec("scalp_open", side="long", price=round(lv, 4), lots=round(pl, 3))
+                        _rec("scalp_open", side="long", part=k + 1, price=round(lv, 4), lots=round(pl, 3))
                 for leg in g["legs"][:]:                  # buy back shorts at their target
                     if leg["side"] == "S" and b <= leg["target"] < a:
                         pnl = (leg["entry"] - leg["target"]) * leg["lots"]
@@ -284,7 +284,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
                         res.scalp_round_trips += 1; _book_roundtrip(pnl)
                         g["sarm"][leg["k"]] = True; g["legs"].remove(leg)
-                        _rec("scalp_close", side="short", entry=round(leg["entry"], 4),
+                        _rec("scalp_close", side="short", part=leg["k"] + 1, lots=round(leg["lots"], 3),
+                             entry=round(leg["entry"], 4),
                              exit=round(leg["target"], 4), pnl=round(pnl, 2))
 
     def scalp_open_mtm(S):

@@ -698,6 +698,22 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
     cflat = [e for e in trace if e["t"] == "confident_flat"]
     setups = [e for e in trace if e["t"] == "grid_setup"]
     g0 = setups[0] if setups else None                   # the n_parts working-part levels (first period)
+    # ── per-part scalp LEDGER: every entry/exit in order, with a running cumulative scalp P&L ──
+    ledger, cum, per_part = [], 0.0, {}
+    for e in trace:
+        if e["t"] == "scalp_open":
+            ledger.append({"date": e["date"], "kind": "вход", "part": e["part"], "side": e["side"],
+                           "price": e["price"], "lots": e["lots"], "pnl": 0.0, "cum": round(cum, 2)})
+        elif e["t"] == "scalp_close":
+            cum += e["pnl"]
+            ledger.append({"date": e["date"], "kind": "выход", "part": e["part"], "side": e["side"],
+                           "price": e["exit"], "lots": e["lots"], "pnl": e["pnl"], "cum": round(cum, 2)})
+            pp = per_part.setdefault(e["part"], {"part": e["part"], "round_trips": 0, "pnl": 0.0})
+            pp["round_trips"] += 1; pp["pnl"] = round(pp["pnl"] + e["pnl"], 2)
+    ledger_full = len(ledger)
+    if len(ledger) > 4000:                                # anti-bloat for very long windows
+        ledger = ledger[:4000]
+    per_part = [per_part[k] for k in sorted(per_part)]
     mid = daily["Close"].rolling(req.bb_window).mean()
     sd = daily["Close"].rolling(req.bb_window).std()
     ub_s = mid + req.bb_k * sd
@@ -736,6 +752,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
         "grid_levels": {"sell": g0["sell"], "buy": g0["buy"], "center": g0["center"],
                         "part_lots": g0["part_lots"]} if g0 else None,
         "n_parts": req.n_parts,
+        "ledger": ledger, "ledger_full": ledger_full, "per_part": per_part,
         "trend_spans": trend_spans,
         "rolls": {"x": [rr["date"] for rr in res.rolls], "y": [rr["spot"] for rr in res.rolls]},
         "equity_total": ser.list_xy(res.equity_dates, res.equity_total, MP),

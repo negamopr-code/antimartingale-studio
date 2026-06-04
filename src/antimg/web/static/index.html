@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=50"/>
+  <link rel="stylesheet" href="/style.css?v=51"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -294,10 +294,12 @@
     </form>
     <div class="results"><div class="plots"><div id="hx-exec"></div><div id="hx-pnl"></div></div>
       <pre class="stats" id="hx-stats"></pre></div>
+    <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧾 Леджер скальпа — входы/выходы по рабочим частям + накопительный итог ↓</h3>
+    <div class="tradetable" id="hx-ledger"></div>
     <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">📋 Проверка правил доктрины (rule-by-rule) — что применено в этом прогоне ↓</h3>
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=50"></script>
+  <script src="/app.js?v=51"></script>
 </body>
 </html>
