@@ -582,7 +582,18 @@ def inspect(req: InspectReq):
 
 
 # ----------------------------------------------------------------- tab 8: hedged intraday (ПИ)
-def _run_hi(daily, datr, vm, realized, req, trace=None):
+def _intraday_feed(req):
+    """Fetch the hourly scalp feed when req.scalp_data=='hourly' (yfinance ~730d). Returns the
+    intraday DataFrame, or None to fall back to the daily bar (fetch failed / not requested)."""
+    if getattr(req, "scalp_data", "daily") != "hourly":
+        return None
+    try:
+        return datamod.fetch_intraday(req.ticker, "60m", start=req.start, end=getattr(req, "end", None))
+    except Exception:
+        return None
+
+
+def _run_hi(daily, datr, vm, realized, req, trace=None, intraday=None):
     """Call the ПИ engine with the knobs from a HedgedIntradayReq or HedgedIntradayScanReq
     (they share field names). Returns the HedgedIntradayResult."""
     return hi.run_hedged_intraday(
@@ -594,7 +605,8 @@ def _run_hi(daily, datr, vm, realized, req, trace=None):
         bb_window=req.bb_window, bb_k=req.bb_k,
         scalp_efficiency=req.scalp_efficiency, max_rt_per_day=req.max_rt_per_day,
         stuck_penalty=req.stuck_penalty, commission_pct=req.commission_pct,
-        slippage_pct=req.slippage_pct, vol_model=vm, realized_vol=realized, trace=trace)
+        slippage_pct=req.slippage_pct, vol_model=vm, realized_vol=realized,
+        intraday=intraday, trace=trace)
 
 
 def _hi_summary(res, starting_bank: float) -> dict:
@@ -635,7 +647,7 @@ def hedged_intraday(req: HedgedIntradayReq):
         raise HTTPException(status_code=422, detail="not enough data in this window for the ATR period")
     datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)  # grid-step ATR (daily/weekly/monthly)
     vm, realized = _build_vol(req, daily)
-    res = _run_hi(daily, datr, vm, realized, req)
+    res = _run_hi(daily, datr, vm, realized, req, intraday=_intraday_feed(req))
     if not res.table:
         raise HTTPException(status_code=422, detail="no straddle periods resolved for these params")
     rolls = res.rolls
@@ -666,7 +678,7 @@ def hedged_intraday(req: HedgedIntradayReq):
             "total_cost": round(res.total_cost, 2),
             "scalp_model": res.scalp_model, "scalp_round_trips": res.scalp_round_trips,
             "scalp_heals": res.scalp_heals, "confident_flat_days": res.confident_flat_days,
-            "scalp_scaled_max": res.scalp_scaled_max, "n_parts": req.n_parts,
+            "scalp_scaled_max": res.scalp_scaled_max, "n_parts": req.n_parts, "intraday_bars": res.intraday_bars,
             "grid_timeframe": req.grid_timeframe, "use_bbands": req.use_bbands,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
         },
@@ -692,7 +704,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
     datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
     vm, realized = _build_vol(req, daily)
     trace: list = []
-    res = _run_hi(daily, datr, vm, realized, req, trace=trace)
+    res = _run_hi(daily, datr, vm, realized, req, trace=trace, intraday=_intraday_feed(req))
     if not res.table:
         raise HTTPException(status_code=422, detail="no straddle period resolved in this window")
     opens = [e for e in trace if e["t"] == "scalp_open"]
@@ -777,7 +789,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             "scalp_round_trips": res.scalp_round_trips, "n_rolls": res.n_rolls,
             "scalp_opens": len(opens), "scalp_stuck_at_end": len(opens) - len(closes),
             "scalp_heals": res.scalp_heals, "confident_flat_days": res.confident_flat_days,
-            "scalp_scaled_max": res.scalp_scaled_max, "trend_days": int(out.sum()),
+            "scalp_scaled_max": res.scalp_scaled_max, "trend_days": int(out.sum()), "intraday_bars": res.intraday_bars,
             "ann_return_pct": round(res.ann_return_pct, 2), "n_days": res.n_days,
             "vol_model": vm.label,
         },

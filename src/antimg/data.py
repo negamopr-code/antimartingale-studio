@@ -96,6 +96,41 @@ def _fetch_stooq(ticker: str) -> pd.DataFrame | None:
         return None
 
 
+def fetch_intraday(ticker: str, interval: str = "60m", start: str | None = None,
+                   end: str | None = None, use_cache: bool = True) -> pd.DataFrame:
+    """Intraday OHLCV bars (DatetimeIndex) for the scalping overlay.
+
+    yfinance limits: 1m≈7d, ≤90m≈60d, 60m≈730d. So for a multi-month/2-year backtest use
+    `interval="60m"` (hourly) — the finest with ~2y of history. Cached per (ticker, interval)
+    like the daily cache; raises on total failure so the caller can fall back to daily bars.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    safe = ticker.replace("/", "_").replace("=", "-").replace("^", "idx_")
+    cp = CACHE_DIR / f"{safe}__{interval}.pkl"
+    if use_cache and cp.exists():
+        df = pd.read_pickle(cp)
+        if not df.empty:
+            return _slice(df, start or "1990-01-01", end)
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, start=start, end=end, interval=interval,
+                         auto_adjust=False, progress=False, threads=False)
+    except Exception as ex:
+        raise RuntimeError(f"intraday fetch failed for {ticker!r} @ {interval}: {ex}")
+    if df is None or df.empty:
+        raise RuntimeError(f"no intraday data for {ticker!r} @ {interval} "
+                           f"(yfinance limits history: 60m≈730d, 1m≈7d)")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df.index = pd.to_datetime(df.index)
+    if getattr(df.index, "tz", None) is not None:
+        df.index = df.index.tz_localize(None)             # tz-naive so _slice/groupby-by-date work
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(how="all")
+    if use_cache:
+        df.to_pickle(cp)
+    return _slice(df, start or "1990-01-01", end)
+
+
 def weekly(df: pd.DataFrame) -> pd.DataFrame:
     """Resample daily OHLC to weekly (week ending Friday)."""
     agg = {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}

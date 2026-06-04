@@ -458,3 +458,14 @@ Not implemented; documented as a rejected tactic.
   be unusably large). 72 tests. assets ?v=54.
   - HABIT: when adding a doctrine feature, surface it on BOTH the main tab and the inspect tab —
     don't leave parity to a follow-up request.
+
+## Tab 8/9 — INTRADAY scalp feed (hourly) — the long-open data item (2026-06-04)
+- **D51** — User: "add an intraday feed for the scalp." `data.fetch_intraday(ticker, "60m", …)`
+  (yfinance hourly ~730d history, cached, tz-naive). Engine `run_hedged_intraday(…, intraday=df)`:
+  groups intraday bars by day and the scalp grid walks the REAL intraday path (many round-trips)
+  instead of one daily OHLC bar; straddle/theta/rolls stay daily. `scalp_data` ('daily'|'hourly') on
+  HedgedIntradayReq (Tab 8 + Tab 9; NOT the scan — 80×2y hourly would hammer yfinance). Graceful
+  fallback to daily if the fetch fails. `res.intraday_bars` surfaced; rule-panel «Скальп» flips ⚠→✅
+  when an intraday feed is used. Synthetic proof: intraday 62 RT/+2916 vs daily 16 RT/+398.
+  - Honest scope: hourly ≈2y only, and 60m is still coarser than live 1-min ПИ — so it's a big step
+    closer (sees intraday chop) but not full tick fidelity; recent-window only. 72 tests. assets ?v=56.

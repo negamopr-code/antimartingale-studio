@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=55"/>
+  <link rel="stylesheet" href="/style.css?v=56"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -236,6 +236,7 @@
       <label>Start <input name="start" value="2018-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
       <label title="grid = событийная сетка на дневном такте; range = интрадей-эвристика (грубая)">Scalp model <select name="scalp_model"><option value="grid">grid (daily-cadence, faithful)</option><option value="range">range (crude heuristic)</option></select></label>
+      <label title="daily = 1 бар/день (интрадей-чоп не виден); hourly = реальные 60m бары (~2 года) → скальп измеряется по внутридневному пути">Scalp data <select name="scalp_data"><option value="daily">daily (1 бар/день)</option><option value="hourly">hourly 60m (~2 года, измеряет скальп)</option></select></label>
       <label title="на каком ТАЙМФРЕЙМЕ брать ATR для шага сетки. daily×2 (дефолт) = шаг ~2 дневных ATR (мысль юзера); weekly/monthly = шаг ещё шире.">Grid ATR TF <select name="grid_timeframe"><option value="daily">daily (шаг=×ATR)</option><option value="weekly">weekly (шире)</option><option value="monthly">monthly (ещё шире)</option></select></label>
       <label title="РЕ-ЦЕНТРИРОВАНИЕ сетки к ТЕКУЩЕЙ цене каждые N дней (закрывая залипшие части): сетка СЛЕДУЕТ за ценой и скальпит текущий диапазон, а не висит на годовалом страйке. 0 = заморозить (старое). ~21 ≈ раз в месяц.">Re-center дней <input name="scalp_recenter_days" type="number" value="0"></label>
       <label title="период ATR в барах выбранного таймфрейма">ATR period <input name="atr_period" type="number" value="14"></label>
@@ -283,6 +284,7 @@
       <label>Start <input name="start" value="2020-03-01"></label>
       <label>End <input name="end" value="2020-09-01" placeholder="latest"></label>
       <label title="детектор флета: внутри полосы скальпим контр-тренд, на пробое — стоп новым входам (не фейдим тренд)">Bollinger <select name="use_bbands"><option value="true">on (don't fade breakouts)</option><option value="false">off (fade everything)</option></select></label>
+      <label title="daily = 1 бар/день; hourly = 60m бары (~2 года) → скальп ловит внутридневной чоп (для недавнего окнa)">Scalp data <select name="scalp_data"><option value="daily">daily</option><option value="hourly">hourly 60m (внутридневной)</option></select></label>
       <label>BB window <input name="bb_window" type="number" value="20"></label>
       <label>BB k (σ) <input name="bb_k" type="number" step="any" value="2.0"></label>
       <label title="srok стреддла">DTE days <input name="dte_days" type="number" value="365"></label>
@@ -302,6 +304,6 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=55"></script>
+  <script src="/app.js?v=56"></script>
 </body>
 </html>

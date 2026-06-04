@@ -87,6 +87,7 @@ class HedgedIntradayResult:
     scalp_heals: int = 0               # times stuck parts were healed (re-centered) with accumulated profit
     confident_flat_days: int = 0       # days in "уверенный флет" (≥N clean round-trips, scaling allowed)
     scalp_scaled_max: float = 1.0      # max working-part lot scale-up reached in уверенный флет (1.0 = never)
+    intraday_bars: int = 0             # # intraday bars the scalp walked (>0 ⇒ scalp on a real intraday feed)
 
 
 def _sigma_at(rv: "pd.Series | None", date, default: float) -> float:
@@ -129,7 +130,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         max_rt_per_day: float = 10.0, stuck_penalty: float = 0.5,
                         commission_pct: float = 0.0, slippage_pct: float = 0.0, vol_model=None,
                         realized_vol: "pd.Series | None" = None,
-                        default_sigma: float = 0.20,
+                        default_sigma: float = 0.20, intraday: "pd.DataFrame | None" = None,
                         trace: "list | None" = None) -> HedgedIntradayResult:
     """Daily-bar backtest of the synthetic-straddle + counter-trend-scalping ПИ method.
 
@@ -171,6 +172,14 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     _sd = daily["Close"].rolling(bb_window).std()
     ub_np = (_mid + bb_k * _sd).to_numpy(float)
     lb_np = (_mid - bb_k * _sd).to_numpy(float)
+    # optional INTRADAY feed for the scalp: group bars by calendar day → the grid walks the real
+    # intraday path (many round-trips) instead of one daily OHLC bar. Straddle/theta/rolls stay daily.
+    intraday_by_day: dict = {}
+    if intraday is not None and not intraday.empty:
+        idf = intraday.sort_index()
+        ohlc = idf[["Open", "High", "Low", "Close"]].to_numpy(float)
+        for ts, row in zip(idf.index, ohlc):
+            intraday_by_day.setdefault(ts.normalize(), []).append(row)
 
     # warm up until ATR is finite
     i = 0
@@ -394,7 +403,13 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
 
         # ---- scalping overlay ----
         if scalp_model == "grid":
-            scalp_walk(op, hi, lo, S, ub_np[j], lb_np[j], d)
+            bars = intraday_by_day.get(d.normalize())
+            if bars:                                       # walk the real intraday path of this day
+                for (io, ih, il, ic) in bars:
+                    scalp_walk(io, ih, il, ic, ub_np[j], lb_np[j], d)
+                    res.intraday_bars += 1
+            else:                                          # no intraday feed → the daily bar
+                scalp_walk(op, hi, lo, S, ub_np[j], lb_np[j], d)
             # ---- залипшие части (when to DROP a working part) ----
             # If price has left the WHOLE grid (all near parts stuck) we HEAL — but ONLY by spending
             # accumulated round-trip profit (doctrine: "unstick with accrued profit, else let the

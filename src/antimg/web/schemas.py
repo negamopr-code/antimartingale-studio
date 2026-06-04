@@ -139,6 +139,9 @@ class HedgedIntradayReq(BaseModel):
     # scalp model: 'grid' = event-driven daily-cadence counter-trend grid (daily bars ARE
     # representative when the step is on the daily scale); 'range' = heuristic intraday lower bound
     scalp_model: str = Field("grid", pattern="^(grid|range)$")
+    # scalp data feed: 'daily' = one OHLC bar/day (intraday chop invisible); 'hourly' = real 60m bars
+    # (yfinance ~730d history) so the grid walks the intraday path and finally MEASURES the scalp.
+    scalp_data: str = Field("daily", pattern="^(daily|hourly)$")
     # grid-step timeframe: 'weekly'/'monthly' ATR makes the step WIDER than a daily bar, so each
     # daily bar is sub-step "intraday-like" info within a larger oscillation the grid scalps over
     # several days (the doctrine's "flatten the grid, bigger targets, once-a-day" mode). 'daily' =
