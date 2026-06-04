@@ -446,3 +446,15 @@ Not implemented; documented as a rejected tactic.
   max ×2.00. Visible in the Tab 9 ledger (lot column grows) + panel rule ⚠→✅. 72 tests. assets ?v=52.
   - Panel now: only conditional ROLLING + daily-scalp-data-limit remain ⚠ (rolling = a real mechanic
     to add; data-limit is inherent, not fixable in code).
+
+## Tab 8 parity — doctrine rule-panel + counters on the MAIN tab (2026-06-04)
+- **D50** — User: "apply this on the main tab too — you should do it automatically." The rule LOGIC
+  already ran identically on Tab 8 (one _run_hi→engine), but the rule-compliance PANEL + counters
+  were Tab-9-only. Surfaced scalp_heals / confident_flat_days / scalp_scaled_max / n_parts /
+  use_bbands in the `/api/hedged-intraday` stats; refactored `renderHiRules(d,s,id)` to take a target
+  container + tolerate Tab-8 aggregate-only stats (scalp_opens/trend_days fall back); rendered the
+  same panel under Tab 8. Verified Tab 8 SPY 2015: heals 6, confident-flat 2627 d, lot-scale max
+  ×1.61, RT 252 — same engine. Per-trade ledger stays on Tab 9 (windowed; full-history ledger would
+  be unusably large). 72 tests. assets ?v=54.
+  - HABIT: when adding a doctrine feature, surface it on BOTH the main tab and the inspect tab —
+    don't leave parity to a follow-up request.

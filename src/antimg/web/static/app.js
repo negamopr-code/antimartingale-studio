@@ -849,6 +849,7 @@ async function renderHedged(d) {
       + `  (${$("#form-hedged [name=max_rt_per_day]").value}), позиция не переносится — может как ЗАВЫСИТЬ, так и занизить скальп.\n`
       + `  Для честной картины переключись на модель «grid» (событийная сетка, дневной такт) с длинным DTE.`;
   $("#hi-stats").textContent = verdict;
+  renderHiRules(d, s, "hi-rules");          // same doctrine-compliance panel as Tab 9 (auto-parity)
   renderTable("hi-table", d.table);
 }
 $("#form-hedged").onsubmit = (e) => {
@@ -1029,7 +1030,7 @@ async function renderHiExec(d) {
         ? `→ Флет/диапазон: контр-скальп собрал mean-reversion (+${f(s.scalp_pnl)}) и помог отбить тету.`
         : `→ Тихий/дрейфовый рынок: скальп около нуля, стреддл платит тету — характерно для не-целевого инструмента.`);
   renderHiLedger(d, s);
-  renderHiRules(d, s);
+  renderHiRules(d, s, "hx-rules");
 }
 
 // per-part scalp ledger: every entry/exit in order, with a running cumulative P&L
@@ -1065,9 +1066,13 @@ function renderHiLedger(d, s) {
     : `<div class="tt-note">в этом окне контр-трендовых сделок не было (цена всё время в тренде / вне полосы).</div>`;
 }
 
-// rule-by-rule doctrine compliance — so a skipped rule is VISIBLE, not silently missing
-function renderHiRules(d, s) {
-  const bb = d.use_bbands;
+// rule-by-rule doctrine compliance — so a skipped rule is VISIBLE, not silently missing.
+// Shared by Tab 8 (main backtest, aggregate stats) and Tab 9 (windowed, full trace). `id` = target
+// container; trace-only fields (scalp_opens/trend_days) fall back gracefully on the main tab.
+function renderHiRules(d, s, id) {
+  const bb = (d.use_bbands !== false);                   // schema default is ON; undefined ⇒ ON
+  const opens = s.scalp_opens != null ? `контр-входов: ${s.scalp_opens}` : `круговых: ${s.scalp_round_trips}`;
+  const trendd = s.trend_days != null ? `вне полосы ${s.trend_days} дн → ` : "";
   // status: ok | part | no  ·  note may use this run's numbers
   const R = [
     ["ok", "Синтетический стреддл 2 Колла − 1 Фьючерс, ATM", "страйк ATM = спот, V-payoff, ролл у экспирации"],
@@ -1078,13 +1083,13 @@ function renderHiRules(d, s) {
       "ДОСЛОВНО: коллы (2·n_str) дроблю на трети — база = ⅓ коллов постоянно хеджирую (⅔·n_str фьючей = 33% пол); "
       + "тренд-резерв = ⅓ коллов НЕ хеджирую → в покое позиция net-long, тренд бежит сам; скальп-лимит = ⅓ коллов. "
       + "Проданные фьючи в полосе 33% (только база) … 67% (полный скальп в ралли). Это и тащит GLD/SLV/SPY вверх vs прежнего нейтрала."],
-    ["ok", "Контр-трендовый скальпинг", `контр-входов: ${s.scalp_opens}`],
+    ["ok", "Контр-трендовый скальпинг", opens],
     ["ok", "Экспоненциальная сетка частей", "уровни на смещениях шаг·m^k — дальние части дальше (не вываливаем объём у центра)"],
     ["ok", "Ответные заявки (книжим возврат)", `круговых сделок: ${s.scalp_round_trips}`],
     ["ok", "Уверенный флет → наращивать лот (заслуженный риск)",
       `после ≥3 чистых циклов (${s.confident_flat_days} дн, 🟢┊ на графике) НАРАЩИВАЮ размер рабочей части за счёт НАКОПЛЕННОЙ прибыли — макс. достигнутый множитель ×${(+(s.scalp_scaled_max||1)).toFixed(2)} (кэп ×2, чтобы скальп+база ≤ коллов → не голый). В леджере виден рост колонки «лот».`],
     ["ok", "Залипшие части: нести/лечить за прибыль", `лечений за накопл. прибыль: ${s.scalp_heals}; иначе перенос до ролла (платит стреддл) — не форс-реализуем`],
-    [bb ? "ok" : "no", "Не фейдить тренд — встать в сторону (BB)", bb ? `вне полосы Боллинджера ${s.trend_days} дн → новые контр-входы СТОП (🟥 на графике)` : "BB-гейт ВЫКЛЮЧЕН — фейдим каждый уровень → правило НЕ применяется ❌"],
+    [bb ? "ok" : "no", "Не фейдить тренд — встать в сторону (BB)", bb ? `${trendd}новые контр-входы СТОП на пробое полосы (🟥 на графике вкладки 9)` : "BB-гейт ВЫКЛЮЧЕН — фейдим каждый уровень → правило НЕ применяется ❌"],
     ["part", "Роллирование только на крупном ходе И в плюсе",
       "роллю ПО РАСПИСАНИЮ (за roll_buffer дней до экспирации). Доктрина: роллить ТОЛЬКО когда ход ≥ стоимости колла И ты в плюс-зоне (мелкие ходы не роллить = «пустая суета»). Условие «ход+профит» не реализовано → потому ЧАСТИЧНО."],
     ["ok", "Макс. убыток = премия (риск-кэп)", "стреддл за период не теряет больше уплаченной премии (V-payoff)"],
@@ -1099,7 +1104,7 @@ function renderHiRules(d, s) {
     + `<td style="white-space:nowrap;vertical-align:top">${rule}</td>`
     + `<td style="color:#8b949e;white-space:normal;max-width:640px;line-height:1.4">${note}</td></tr>`).join("");
   const nOk = R.filter((r) => r[0] === "ok").length, nPart = R.filter((r) => r[0] === "part").length, nNo = R.filter((r) => r[0] === "no").length;
-  $("#hx-rules").innerHTML =
+  $("#" + id).innerHTML =
     `<div class="tt-scroll"><table><thead><tr><th>✓</th><th>правило доктрины</th><th>как в этом прогоне</th></tr></thead>`
     + `<tbody>${rows}</tbody></table></div>`
     + `<div class="tt-note">✅ применено: ${nOk}  ·  ⚠ частично: ${nPart}  ·  ❌ не применено: ${nNo}  —  честная картина: ядро (стреддл/сетка/залипшие/не-фейдить-тренд) применено; «уверенный-флет наращивание» и «условный ролл» пока частично; скальп на дневках ограничен данными.</div>`;

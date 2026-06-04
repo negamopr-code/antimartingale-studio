@@ -665,9 +665,12 @@ def hedged_intraday(req: HedgedIntradayReq):
             "max_premium_at_risk": round(res.max_premium_at_risk, 2),
             "total_cost": round(res.total_cost, 2),
             "scalp_model": res.scalp_model, "scalp_round_trips": res.scalp_round_trips,
-            "grid_timeframe": req.grid_timeframe,
+            "scalp_heals": res.scalp_heals, "confident_flat_days": res.confident_flat_days,
+            "scalp_scaled_max": res.scalp_scaled_max, "n_parts": req.n_parts,
+            "grid_timeframe": req.grid_timeframe, "use_bbands": req.use_bbands,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
         },
+        "use_bbands": req.use_bbands,
     }
 
 
