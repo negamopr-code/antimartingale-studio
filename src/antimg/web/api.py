@@ -823,6 +823,9 @@ def hedged_intraday_scan(req: HedgedIntradayScanReq):
         "profitable_pct": round(100.0 * len(profitable) / len(ok), 1) if ok else 0.0,
         "median_cagr_pct": round(median(cagrs), 2),
         "mean_cagr_pct": round(sum(cagrs) / len(cagrs), 2) if cagrs else 0.0,
+        # mean with the single BEST instrument dropped — exposes how much the headline rests on one
+        # outlier (e.g. SOL). If this is ≪ the full mean, the average is outlier-carried.
+        "mean_cagr_ex_best_pct": round(sum(cagrs[:-1]) / len(cagrs[:-1]), 2) if len(cagrs) > 1 else 0.0,
         "median_scalp_cover_pct": round(median(covers), 1),
         "loss_cap_ok_pct": round(100.0 * sum(1 for r in ok if r["loss_cap_ok"]) / len(ok), 1) if ok else 0.0,
         "best": max(ok, key=lambda r: r["cagr_pct"], default=None),

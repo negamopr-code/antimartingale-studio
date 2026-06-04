@@ -915,6 +915,8 @@ async function renderHiScan(d) {
     + `(крипта/металлы/энергия), а не FX и медленные ETF. Плюс СКАЛЬП недо-измерен на дневках (см. ниже).\n\n`
     + `── вся панель (${s.ok} инстр.) ──\n`
     + `${s.profitable}/${s.ok} в плюсе (${f(s.profitable_pct)}%)   ·   медианный CAGR : ${f(s.median_cagr_pct)}%   ·   средний : ${f(s.mean_cagr_pct)}%\n`
+    + (s.mean_cagr_ex_best_pct != null
+        ? `среднее БЕЗ лучшего (${s.best ? s.best.ticker : "—"}) : ${f(s.mean_cagr_ex_best_pct)}%   ← если резко падает, headline держится на одном выбросе\n` : "")
     + (tgt.length
         ? `── доктринные таргеты (крипта/металлы/энергия, ${tgt.length} инстр.) ──\n`
           + `  ${tgtProf}/${tgt.length} в плюсе (${f(100 * tgtProf / tgt.length)}%)   ·   медианный CAGR : ${f(tgtMed)}%\n`
