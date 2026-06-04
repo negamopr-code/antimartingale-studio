@@ -699,15 +699,24 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
     setups = [e for e in trace if e["t"] == "grid_setup"]
     g0 = setups[0] if setups else None                   # the n_parts working-part levels (first period)
     # ── per-part scalp LEDGER: every entry/exit in order, with a running cumulative scalp P&L ──
-    ledger, cum, per_part = [], 0.0, {}
+    ledger, cum, per_part, open_parts = [], 0.0, {}, []
+    def _open_str():                                      # current open position, e.g. "ч.1+ч.2"
+        return "+".join(f"ч.{p}" for p in sorted(set(open_parts))) if open_parts else "—"
     for e in trace:
         if e["t"] == "scalp_open":
+            open_parts.append(e["part"])
             ledger.append({"date": e["date"], "kind": "вход", "part": e["part"], "side": e["side"],
-                           "price": e["price"], "lots": e["lots"], "pnl": 0.0, "cum": round(cum, 2)})
+                           "price": e["price"], "lots": e["lots"], "pnl": 0.0, "cum": round(cum, 2),
+                           "streak": e.get("streak", 0), "conf_flat": e.get("conf_flat", False),
+                           "scale": e.get("scale", 1.0), "open": _open_str()})
         elif e["t"] == "scalp_close":
             cum += e["pnl"]
+            if e["part"] in open_parts:
+                open_parts.remove(e["part"])
             ledger.append({"date": e["date"], "kind": "выход", "part": e["part"], "side": e["side"],
-                           "price": e["exit"], "lots": e["lots"], "pnl": e["pnl"], "cum": round(cum, 2)})
+                           "price": e["exit"], "lots": e["lots"], "pnl": e["pnl"], "cum": round(cum, 2),
+                           "streak": e.get("streak", 0), "conf_flat": e.get("conf_flat", False),
+                           "scale": e.get("scale", 1.0), "open": _open_str()})
             pp = per_part.setdefault(e["part"], {"part": e["part"], "round_trips": 0, "pnl": 0.0})
             pp["round_trips"] += 1; pp["pnl"] = round(pp["pnl"] + e["pnl"], 2)
     ledger_full = len(ledger)

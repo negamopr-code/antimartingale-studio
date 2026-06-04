@@ -248,18 +248,21 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         # working-part lot UP — funded by ACCRUED PROFIT only (heal_budget). Capped at ×2 so the total
         # scalp (n_parts·2·base) never exceeds calls−base ⇒ still never naked.
         pl = g["part_lots"]
+        lot_scale = 1.0
         if confident_flat_scale and clean_streak >= confident_flat_n and st["prem_book"] > 0:
-            scale = 1.0 + min(max(heal_budget, 0.0) / st["prem_book"], 1.0)
-            pl *= scale
-            if scale > res.scalp_scaled_max:
-                res.scalp_scaled_max = round(scale, 3)
+            lot_scale = 1.0 + min(max(heal_budget, 0.0) / st["prem_book"], 1.0)
+            pl *= lot_scale
+            if lot_scale > res.scalp_scaled_max:
+                res.scalp_scaled_max = round(lot_scale, 3)
         # FLAT gate: don't open a counter-trend leg into a breakout (short above the upper band /
         # long below the lower band) — step aside, let the straddle run. Exits are always allowed.
         gate_short = (lambda lv: not (use_bbands and np.isfinite(ub) and lv > ub))
         gate_long = (lambda lv: not (use_bbands and np.isfinite(lb) and lv < lb))
         def _rec(t, **kw):
             if trace is not None:
-                trace.append({"t": t, "date": date.date().isoformat(), **kw})
+                trace.append({"t": t, "date": date.date().isoformat(),
+                              "streak": clean_streak, "conf_flat": clean_streak >= confident_flat_n,
+                              "scale": round(lot_scale, 3), **kw})
         path = [o, l, h, c] if c >= o else [o, h, l, c]
         for a, b in zip(path, path[1:]):
             if b > a:                                     # rising segment

@@ -1037,14 +1037,19 @@ function renderHiLedger(d, s) {
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
   const led = d.ledger || [];
   const head = "<tr><th>#</th><th>дата</th><th>событие</th><th>часть</th><th>сторона</th>"
-    + "<th>цена</th><th>лот</th><th>P&L</th><th>Σ накопл.</th></tr>";
+    + "<th>цена</th><th>лот</th><th>серия</th><th>уверенный флет</th><th>открыто</th><th>P&L</th><th>Σ накопл.</th></tr>";
   const body = led.map((e, i) => {
     const cls = e.kind === "выход" ? (e.pnl >= 0 ? "w" : "l") : "";
     const pcol = e.pnl > 0 ? "#3fb950" : e.pnl < 0 ? "#f85149" : "#8b949e";
     const ccol = e.cum >= 0 ? "#3fb950" : "#f85149";
+    const flat = e.conf_flat
+      ? `<span style="color:#3fb950">🟢 да${e.scale > 1.001 ? ` ·лот ×${(+e.scale).toFixed(2)}` : ""}</span>`
+      : `<span style="color:#8b949e">—</span>`;
     return `<tr class="${cls}"><td>${i + 1}</td><td>${e.date}</td>`
       + `<td>${e.kind === "вход" ? "▸ вход" : "◂ выход"}</td><td style="text-align:center">ч.${e.part}</td>`
       + `<td>${e.side === "short" ? "🔻шорт" : "🔺лонг"}</td><td>${f(e.price)}</td><td>${f(e.lots)}</td>`
+      + `<td style="text-align:center">${e.streak}</td><td style="white-space:nowrap">${flat}</td>`
+      + `<td style="white-space:nowrap;color:#8b949e">${e.open}</td>`
       + `<td style="color:${pcol}">${e.kind === "выход" ? (e.pnl >= 0 ? "+" : "") + f(e.pnl) : "—"}</td>`
       + `<td style="color:${ccol};font-weight:600">${e.cum >= 0 ? "+" : ""}${f(e.cum)}</td></tr>`;
   }).join("");
