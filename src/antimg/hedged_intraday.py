@@ -20,7 +20,12 @@ Construction (per the corpus, confirmed by live consult 2026-06-04):
         O→H→L→C); resting limit orders fill when crossed; a short at a sell-level is bought back
         one step lower (and vice-versa); each working part holds ≤1 leg so total ≤ the intraday
         limit (never naked); genuinely stuck legs are carried and MtM'd, closed at the roll. No
-        efficiency/round-trip/penalty fudge — daily OHLC is *representative* here, not a bound.
+        efficiency/round-trip/penalty fudge. ⚠ HONEST SCOPE: long-dated options make the THETA
+        faithful, and the straddle GAMMA on big moves is faithful — but the SCALP is still a LOWER
+        BOUND: a daily bar holds ~1 reversal, so this books only ~10–40 round-trips/yr vs live ПИ's
+        ~2500/yr (intraday oscillation isn't in the bar). So the backtest fairly measures "buy a
+        long straddle and roll it" (profitable on volatile/trending instruments — the doctrine's
+        "big fish"), NOT the flat-market scalping that needs intraday data.
       - **range** — legacy CRUDE heuristic `part_lots·(min(max_rt·g1, eff·reversed_range) −
         penalty·max(0,|C−O|−g1))`, reversed_range = (H−L)−|C−O|. NOT mechanically faithful: its
         magnitude is whatever the eff/max_rt knobs are set to (so it can over- OR under-state the
