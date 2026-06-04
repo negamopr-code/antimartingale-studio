@@ -64,6 +64,18 @@ def test_hedged_intraday(client):
     assert {"equity_total", "equity_straddle", "equity_scalp", "theta_path"} <= set(d)
 
 
+def test_hedged_intraday_scan(client):
+    r = client.post("/api/hedged-intraday/scan", json={"atr_period": 10, "start": "2015-01-01"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["summary"]["total"] >= 1 and d["results"]
+    s = d["summary"]
+    assert {"profitable_pct", "median_cagr_pct", "loss_cap_ok_pct"} <= set(s)
+    ok = [row for row in d["results"] if row["ok"]]
+    assert ok, "the synthetic fixture should resolve at least one instrument"
+    assert {"cagr_pct", "scalp_pnl", "loss_cap_ok"} <= set(ok[0])
+
+
 def test_backtest_linear(client):
     r = client.post("/api/backtest/linear", json={"ticker": "SPY", "atr_period": 5,
                                                   "base_bet": 100, "target_streak": 10})

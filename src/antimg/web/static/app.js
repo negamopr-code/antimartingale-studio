@@ -826,6 +826,79 @@ $("#form-hedged").onsubmit = (e) => {
     renderHedged(await post("/api/hedged-intraday", formData(e.target))));
 };
 
+// ---- tab 8 bulk: ПИ across the whole catalog (own sortable table)
+let _hiScan = { rows: [], sort: "cagr_pct", desc: true };
+function renderHiScanTable() {
+  const el = $("#hi-scan-table");
+  const dir = _hiScan.desc ? -1 : 1;
+  const rows = [..._hiScan.rows].sort((a, b) => {
+    if (a.ok !== b.ok) return a.ok ? -1 : 1;
+    if (!a.ok) return 0;
+    const av = a[_hiScan.sort] ?? -Infinity, bv = b[_hiScan.sort] ?? -Infinity;
+    return (av - bv) * dir;
+  });
+  const cols = [["ticker", "ticker"], ["group", "group"], ["cagr_pct", "CAGR %"],
+    ["net", "net $"], ["straddle_pnl", "стреддл $"], ["scalp_pnl", "скальп $"],
+    ["scalp_cover_pct", "тета покрыта %"], ["worst_period_pnl", "худший период $"],
+    ["max_premium_at_risk", "премия cap $"], ["loss_cap_ok", "cap?"],
+    ["max_drawdown", "max DD $"], ["n_rolls", "роллов"]];
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const sgn = (v) => (v > 0 ? "#3fb950" : "#f85149");
+  const head = "<tr>" + cols.map(([k, lbl]) =>
+    `<th data-sort="${k}" style="cursor:pointer">${lbl}${_hiScan.sort === k ? (_hiScan.desc ? " ▼" : " ▲") : ""}</th>`).join("") + "</tr>";
+  const body = rows.map((r) => {
+    if (!r.ok) return `<tr class="l"><td>${r.ticker}</td><td>${r.group}</td>`
+      + `<td colspan="${cols.length - 2}" style="color:#8b949e">⚠ ${r.error}</td></tr>`;
+    return `<tr class="${r.net > 0 ? "w" : "l"}"><td>${r.ticker}</td><td>${r.group}</td>`
+      + `<td style="color:${sgn(r.cagr_pct)}">${f(r.cagr_pct)}</td><td>${f(r.net)}</td>`
+      + `<td style="color:${sgn(r.straddle_pnl)}">${f(r.straddle_pnl)}</td>`
+      + `<td style="color:${sgn(r.scalp_pnl)}">${f(r.scalp_pnl)}</td><td>${f(r.scalp_cover_pct)}</td>`
+      + `<td>${f(r.worst_period_pnl)}</td><td>${f(r.max_premium_at_risk)}</td>`
+      + `<td>${r.loss_cap_ok ? "✅" : "⚠"}</td><td>${f(r.max_drawdown)}</td><td>${r.n_rolls}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="tt-scroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`
+    + `<div class="tt-note">${rows.length} инструментов · клик по заголовку = сортировка</div>`;
+  $$("#hi-scan-table th[data-sort]").forEach((th) => th.onclick = () => {
+    const k = th.dataset.sort;
+    if (_hiScan.sort === k) _hiScan.desc = !_hiScan.desc; else { _hiScan.sort = k; _hiScan.desc = true; }
+    renderHiScanTable();
+  });
+}
+async function renderHiScan(d) {
+  _hiScan = { rows: d.results, sort: "cagr_pct", desc: true };
+  const s = d.summary;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const robust = s.profitable_pct >= 50 && s.median_cagr_pct > 0;
+  let verdict =
+    `${robust ? "✅ ШИРОКО ПРИБЫЛЬНА (in-sample)" : "⚠ УЗКО / ЗАВИСИТ ОТ ИНСТРУМЕНТА"}   `
+    + `${s.profitable}/${s.ok} инструментов в плюсе (${f(s.profitable_pct)}%)\n`
+    + `медианный CAGR : ${f(s.median_cagr_pct)}%   ·   средний CAGR : ${f(s.mean_cagr_pct)}%\n`
+    + (s.best ? `лучший  : ${s.best.ticker}  ${f(s.best.cagr_pct)}%/год  (net ${f(s.best.net)})\n` : "")
+    + (s.worst ? `худший  : ${s.worst.ticker}  ${f(s.worst.cagr_pct)}%/год  (net ${f(s.worst.net)})\n` : "")
+    + (s.failed ? `не загрузилось : ${s.failed}\n` : "")
+    + `медиана покрытия теты скальпом : ${f(s.median_scalp_cover_pct)}%   ·   `
+    + `loss-cap (стреддл ≤ премии) держится : ${f(s.loss_cap_ok_pct)}% инструментов\n\n`
+    + `Доктрина зовёт волатильные инструменты (серебро/ETH) — там гамма стреддла окупает тету,\n`
+    + `а скальп идёт сверху. ⚠ Скальп смоделирован из ДНЕВНЫХ баров (нижняя оценка, см. вкладку выше),\n`
+    + `так что это пессимистичная граница; CAGR vs доктринные 25–40%/год читай с этой поправкой.`;
+  $("#hi-scan-stats").textContent = verdict;
+  const ok = d.results.filter((r) => r.ok).sort((a, b) => a.cagr_pct - b.cagr_pct);
+  await plot("hi-scan-bar", [{
+    type: "bar", orientation: "h",
+    x: ok.map((r) => r.cagr_pct), y: ok.map((r) => r.ticker),
+    marker: { color: ok.map((r) => (r.net > 0 ? "#3fb950" : "#f85149")) },
+    hovertemplate: "%{y}: %{x:.1f}%/год<extra></extra>",
+  }], layout("ПИ CAGR % на инструмент  (одинаковые параметры по всему каталогу)", {
+    height: Math.max(420, 16 * ok.length), margin: { t: 36, r: 20, b: 36, l: 70 },
+    xaxis: { gridcolor: "#2a3340", title: { text: "CAGR % / год" },
+             zeroline: true, zerolinecolor: "#8b949e", zerolinewidth: 1 },
+    yaxis: { gridcolor: "transparent", automargin: true, tickfont: { size: 9 } },
+  }));
+  renderHiScanTable();
+}
+$("#hedged-scan-btn").onclick = (e) => withBusy(e.target, async () =>
+  renderHiScan(await post("/api/hedged-intraday/scan", formData($("#form-hedged")))));
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

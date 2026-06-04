@@ -24,7 +24,7 @@ from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
 from .schemas import (BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
-                      HedgedIntradayReq, InspectReq, OptionsReq, ScanReq)
+                      HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -141,15 +141,19 @@ def backtest_linear(req: BacktestReq):
     return _backtest_payload(daily, res)
 
 
-def _build_vol(req: "OptionsReq", daily):
+def _build_vol(req, daily, ticker: str | None = None):
     """Construct the IV surface (real CBOE term structure + fixed-β skew) for the option model.
 
     Falls back to the asset's realized vol when no vol index is available (non-S&P/-VXN/etc),
     and to a flat constant when iv_source='constant'. With use_term_structure=False only the
     nearest tenor is used (flat in T). Returns a vol.VolModel (see src/antimg/vol.py).
+
+    `ticker` overrides `req.ticker` — used by the hedged-intraday scan, whose request has no
+    single ticker (it iterates the catalog), so each instrument builds its own surface.
     """
+    ticker = ticker or req.ticker
     realized = datamod.realized_vol(daily["Close"], req.iv_window)
-    vm = volmod.build(req.ticker, req.start, iv_source=req.iv_source,
+    vm = volmod.build(ticker, req.start, iv_source=req.iv_source,
                       skew_beta=req.skew_beta, realized=realized, iv_const=req.iv_const)
     if not req.use_term_structure and len(vm._T) > 1:    # collapse to the tenor nearest the option
         target = req.dte_days / 365.0
@@ -578,6 +582,38 @@ def inspect(req: InspectReq):
 
 
 # ----------------------------------------------------------------- tab 8: hedged intraday (ПИ)
+def _run_hi(daily, datr, vm, realized, req):
+    """Call the ПИ engine with the knobs from a HedgedIntradayReq or HedgedIntradayScanReq
+    (they share field names). Returns the HedgedIntradayResult."""
+    return hi.run_hedged_intraday(
+        daily, datr, starting_bank=req.starting_bank, risk_pct=req.risk_pct,
+        dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
+        n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
+        intraday_frac=req.intraday_frac, scalp_efficiency=req.scalp_efficiency,
+        max_rt_per_day=req.max_rt_per_day, stuck_penalty=req.stuck_penalty,
+        commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+        vol_model=vm, realized_vol=realized)
+
+
+def _hi_summary(res, starting_bank: float) -> dict:
+    """Per-instrument bottom line for the ПИ scan (one row)."""
+    net = res.final_bank - starting_bank
+    return {
+        "net": round(net, 2),
+        "ret_pct": round(100.0 * net / max(1e-9, starting_bank), 2),
+        "cagr_pct": round(res.ann_return_pct, 2),
+        "straddle_pnl": round(res.straddle_pnl, 2),
+        "scalp_pnl": round(res.scalp_pnl, 2),
+        "scalp_cover_pct": round(res.scalp_covers_theta_pct, 1),
+        "n_rolls": res.n_rolls, "n_days": res.n_days, "years": round(res.years, 2),
+        "max_drawdown": round(res.max_drawdown, 2),
+        "worst_period_pnl": round(res.worst_period_pnl, 2),
+        "max_premium_at_risk": round(res.max_premium_at_risk, 2),
+        # the straddle loss cap holds if the worst single period never lost more than its premium
+        "loss_cap_ok": bool(res.worst_period_pnl >= -res.max_premium_at_risk - 1e-6),
+    }
+
+
 @app.post("/api/hedged-intraday")
 def hedged_intraday(req: HedgedIntradayReq):
     """Прикрытый Интрадей (Korovin): a long synthetic straddle (2 ATM calls − 1 future) whose
@@ -596,14 +632,7 @@ def hedged_intraday(req: HedgedIntradayReq):
         raise HTTPException(status_code=422, detail="not enough data in this window for the ATR period")
     datr = datamod.atr(daily, req.atr_period)                 # DAILY ATR = grid step scale
     vm, realized = _build_vol(req, daily)
-    res = hi.run_hedged_intraday(
-        daily, datr, starting_bank=req.starting_bank, risk_pct=req.risk_pct,
-        dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
-        n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
-        intraday_frac=req.intraday_frac, scalp_efficiency=req.scalp_efficiency,
-        max_rt_per_day=req.max_rt_per_day, stuck_penalty=req.stuck_penalty,
-        commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-        vol_model=vm, realized_vol=realized)
+    res = _run_hi(daily, datr, vm, realized, req)
     if not res.table:
         raise HTTPException(status_code=422, detail="no straddle periods resolved for these params")
     rolls = res.rolls
@@ -633,6 +662,53 @@ def hedged_intraday(req: HedgedIntradayReq):
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
         },
     }
+
+
+@app.post("/api/hedged-intraday/scan")
+def hedged_intraday_scan(req: HedgedIntradayScanReq):
+    """Bulk ПИ backtest across the WHOLE catalog with identical params — to see on which
+    instruments the synthetic straddle + scalping holds up (the corpus flags silver/ETH as the
+    volatile sweet spot, gold as the beginner pick). Sequential (Yahoo 429); per-ticker failures
+    are captured, not fatal. Heavier than the shares scan (daily BS reprice per instrument)."""
+    rows = []
+    for ticker, label, group in instruments.flat_with_group():
+        try:
+            daily = datamod.fetch(ticker, start=req.start)
+            daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+            if daily.empty or len(daily) < req.atr_period * 3:
+                rows.append({"ticker": ticker, "label": label, "group": group,
+                             "ok": False, "error": "not enough data"})
+                continue
+            datr = datamod.atr(daily, req.atr_period)
+            vm, realized = _build_vol(req, daily, ticker=ticker)
+            res = _run_hi(daily, datr, vm, realized, req)
+            if not res.table:
+                rows.append({"ticker": ticker, "label": label, "group": group,
+                             "ok": False, "error": "no straddle periods resolved"})
+                continue
+            rows.append({"ticker": ticker, "label": label, "group": group, "ok": True,
+                         "vol_model": vm.label, **_hi_summary(res, req.starting_bank)})
+        except Exception as ex:                              # never let one ticker kill the sweep
+            rows.append({"ticker": ticker, "label": label, "group": group,
+                         "ok": False, "error": f"{type(ex).__name__}: {ex}"})
+
+    ok = [r for r in rows if r["ok"]]
+    profitable = [r for r in ok if r["net"] > 0]
+    cagrs = sorted(r["cagr_pct"] for r in ok)
+    covers = sorted(r["scalp_cover_pct"] for r in ok)
+    median = lambda xs: xs[len(xs) // 2] if xs else 0.0
+    summary = {
+        "total": len(rows), "ok": len(ok), "failed": len(rows) - len(ok),
+        "profitable": len(profitable),
+        "profitable_pct": round(100.0 * len(profitable) / len(ok), 1) if ok else 0.0,
+        "median_cagr_pct": round(median(cagrs), 2),
+        "mean_cagr_pct": round(sum(cagrs) / len(cagrs), 2) if cagrs else 0.0,
+        "median_scalp_cover_pct": round(median(covers), 1),
+        "loss_cap_ok_pct": round(100.0 * sum(1 for r in ok if r["loss_cap_ok"]) / len(ok), 1) if ok else 0.0,
+        "best": max(ok, key=lambda r: r["cagr_pct"], default=None),
+        "worst": min(ok, key=lambda r: r["cagr_pct"], default=None),
+    }
+    return {"params": req.model_dump(), "results": rows, "summary": summary}
 
 
 # ----------------------------------------------------------------- TradingView ingest

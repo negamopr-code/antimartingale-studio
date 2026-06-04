@@ -154,6 +154,33 @@ class HedgedIntradayReq(BaseModel):
     slippage_pct: float = Field(0.0, ge=0, le=50)
 
 
+class HedgedIntradayScanReq(BaseModel):
+    """Run the Прикрытый Интрадей backtest across the WHOLE instrument catalog with identical
+    params (same knobs as HedgedIntradayReq minus `ticker`/`end` — the scan iterates every
+    catalog ticker itself). Sequential by design (Yahoo 429); per-ticker failures are captured."""
+    start: str = "2018-01-01"
+    atr_period: int = Field(14, ge=2, le=200)
+    starting_bank: float = Field(10_000.0, gt=0)
+    risk_pct: float = Field(0.20, gt=0, le=1.0)
+    dte_days: int = Field(30, ge=7, le=365)
+    roll_buffer_days: int = Field(5, ge=1, le=60)
+    r: float = Field(0.045, ge=-0.05, le=0.5)
+    n_parts: int = Field(5, ge=1, le=10)
+    grid_atr_frac: float = Field(0.5, gt=0, le=5)
+    grid_mult: float = Field(2.0, ge=1.0, le=5)
+    intraday_frac: float = Field(0.333, gt=0, le=1.0)
+    scalp_efficiency: float = Field(0.5, ge=0, le=1.0)
+    max_rt_per_day: float = Field(10.0, ge=0, le=100)
+    stuck_penalty: float = Field(0.5, ge=0, le=5)
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
+    iv_const: float = Field(0.20, gt=0, le=3)
+    skew_beta: float | None = Field(None, ge=-2, le=2)
+    use_term_structure: bool = True
+    commission_pct: float = Field(0.0, ge=0, le=50)
+    slippage_pct: float = Field(0.0, ge=0, le=50)
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

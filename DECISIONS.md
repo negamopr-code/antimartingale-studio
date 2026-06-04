@@ -250,3 +250,19 @@ Not implemented; documented as a rejected tactic.
     written back to the skill (`references/lessons.md::backtest-daily-bars`).
   - Verified: SPY/GLD real-data smoke (worst period ≥ −premium = the loss cap holds; identity
     total = bank + straddle + scalp). assets ?v=33. 64 tests (+5 engine, +1 web). 8 tabs now.
+
+## Tab 8 bulk scan — ПИ across the whole catalog (2026-06-04)
+- **D35** — Added a one-click cross-instrument sweep for the Hedged Intraday strategy (parallels
+  Tab 5 «Scan all» but for ПИ). New `HedgedIntradayScanReq` (the ПИ knobs minus ticker/end — too
+  different from shares/coinflip to bolt onto `ScanReq`) + `POST /api/hedged-intraday/scan`: runs
+  `run_hedged_intraday` on every `instruments.flat_with_group()` ticker with identical params,
+  sequential (Yahoo 429), per-ticker failures captured. Per-row summary (`_hi_summary`): net,
+  ret%, **CAGR**, straddle/scalp split, scalp-cover%, worst-period, premium cap, **loss_cap_ok**
+  (worst period ≥ −premium), maxDD, rolls. Aggregate: profitable%, median/mean CAGR, median
+  scalp-cover, loss-cap-ok%, best/worst.
+  - Refactored `_build_vol(req, daily, ticker=None)` to take a ticker override (scan has no single
+    ticker) and extracted `_run_hi(daily, datr, vm, realized, req)` shared by the single route + scan.
+  - Tab 8 frontend: «📊 Bulk» button reusing the same form params (ticker/end ignored server-side),
+    its own sortable results table (`renderHiScanTable`, default sort CAGR desc) + horizontal CAGR
+    bar + verdict (robust if ≥50% profitable AND median CAGR>0; restates the daily-bar lower-bound
+    caveat). assets ?v=34. 65 tests (+scan web test).
