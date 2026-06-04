@@ -582,7 +582,7 @@ def inspect(req: InspectReq):
 
 
 # ----------------------------------------------------------------- tab 8: hedged intraday (ПИ)
-def _run_hi(daily, datr, vm, realized, req):
+def _run_hi(daily, datr, vm, realized, req, trace=None):
     """Call the ПИ engine with the knobs from a HedgedIntradayReq or HedgedIntradayScanReq
     (they share field names). Returns the HedgedIntradayResult."""
     return hi.run_hedged_intraday(
@@ -590,10 +590,11 @@ def _run_hi(daily, datr, vm, realized, req):
         dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
         n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
         intraday_frac=req.intraday_frac, scalp_model=req.scalp_model,
-        scalp_recenter_days=req.scalp_recenter_days,
+        scalp_recenter_days=req.scalp_recenter_days, use_bbands=req.use_bbands,
+        bb_window=req.bb_window, bb_k=req.bb_k,
         scalp_efficiency=req.scalp_efficiency, max_rt_per_day=req.max_rt_per_day,
         stuck_penalty=req.stuck_penalty, commission_pct=req.commission_pct,
-        slippage_pct=req.slippage_pct, vol_model=vm, realized_vol=realized)
+        slippage_pct=req.slippage_pct, vol_model=vm, realized_vol=realized, trace=trace)
 
 
 def _hi_summary(res, starting_bank: float) -> dict:
@@ -666,6 +667,64 @@ def hedged_intraday(req: HedgedIntradayReq):
             "scalp_model": res.scalp_model, "scalp_round_trips": res.scalp_round_trips,
             "grid_timeframe": req.grid_timeframe,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
+        },
+    }
+
+
+@app.post("/api/hedged-intraday/inspect")
+def hedged_intraday_inspect(req: HedgedIntradayReq):
+    """Watch the ПИ strategy EXECUTE over a chosen window: price + Bollinger flat-band, the ATM
+    straddle strike (step line), every counter-trend scalp entry/exit, rolls, and the P&L
+    decomposition — so the rules (don't fade a breakout, carry stuck parts, straddle runs the
+    trend) can be audited visually. Use a short window (e.g. 3 months) to see each trade."""
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < max(req.atr_period, req.bb_window) + 2:
+        raise HTTPException(status_code=422, detail="not enough data in this window")
+    datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
+    vm, realized = _build_vol(req, daily)
+    trace: list = []
+    res = _run_hi(daily, datr, vm, realized, req, trace=trace)
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no straddle period resolved in this window")
+    opens = [e for e in trace if e["t"] == "scalp_open"]
+    closes = [e for e in trace if e["t"] == "scalp_close"]
+    mid = daily["Close"].rolling(req.bb_window).mean()
+    sd = daily["Close"].rolling(req.bb_window).std()
+    # straddle strike as a step line over each period (open→close at its strike)
+    strike_x, strike_y = [], []
+    for row in res.table:
+        strike_x += [row["open"], row["close"]]
+        strike_y += [row["strike"], row["strike"]]
+    sh = [e for e in opens if e["side"] == "short"]
+    lo = [e for e in opens if e["side"] == "long"]
+    return {
+        "ticker": req.ticker, "use_bbands": req.use_bbands,
+        "price": ser.series_xy(daily["Close"], MP),
+        "bb_upper": ser.series_xy(mid + req.bb_k * sd, MP),
+        "bb_lower": ser.series_xy(mid - req.bb_k * sd, MP),
+        "strike": {"x": strike_x, "y": strike_y},
+        "scalp_short": {"x": [e["date"] for e in sh], "y": [e["price"] for e in sh]},
+        "scalp_long": {"x": [e["date"] for e in lo], "y": [e["price"] for e in lo]},
+        "scalp_close": {"x": [e["date"] for e in closes], "y": [e["exit"] for e in closes],
+                        "pnl": [e["pnl"] for e in closes]},
+        "rolls": {"x": [rr["date"] for rr in res.rolls], "y": [rr["spot"] for rr in res.rolls]},
+        "equity_total": ser.list_xy(res.equity_dates, res.equity_total, MP),
+        "equity_straddle": ser.list_xy(res.equity_dates, res.equity_straddle, MP),
+        "equity_scalp": ser.list_xy(res.equity_dates, res.equity_scalp, MP),
+        "stats": {
+            "net_pnl": round(res.final_bank - res.starting_bank, 2),
+            "straddle_pnl": round(res.straddle_pnl, 2), "scalp_pnl": round(res.scalp_pnl, 2),
+            "gamma_dir_pnl": round(res.gamma_dir_pnl, 2), "total_theta": round(res.total_theta, 2),
+            "scalp_round_trips": res.scalp_round_trips, "n_rolls": res.n_rolls,
+            "scalp_opens": len(opens), "scalp_stuck_at_end": len(opens) - len(closes),
+            "ann_return_pct": round(res.ann_return_pct, 2), "n_days": res.n_days,
+            "vol_model": vm.label,
         },
     }
 

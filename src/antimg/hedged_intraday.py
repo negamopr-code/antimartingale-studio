@@ -119,11 +119,13 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 2.0,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
                         scalp_model: str = "grid", scalp_recenter_days: int = 0,
+                        use_bbands: bool = True, bb_window: int = 20, bb_k: float = 2.0,
                         scalp_efficiency: float = 0.5,
                         max_rt_per_day: float = 10.0, stuck_penalty: float = 0.5,
                         commission_pct: float = 0.0, slippage_pct: float = 0.0, vol_model=None,
                         realized_vol: "pd.Series | None" = None,
-                        default_sigma: float = 0.20) -> HedgedIntradayResult:
+                        default_sigma: float = 0.20,
+                        trace: "list | None" = None) -> HedgedIntradayResult:
     """Daily-bar backtest of the synthetic-straddle + counter-trend-scalping ПИ method.
 
     The straddle (2 ATM calls − 1 future) is marked-to-market daily via BS and rolled to a
@@ -157,6 +159,13 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     atr_np = daily_atr.reindex(idx).to_numpy(float)
     T0 = dte_days / 365.0
     fee = (commission_pct + slippage_pct) / 100.0
+    # Bollinger Bands = the FLAT detector. Scalp counter-trend only INSIDE the band; when price
+    # breaks OUT (a confirmed trend) suspend new counter-trend entries and let the straddle +
+    # trend-reserve run (doctrine: don't fade a galloping market). ub/lb are NaN until warmed up.
+    _mid = daily["Close"].rolling(bb_window).mean()
+    _sd = daily["Close"].rolling(bb_window).std()
+    ub_np = (_mid + bb_k * _sd).to_numpy(float)
+    lb_np = (_mid - bb_k * _sd).to_numpy(float)
 
     # warm up until ATR is finite
     i = 0
@@ -200,38 +209,53 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                     part_lots=lim / max(1, n_parts),
                     sarm=[True] * n_parts, barm=[True] * n_parts, legs=[])
 
-    def scalp_walk(o, h, l, c):
+    def scalp_walk(o, h, l, c, ub, lb, date):
         nonlocal scalp_realized, scalp_cost_cum
         g = GRID
         if not g or g["part_lots"] <= 0:
             return
         pl = g["part_lots"]
+        # FLAT gate: don't open a counter-trend leg into a breakout (short above the upper band /
+        # long below the lower band) — step aside, let the straddle run. Exits are always allowed.
+        gate_short = (lambda lv: not (use_bbands and np.isfinite(ub) and lv > ub))
+        gate_long = (lambda lv: not (use_bbands and np.isfinite(lb) and lv < lb))
+        def _rec(t, **kw):
+            if trace is not None:
+                trace.append({"t": t, "date": date.date().isoformat(), **kw})
         path = [o, l, h, c] if c >= o else [o, h, l, c]
         for a, b in zip(path, path[1:]):
             if b > a:                                     # rising segment
                 for k in range(n_parts):                  # enter shorts at sell-levels crossed up
                     lv = g["sell_lv"][k]
-                    if g["sarm"][k] and a < lv <= b:
+                    if g["sarm"][k] and a < lv <= b and gate_short(lv):
                         g["legs"].append({"side": "S", "k": k, "entry": lv,
                                           "target": g["inner_up"][k], "lots": pl})
                         g["sarm"][k] = False; scalp_cost_cum += fee * pl * lv
+                        _rec("scalp_open", side="short", price=round(lv, 4), lots=round(pl, 3))
                 for leg in g["legs"][:]:                  # close longs at their sell-target
                     if leg["side"] == "L" and a < leg["target"] <= b:
-                        scalp_realized += (leg["target"] - leg["entry"]) * leg["lots"]
+                        pnl = (leg["target"] - leg["entry"]) * leg["lots"]
+                        scalp_realized += pnl
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
                         res.scalp_round_trips += 1; g["barm"][leg["k"]] = True; g["legs"].remove(leg)
+                        _rec("scalp_close", side="long", entry=round(leg["entry"], 4),
+                             exit=round(leg["target"], 4), pnl=round(pnl, 2))
             elif b < a:                                   # falling segment
                 for k in range(n_parts):                  # enter longs at buy-levels crossed down
                     lv = g["buy_lv"][k]
-                    if g["barm"][k] and b <= lv < a:
+                    if g["barm"][k] and b <= lv < a and gate_long(lv):
                         g["legs"].append({"side": "L", "k": k, "entry": lv,
                                           "target": g["inner_dn"][k], "lots": pl})
                         g["barm"][k] = False; scalp_cost_cum += fee * pl * lv
+                        _rec("scalp_open", side="long", price=round(lv, 4), lots=round(pl, 3))
                 for leg in g["legs"][:]:                  # buy back shorts at their target
                     if leg["side"] == "S" and b <= leg["target"] < a:
-                        scalp_realized += (leg["entry"] - leg["target"]) * leg["lots"]
+                        pnl = (leg["entry"] - leg["target"]) * leg["lots"]
+                        scalp_realized += pnl
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
                         res.scalp_round_trips += 1; g["sarm"][leg["k"]] = True; g["legs"].remove(leg)
+                        _rec("scalp_close", side="short", entry=round(leg["entry"], 4),
+                             exit=round(leg["target"], 4), pnl=round(pnl, 2))
 
     def scalp_open_mtm(S):
         return sum(((S - leg["entry"]) if leg["side"] == "L" else (leg["entry"] - S)) * leg["lots"]
@@ -326,7 +350,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
 
         # ---- scalping overlay ----
         if scalp_model == "grid":
-            scalp_walk(op, hi, lo, S)
+            scalp_walk(op, hi, lo, S, ub_np[j], lb_np[j], d)
         else:                                             # range heuristic (lower bound)
             g1 = grid_atr_frac * atr_d
             part_lots = (st["n_str"] * intraday_frac) / max(1, n_parts)

@@ -76,6 +76,17 @@ def test_hedged_intraday_scan(client):
     assert {"cagr_pct", "scalp_pnl", "loss_cap_ok"} <= set(ok[0])
 
 
+def test_hedged_intraday_inspect(client):
+    r = client.post("/api/hedged-intraday/inspect",
+                    json={"ticker": "SPY", "start": "2015-01-01", "end": "2016-06-01",
+                          "bb_window": 20, "n_parts": 10})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert {"price", "bb_upper", "bb_lower", "strike", "scalp_short", "scalp_long",
+            "scalp_close", "rolls", "equity_total"} <= set(d)
+    assert {"scalp_opens", "scalp_round_trips", "scalp_stuck_at_end", "gamma_dir_pnl"} <= set(d["stats"])
+
+
 def test_backtest_linear(client):
     r = client.post("/api/backtest/linear", json={"ticker": "SPY", "atr_period": 5,
                                                   "base_bet": 100, "target_streak": 10})

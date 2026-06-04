@@ -965,6 +965,53 @@ async function renderHiScan(d) {
 $("#hedged-scan-btn").onclick = (e) => withBusy(e.target, async () =>
   renderHiScan(await post("/api/hedged-intraday/scan", formData($("#form-hedged")))));
 
+// ---- tab 9: ПИ Execution — watch the strategy run on a window
+async function renderHiExec(d) {
+  const s = d.stats;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена", line: { color: "#c9d1d9", width: 1.5 } };
+  const ubT = { x: d.bb_upper.x, y: d.bb_upper.y, mode: "lines", name: "BB верх", line: { color: "#39414d", width: 1 } };
+  const lbT = { x: d.bb_lower.x, y: d.bb_lower.y, mode: "lines", name: "BB низ (флет внутри)",
+                line: { color: "#39414d", width: 1 }, fill: "tonexty", fillcolor: "rgba(91,157,255,0.06)" };
+  const strike = { x: d.strike.x, y: d.strike.y, mode: "lines", name: "страйк стреддла (ATM)",
+                   line: { color: "#f0c000", width: 1.5, dash: "dot", shape: "hv" } };
+  const sh = { x: d.scalp_short.x, y: d.scalp_short.y, mode: "markers", name: `🔻 шорт-скальп (${d.scalp_short.x.length})`,
+               marker: { color: "#f85149", symbol: "triangle-down", size: 9, opacity: 0.85 } };
+  const lo = { x: d.scalp_long.x, y: d.scalp_long.y, mode: "markers", name: `🔺 лонг-скальп (${d.scalp_long.x.length})`,
+               marker: { color: "#3fb950", symbol: "triangle-up", size: 9, opacity: 0.85 } };
+  const cl = { x: d.scalp_close.x, y: d.scalp_close.y, mode: "markers", name: `○ выход (${d.scalp_close.x.length})`,
+               marker: { color: "#5b9dff", symbol: "circle-open", size: 7, line: { width: 1.5 } } };
+  const rolls = { x: d.rolls.x, y: d.rolls.y, mode: "markers", name: `◆ ролл (${d.rolls.x.length})`,
+                  marker: { color: "#39d0d8", symbol: "diamond", size: 11, line: { color: "#0f1419", width: 1 } } };
+  await plot("hx-exec", [ubT, lbT, price, strike, sh, lo, cl, rolls], layout(
+    `${d.ticker} — исполнение ПИ (полоса Боллинджера = «флет»; вне полосы новые контр-входы не ставятся)`, {
+      height: 440, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
+  await plot("hx-pnl", [
+    { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл (гамма−тета)", line: { color: "#f0c000", width: 1.5 } },
+    { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп", yaxis: "y2", line: { color: "#5b9dff", width: 1.5 } },
+    { x: d.equity_total.x, y: d.equity_total.y, mode: "lines", name: "ИТОГО", line: { color: s.net_pnl >= 0 ? "#3fb950" : "#f85149", width: 2.5 }, fill: "tozeroy", fillcolor: s.net_pnl >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
+  ], layout("P&L: стреддл + скальп = ИТОГО", {
+    height: 300, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "$ стреддл/итого" }, zeroline: true, zerolinecolor: "#8b949e" },
+    yaxis2: { overlaying: "y", side: "right", title: { text: "$ скальп" }, gridcolor: "transparent", zeroline: false, tickfont: { color: "#5b9dff" }, titlefont: { color: "#5b9dff" } } }));
+  const up = s.net_pnl >= 0;
+  $("#hx-stats").textContent =
+    `${up ? "✅ ИТОГО ПЛЮС" : "❌ ИТОГО МИНУС"}  net ${up ? "+" : ""}${f(s.net_pnl)}  (CAGR ${f(s.ann_return_pct)}%, ${s.n_days} дн)\n`
+    + `стреддл (гамма−тета) ${s.straddle_pnl >= 0 ? "+" : ""}${f(s.straddle_pnl)}  =  гамма+направление ${s.gamma_dir_pnl >= 0 ? "+" : ""}${f(s.gamma_dir_pnl)} + тета ${f(s.total_theta)}\n`
+    + `скальп ${s.scalp_pnl >= 0 ? "+" : ""}${f(s.scalp_pnl)}  ·  контр-входов ${s.scalp_opens}  ·  круговых ${s.scalp_round_trips}  ·  залипло к концу ${s.scalp_stuck_at_end}  ·  роллов ${s.n_rolls}\n`
+    + `BB-гейт: ${d.use_bbands ? "ВКЛ — на пробое полосы новые контр-входы НЕ ставятся (не фейдим тренд, стреддл бежит)" : "ВЫКЛ — фейдим каждый уровень"}\n\n`
+    + `ЧИТАЙ ГРАФИК: 🔻/🔺 = контр-трендовые входы скальпа внутри флета; ○ = их закрытие на возврате; ◆ = ролл стреддла.\n`
+    + (s.straddle_pnl > 0 && s.scalp_pnl < 0
+        ? `→ Тренд: стреддл-ГАММА (+${f(s.gamma_dir_pnl)}) забрала движение, контр-скальп залип и в минусе — ИТОГО плюс ЗА СЧЁТ стреддла (это by design: скальп и стреддл — разные стороны тренда).`
+        : s.scalp_pnl > 0
+        ? `→ Флет/диапазон: контр-скальп собрал mean-reversion (+${f(s.scalp_pnl)}) и помог отбить тету.`
+        : `→ Тихий/дрейфовый рынок: скальп около нуля, стреддл платит тету — характерно для не-целевого инструмента.`);
+}
+$("#form-hiexec").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () =>
+    renderHiExec(await post("/api/hedged-intraday/inspect", formData(e.target))));
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

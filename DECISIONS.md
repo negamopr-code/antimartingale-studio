@@ -370,3 +370,21 @@ Not implemented; documented as a rejected tactic.
     (+72k) — opposite sides of the trend BY DESIGN (the straddle is the hedge of the scalp's trend
     risk). So "volatile = back-and-forth = scalp profits" conflates volatility with mean-reversion.
   - Live consults on gamma-scalping / trend behavior QUEUED (NotebookLM rate-limited).
+
+## Tab 9 — ПИ Execution viewer + "don't fade a trend" rule (Bollinger gate) (2026-06-04)
+- **D42** — User: apply ALL the basic rules (skill references, not live consult), and add a tab to
+  WATCH the strategy on a chosen window. Two parts:
+  1. **Applied the missing rule** — *don't fade a confirmed trend*: a Bollinger-band FLAT detector
+     gates new counter-trend scalp entries (no short above the upper band / long below the lower
+     band; exits always allowed) → on a breakout the grid steps aside and lets the straddle run.
+     Engine: `use_bbands`(default on)/`bb_window`(20)/`bb_k`(2). Helps modestly (a trailing band
+     drifts with the trend, so it only blocks extreme breakouts): SOL scalp −345k→−306k, SLV +43→+391.
+  2. **Tab 9 "ПИ Execution"** + `POST /api/hedged-intraday/inspect` (engine `trace=` emits every
+     scalp open/close): pick instrument+window (default 3-mo), see price + BB flat-band + ATM strike
+     step + each 🔻short/🔺long scalp entry + ○ exit + ◆ roll + the P&L decomposition, with a
+     narrative that reads the regime. Verified SOL 2021-H1: scalp opened 10 shorts into the rally,
+     7 stuck, scalp −10.5k, but straddle GAMMA +81.9k → TOTAL +71k — the user's thesis on screen
+     ("trend like hell ⇒ positive despite the stuck ⅓; scalp & straddle are opposite sides of the
+     trend by design"). 70 tests. assets ?v=44.
+  - Process note (user): the corpus is for things OUTSIDE the strategy; the strategy rules are in
+    the skill refs — APPLY them, don't ping a rate-limited corpus for what's already documented.

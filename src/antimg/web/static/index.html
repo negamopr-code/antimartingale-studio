@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=43"/>
+  <link rel="stylesheet" href="/style.css?v=44"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -21,6 +21,7 @@
       <button class="tab" data-tab="explain">6 · Explain</button>
       <button class="tab" data-tab="inspect">7 · Inspect</button>
       <button class="tab" data-tab="hedged">8 · Hedged Intraday (ПИ)</button>
+      <button class="tab" data-tab="hiexec">9 · ПИ Execution</button>
     </nav>
   </header>
 
@@ -267,6 +268,34 @@
     <div class="tradetable" id="hi-scan-table"></div>
   </section>
 
-  <script src="/app.js?v=43"></script>
+  <!-- TAB 9 — ПИ Execution (watch the strategy run on a window) -->
+  <section id="hiexec" class="panel">
+    <p class="hint">Смотри, как ПИ <b>исполняется</b> на выбранном окне (напр. 3 месяца). Цена + полоса
+      Боллинджера (детектор «флета»), страйк ATM-стреддла (ступенька), КАЖДЫЙ контр-трендовый вход скальпа
+      (🔻шорт у верха / 🔺лонг у низа) и выход (○), роллы (◆), и разложение P&L.
+      <b>Правила видно глазами:</b> на пробое полосы новые контр-трендовые входы НЕ ставятся (не фейдим тренд —
+      стреддл и «третий-резерв» бегут); залипшие части переносятся; «тренд как ад» → стреддл-гамма даёт плюс,
+      несмотря на застрявшую ⅓. На сильном тренде ИТОГО положительный, хоть скальп и в минусе — это by design.</p>
+    <form class="controls" id="form-hiexec">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2020-03-01"></label>
+      <label>End <input name="end" value="2020-09-01" placeholder="latest"></label>
+      <label title="детектор флета: внутри полосы скальпим контр-тренд, на пробое — стоп новым входам (не фейдим тренд)">Bollinger <select name="use_bbands"><option value="true">on (don't fade breakouts)</option><option value="false">off (fade everything)</option></select></label>
+      <label>BB window <input name="bb_window" type="number" value="20"></label>
+      <label>BB k (σ) <input name="bb_k" type="number" step="any" value="2.0"></label>
+      <label title="srok стреддла">DTE days <input name="dte_days" type="number" value="365"></label>
+      <label title="бюджет премии = risk% × банк">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
+      <label>Grid parts <input name="n_parts" type="number" value="10"></label>
+      <label title="первый шаг = ×ATR">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="1.0"></label>
+      <label>Grid mult <input name="grid_mult" type="number" step="any" value="1.5"></label>
+      <label title="⅓ правило: лимит скальпа как доля фьючерсов">Intraday frac <input name="intraday_frac" type="number" step="any" value="0.333"></label>
+      <label>ATR period <input name="atr_period" type="number" value="14"></label>
+      <button type="submit">Показать исполнение</button>
+    </form>
+    <div class="results"><div class="plots"><div id="hx-exec"></div><div id="hx-pnl"></div></div>
+      <pre class="stats" id="hx-stats"></pre></div>
+  </section>
+
+  <script src="/app.js?v=44"></script>
 </body>
 </html>
