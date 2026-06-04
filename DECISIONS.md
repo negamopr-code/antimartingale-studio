@@ -226,3 +226,27 @@ Not implemented; documented as a rejected tactic.
   - Tab 4 gets a «🎯 Next bet (live)» button + the hint documents pairing & the closed loop. assets ?v=30.
   - 58 tests (+pyramid_state, +next-bet endpoint, +open/close pairing). ARCHITECTURE.md updated (status →
     implemented incl. pairing + next-bet).
+
+## Tab 8 — Hedged Intraday (Прикрытый Интрадей, Korovin) backtest (2026-06-04)
+- **D34** — New tab + engine for a DIFFERENT strategy family (not antimartingale): the ПИ method
+  (`/hedgedintraday` skill). Built per a live consult of the corpus (`5fada65b`) on backtest modeling.
+  - **Position** = long synthetic **straddle (2 ATM calls − 1 future)**, delta-neutral, long gamma,
+    max loss = premium. BS mark-to-market daily (IV from `vol.VolModel` term-structure/skew, same as
+    Tab 3), rolled to a fresh ATM strike within `roll_buffer_days` of expiry (monthly DTE default).
+    Premium budget = `risk_pct`·bank (doctrine 20%), re-sized to the running bank at each roll.
+  - **Scalping overlay** = counter-trend exponential grid (three-thirds: intraday limit = `intraday_frac`
+    of futures, `n_parts`, first step `grid_atr_frac`·dailyATR, `grid_mult` spacing). Daily-bar model:
+    `scalp_day = part_lots·(min(max_rt·g1, eff·reversed_range) − stuck_penalty·max(0,|C−O|−g1))`,
+    `reversed_range = (H−L)−|C−O|` (the mean-reverting part the grid harvests; trend portion drags).
+  - **Engine**: `src/antimg/hedged_intraday.py::run_hedged_intraday` → separated **straddle / scalp /
+    total** P&L streams + a modeled theta path + per-straddle-period table. `POST /api/hedged-intraday`
+    (`HedgedIntradayReq`). Tab 8 plots the P&L decomposition + price-with-rolls and an honest verdict
+    (CAGR vs the doctrine's 25–40%/yr; % of theta the scalp covered; worst-period vs premium cap).
+  - **Honesty (key)**: daily bars see ~1 reversal/day vs the corpus's ~10 RT/day on 1-min → scalp is a
+    PESSIMISTIC LOWER BOUND, theta dominates. Default eff=0.5 recovers ~14% of theta on SPY/GLD 2018-26
+    — which MATCHES Korovin's own "students offset 10–15% of straddle cost/month" figure (calibration
+    check). Monthly ATM straddles bled (~−32% CAGR) under this conservative daily model; lifting
+    `scalp_efficiency`/`max_rt_per_day` approximates intraday frequency. Verdict states all this; lesson
+    written back to the skill (`references/lessons.md::backtest-daily-bars`).
+  - Verified: SPY/GLD real-data smoke (worst period ≥ −premium = the loss cap holds; identity
+    total = bank + straddle + scalp). assets ?v=33. 64 tests (+5 engine, +1 web). 8 tabs now.

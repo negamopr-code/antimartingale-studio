@@ -123,6 +123,37 @@ class InspectReq(BaseModel):
     r: float = Field(0.045, ge=-0.05, le=0.5)
 
 
+class HedgedIntradayReq(BaseModel):
+    """Прикрытый Интрадей (ПИ) backtest: synthetic straddle (2 ATM calls − 1 future) whose
+    theta is paid by a counter-trend intraday scalping grid. Daily-bar approximation — the
+    scalp efficiency knobs are explicit because we have no tick data (see engine docstring)."""
+    ticker: str = Field("GLD", min_length=1, max_length=20)   # gold = corpus beginner pick
+    start: str = "2018-01-01"
+    end: str | None = None
+    atr_period: int = Field(14, ge=2, le=200)                 # DAILY ATR (grid step scale)
+    starting_bank: float = Field(10_000.0, gt=0)
+    risk_pct: float = Field(0.20, gt=0, le=1.0)               # premium budget = risk_pct·bank
+    dte_days: int = Field(30, ge=7, le=365)                   # monthly straddle by default
+    roll_buffer_days: int = Field(5, ge=1, le=60)             # re-strike ATM this many days before expiry
+    r: float = Field(0.045, ge=-0.05, le=0.5)
+    # scalping grid (three-thirds + exponential spacing)
+    n_parts: int = Field(5, ge=1, le=10)                      # working parts (modern universal = 5)
+    grid_atr_frac: float = Field(0.5, gt=0, le=5)             # first grid step = this × daily ATR
+    grid_mult: float = Field(2.0, ge=1.0, le=5)               # exponential spacing between parts
+    intraday_frac: float = Field(0.333, gt=0, le=1.0)         # ⅓ rule: scalp limit as a frac of futures
+    scalp_efficiency: float = Field(0.5, ge=0, le=1.0)        # frac of reversed range the grid books
+    max_rt_per_day: float = Field(10.0, ge=0, le=100)         # cap on round-trips/day (~corpus 10)
+    stuck_penalty: float = Field(0.5, ge=0, le=5)             # drag from parts stuck offside in a trend
+    # IV surface (same engine as the options tab)
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
+    iv_const: float = Field(0.20, gt=0, le=3)
+    skew_beta: float | None = Field(None, ge=-2, le=2)
+    use_term_structure: bool = True
+    commission_pct: float = Field(0.0, ge=0, le=50)
+    slippage_pct: float = Field(0.0, ge=0, le=50)
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=32"/>
+  <link rel="stylesheet" href="/style.css?v=33"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -20,6 +20,7 @@
       <button class="tab" data-tab="scan">5 · Scan all</button>
       <button class="tab" data-tab="explain">6 · Explain</button>
       <button class="tab" data-tab="inspect">7 · Inspect</button>
+      <button class="tab" data-tab="hedged">8 · Hedged Intraday (ПИ)</button>
     </nav>
   </header>
 
@@ -218,6 +219,44 @@
     <div class="tradetable" id="insp-ledger"></div>
   </section>
 
-  <script src="/app.js?v=32"></script>
+  <!-- TAB 8 — Hedged Intraday (Прикрытый Интрадей, Korovin) -->
+  <section id="hedged" class="panel">
+    <p class="hint"><b>Прикрытый Интрадей</b> (Korovin, методика <code>/hedgedintraday</code>) — это
+      НЕ антимартингейл. Длинный <b>синтетический стреддл = 2 ATM колла − 1 фьючерс</b> (длинная гамма,
+      макс. убыток = уплаченная премия), тету которого оплачивает <b>контр-трендовый интрадей-скальпинг</b>
+      по экспоненциальной сетке. Стреддл MtM по Блэку-Шоулзу, роллится в ATM у экспирации; скальп
+      собирает «развернувшуюся» часть дневного диапазона <code>(H−L)−|Close−Open|</code>.
+      <b>⚠ Дневные бары, нет тиков</b> → скальп — это аппроксимация с явным КПД (<code>scalp efficiency</code>);
+      судим по <b>совокупному росту счёта</b>, разложенному на стреддл (гамма−тета) и скальп. Цель доктрины ≈ 25–40%/год.</p>
+    <form class="controls" id="form-hedged">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2018-01-01"></label>
+      <label>End <input name="end" placeholder="latest"></label>
+      <label title="ДНЕВНОЙ ATR — масштаб шага сетки">ATR period <input name="atr_period" type="number" value="14"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label title="бюджет премии = risk% × банк (доктрина: 20% за период)">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
+      <label title="срок стреддла; месячный = проще учёт, квартальный = медленнее тета">DTE days <input name="dte_days" type="number" value="30"></label>
+      <label title="за сколько дней до экспирации перекрыться в новый ATM-страйк">Roll @ d-to-exp 🔁 <input name="roll_buffer_days" type="number" value="5"></label>
+      <label title="рабочих частей сетки (современный «универсал» = 5)">Grid parts <input name="n_parts" type="number" value="5"></label>
+      <label title="первый шаг сетки = это × дневной ATR">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="0.5"></label>
+      <label title="экспоненциальный множитель между частями (каждая дальше предыдущей)">Grid mult <input name="grid_mult" type="number" step="any" value="2.0"></label>
+      <label title="правило трёх третей: интрадейный лимит как доля фьючерсов">Intraday frac <input name="intraday_frac" type="number" step="any" value="0.333"></label>
+      <label title="КПД скальпа: какую долю развернувшегося диапазона сетка реально снимает (нет тиков → калибровка)">Scalp eff. <input name="scalp_efficiency" type="number" step="any" value="0.5"></label>
+      <label title="кэп круговых сделок в день (доктрина ≈10/день при полной загрузке)">Max RT/day <input name="max_rt_per_day" type="number" step="any" value="10"></label>
+      <label title="штраф за залипшие части: контр-трендовый скальп теряет на трендовом движении сверх 1-го шага">Stuck penalty <input name="stuck_penalty" type="number" step="any" value="0.5"></label>
+      <label>IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="index">force vol-index</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label>Term structure <select name="use_term_structure"><option value="true">on (interp to DTE)</option><option value="false">off (flat)</option></select></label>
+      <label title="скос: пусто = дефолт по классу актива">Skew β <input name="skew_beta" type="number" step="any" placeholder="class default"></label>
+      <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
+      <label>Commission % /fill <input name="commission_pct" type="number" step="any" value="0"></label>
+      <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0"></label>
+      <button type="submit">Прогнать ПИ-бэктест</button>
+    </form>
+    <div class="results"><div class="plots"><div id="hi-equity"></div><div id="hi-price"></div></div>
+      <pre class="stats" id="hi-stats"></pre></div>
+    <div class="tradetable" id="hi-table"></div>
+  </section>
+
+  <script src="/app.js?v=33"></script>
 </body>
 </html>

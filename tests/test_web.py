@@ -52,6 +52,18 @@ def test_coinflip_validation_caps(client):
     assert r.status_code == 422  # exceeds max_iterations
 
 
+def test_hedged_intraday(client):
+    r = client.post("/api/hedged-intraday", json={"ticker": "SPY", "atr_period": 10,
+                                                  "start": "2015-01-01", "dte_days": 30})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    s = d["stats"]
+    assert s["n_days"] > 0 and d["table"]
+    assert s["total_theta"] <= 0.0                       # long straddle pays theta
+    assert {"straddle_pnl", "scalp_pnl", "scalp_covers_theta_pct", "ann_return_pct"} <= set(s)
+    assert {"equity_total", "equity_straddle", "equity_scalp", "theta_path"} <= set(d)
+
+
 def test_backtest_linear(client):
     r = client.post("/api/backtest/linear", json={"ticker": "SPY", "atr_period": 5,
                                                   "base_bet": 100, "target_streak": 10})

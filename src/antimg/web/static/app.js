@@ -759,6 +759,73 @@ $("#form-inspect").onsubmit = (e) => {
     renderInspect(await post("/api/inspect", formData(e.target))));
 };
 
+// ---- tab 8 hedged intraday (Прикрытый Интрадей) — straddle + counter-trend scalping
+async function renderHedged(d) {
+  const s = d.stats;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  const net = s.net_pnl, up = net > 0;
+
+  // --- equity decomposition: total vs straddle (gamma−theta) vs scalp ---
+  await plot("hi-equity", [
+    { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл P&L (гамма−тета)",
+      line: { color: "#f0c000", width: 1.5 } },
+    { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп P&L (контр-тренд)",
+      line: { color: "#5b9dff", width: 1.5 } },
+    { x: d.theta_path.x, y: d.theta_path.y, mode: "lines", name: "тета уплачено (накоп.)",
+      line: { color: "#8b949e", width: 1, dash: "dot" } },
+    { x: d.equity_total.x, y: d.equity_total.y, mode: "lines", name: "ИТОГО P&L счёта",
+      line: { color: up ? "#3fb950" : "#f85149", width: 2.5 },
+      fill: "tozeroy", fillcolor: up ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
+  ], layout("Разложение P&L: стреддл (гамма−тета) + скальп = ИТОГО", {
+    height: 380, xaxis: { gridcolor: "#2a3340" },
+    yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L (от 0)" },
+             zeroline: true, zerolinecolor: "#8b949e" } }));
+
+  // --- price with roll markers ---
+  const price = { x: d.price.x, y: d.price.y, mode: "lines", name: "цена (close)",
+                  line: { color: "#c9d1d9", width: 1 } };
+  const rolls = { x: (d.rolls || {}).x || [], y: (d.rolls || {}).y || [], mode: "markers",
+                  name: `🔁 ролл стреддла (${(d.rolls.x || []).length})`,
+                  marker: { color: "#39d0d8", symbol: "diamond", size: 7, line: { color: "#0f1419", width: 1 } } };
+  await plot("hi-price", [price, rolls], layout(`${d.ticker} — цена + роллы ATM-стреддла`, {
+    height: 320, xaxis: { gridcolor: "#2a3340", rangeselector: {
+      bgcolor: "#10151c", activecolor: "#5b9dff", font: { color: "#e6edf3" }, buttons: [
+        { step: "month", count: 6, label: "6m", stepmode: "backward" },
+        { step: "year", count: 1, label: "1y", stepmode: "backward" }, { step: "all", label: "all" }] } } }));
+
+  // --- honest verdict ---
+  const cover = s.scalp_covers_theta_pct;
+  const ann = s.ann_return_pct;
+  const inBand = ann >= 25 && ann <= 40;
+  const startBank = s.final_bank - net;
+  const retPct = startBank ? 100 * net / startBank : 0;
+  let verdict =
+    `${up ? "✅ СЧЁТ ВЫРОС" : "❌ СЧЁТ УПАЛ"}   ИТОГО P&L ${net >= 0 ? "+" : ""}${f(net)}  (${f(retPct)}% за период)\n`
+    + `годовых (CAGR) : ${f(ann)}%  за ${f(s.years)} лет  ${inBand ? "✅ в доктринной полосе 25–40%" : (ann > 40 ? "⚠ выше 25–40% — вероятно режим/КПД оптимистичны" : "⚠ ниже доктринных 25–40%")}\n\n`
+    + `── РАЗЛОЖЕНИЕ ──\n`
+    + `стреддл (гамма−тета) : ${s.straddle_pnl >= 0 ? "+" : ""}${f(s.straddle_pnl)}\n`
+    + `скальп (контр-тренд) : ${s.scalp_pnl >= 0 ? "+" : ""}${f(s.scalp_pnl)}\n`
+    + `тета уплачено всего  : ${f(s.total_theta)}  →  скальп покрыл ${f(cover)}% теты `
+    + `${cover >= 100 ? "✅ (минимальная задача выполнена — тета отбита)" : "⚠ (скальп НЕ отбил тету — режим/КПД)"}\n\n`
+    + `── РИСК ──\n`
+    + `макс. премия под риском (1 стреддл) : ${f(s.max_premium_at_risk)}  = пол потерь стреддла\n`
+    + `худший период (стреддл+скальп)      : ${f(s.worst_period_pnl)}\n`
+    + `max drawdown : ${f(s.max_drawdown)}   ·   роллов : ${s.n_rolls}   ·   дней : ${s.n_days}\n`
+    + `IV-поверхность : ${s.vol_model} (класс ${s.vol_class})   ·   издержки : ${f(s.total_cost)}\n\n`
+    + `⚠ ДНЕВНЫЕ бары видят ~1 разворот в день ((H−L)−|Close−Open|), а реальный интрадей-скальп\n`
+    + `  делает ~10 круговых/день на 1-мин графике (доктрина). ⇒ скальп здесь — ПЕССИМИСТИЧНАЯ\n`
+    + `  НИЖНЯЯ ОЦЕНКА: тета доминирует сильнее, чем в живой ПИ. Чтобы приблизить интрадей-частоту,\n`
+    + `  поднимай «Scalp eff.» и «Max RT/day» (КПД ${$("#form-hedged [name=scalp_efficiency]").value}). Стреддл (BS-MtM) точен —\n`
+    + `  тета и гамма выпадают из переоценки. Судим по ИТОГО, не по скальпу отдельно.`;
+  $("#hi-stats").textContent = verdict;
+  renderTable("hi-table", d.table);
+}
+$("#form-hedged").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () =>
+    renderHedged(await post("/api/hedged-intraday", formData(e.target))));
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

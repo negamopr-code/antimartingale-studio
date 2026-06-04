@@ -17,13 +17,14 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import atr_strategy as strat
 from .. import data as datamod
+from .. import hedged_intraday as hi
 from .. import vol as volmod
 from .. import instruments, scenarios, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
-from .schemas import (BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq, InspectReq,
-                      OptionsReq, ScanReq)
+from .schemas import (BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
+                      HedgedIntradayReq, InspectReq, OptionsReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -573,6 +574,64 @@ def inspect(req: InspectReq):
         "high": ser.series_xy(daily["High"], MP),
         "low": ser.series_xy(daily["Low"], MP),
         "trace": _jsonable(trace), "table": res.table,
+    }
+
+
+# ----------------------------------------------------------------- tab 8: hedged intraday (ПИ)
+@app.post("/api/hedged-intraday")
+def hedged_intraday(req: HedgedIntradayReq):
+    """Прикрытый Интрадей (Korovin): a long synthetic straddle (2 ATM calls − 1 future) whose
+    theta is paid by a counter-trend intraday scalping grid. Daily-bar backtest — the straddle
+    is BS-marked daily and rolled ATM near expiry; the scalp overlay harvests the reversed part
+    of each day's range. Returns separated straddle / scalp / total streams (judge by the total).
+    """
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < req.atr_period * 3:
+        raise HTTPException(status_code=422, detail="not enough data in this window for the ATR period")
+    datr = datamod.atr(daily, req.atr_period)                 # DAILY ATR = grid step scale
+    vm, realized = _build_vol(req, daily)
+    res = hi.run_hedged_intraday(
+        daily, datr, starting_bank=req.starting_bank, risk_pct=req.risk_pct,
+        dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
+        n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
+        intraday_frac=req.intraday_frac, scalp_efficiency=req.scalp_efficiency,
+        max_rt_per_day=req.max_rt_per_day, stuck_penalty=req.stuck_penalty,
+        commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+        vol_model=vm, realized_vol=realized)
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no straddle periods resolved for these params")
+    rolls = res.rolls
+    return {
+        "ticker": req.ticker, "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
+        "price": ser.series_xy(daily["Close"], MP),
+        "equity_total": ser.list_xy(res.equity_dates, res.equity_total, MP),
+        "equity_straddle": ser.list_xy(res.equity_dates, res.equity_straddle, MP),
+        "equity_scalp": ser.list_xy(res.equity_dates, res.equity_scalp, MP),
+        "theta_path": ser.list_xy(res.equity_dates, res.theta_path, MP),
+        "rolls": {"x": [rr["date"] for rr in rolls], "y": [rr["spot"] for rr in rolls]},
+        "table": res.table,
+        "stats": {
+            "final_bank": round(res.final_bank, 2),
+            "net_pnl": round(res.final_bank - res.starting_bank, 2),
+            "straddle_pnl": round(res.straddle_pnl, 2),
+            "scalp_pnl": round(res.scalp_pnl, 2),
+            "total_theta": round(res.total_theta, 2),
+            "scalp_covers_theta_pct": round(res.scalp_covers_theta_pct, 1),
+            "ann_return_pct": round(res.ann_return_pct, 2),
+            "years": round(res.years, 2),
+            "n_rolls": res.n_rolls, "n_days": res.n_days,
+            "max_drawdown": round(res.max_drawdown, 2),
+            "worst_period_pnl": round(res.worst_period_pnl, 2),
+            "max_premium_at_risk": round(res.max_premium_at_risk, 2),
+            "total_cost": round(res.total_cost, 2),
+            "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
+        },
     }
 
 
