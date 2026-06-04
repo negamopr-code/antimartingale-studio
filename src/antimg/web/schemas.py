@@ -143,10 +143,14 @@ class HedgedIntradayReq(BaseModel):
     # daily bar is sub-step "intraday-like" info within a larger oscillation the grid scalps over
     # several days (the doctrine's "flatten the grid, bigger targets, once-a-day" mode). 'daily' =
     # tightest grid (needs the most intraday resolution we don't have).
-    grid_timeframe: str = Field("weekly", pattern="^(daily|weekly|monthly)$")
+    grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")
+    # re-center the scalp grid to the CURRENT price every N calendar days (realizing stuck legs):
+    # the grid follows price and scalps the current range instead of sitting frozen at the year-old
+    # strike. 0 = never re-center (legacy frozen grid). ~21 ≈ monthly.
+    scalp_recenter_days: int = Field(21, ge=0, le=365)
     # scalping grid (three-thirds + exponential spacing)
     n_parts: int = Field(5, ge=1, le=10)                      # working parts (modern universal = 5)
-    grid_atr_frac: float = Field(1.0, gt=0, le=5)             # first grid step = this × the chosen-timeframe ATR
+    grid_atr_frac: float = Field(2.0, gt=0, le=10)            # first grid step = this × the chosen-timeframe ATR (≈2× daily)
     grid_mult: float = Field(2.0, ge=1.0, le=5)               # exponential spacing between parts
     intraday_frac: float = Field(0.333, gt=0, le=1.0)         # ⅓ rule: scalp limit as a frac of futures
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)        # range model only: frac of reversed range booked
@@ -174,9 +178,10 @@ class HedgedIntradayScanReq(BaseModel):
     roll_buffer_days: int = Field(10, ge=1, le=90)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     scalp_model: str = Field("grid", pattern="^(grid|range)$")
-    grid_timeframe: str = Field("weekly", pattern="^(daily|weekly|monthly)$")
+    grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")
+    scalp_recenter_days: int = Field(21, ge=0, le=365)
     n_parts: int = Field(5, ge=1, le=10)
-    grid_atr_frac: float = Field(1.0, gt=0, le=5)
+    grid_atr_frac: float = Field(2.0, gt=0, le=10)
     grid_mult: float = Field(2.0, ge=1.0, le=5)
     intraday_frac: float = Field(0.333, gt=0, le=1.0)
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)

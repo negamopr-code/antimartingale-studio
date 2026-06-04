@@ -321,3 +321,20 @@ Not implemented; documented as a rejected tactic.
   - Default `dte_days` 180→365 (the user's "even one year"): slower theta, straddle closer to
     breakeven on indices. assets ?v=40. 68 tests.
   - Live consult on SPY/index suitability QUEUED (NotebookLM rate-limited).
+
+## Tab 8 — scalp grid re-centering (frozen-grid bug fix) (2026-06-04)
+- **D39** — User spotted the real bug: the scalp grid was anchored at the straddle strike and frozen
+  for the whole option life (a year at DTE 365), so once price trended away it stopped scalping the
+  current range entirely (→ ~0 round-trips). Fix: `scalp_recenter_days` (default 21) re-centers the
+  grid to the CURRENT price every N days (realizing stuck legs), so it follows price and scalps the
+  live range. Defaults shifted to the user's "2× daily ATR target": grid_timeframe daily,
+  grid_atr_frac 2.0, recenter 21; engine dte_days 180→365.
+  - **Honest measured outcome:** re-centering REDUCES the frozen-grid trend-bleed (ETH scalp
+    −18.8k→−8.3k, CAGR 24.9%→28%; GLD/SLV/NG scalp losses cut toward ~0) — kept ON by default. BUT
+    it does NOT manufacture scalp income: round-trips/yr stay ~5 whether frozen or tracking, coarse
+    or fine step. CONFIRMS the hard limit: live ПИ's ~2500 round-trips/yr are TINY intraday wiggles
+    (smaller than daily ATR) that an OHLC bar discards; the ≥2·ATR swings a daily bar CAN see are
+    rare (~5/yr) and usually don't cleanly reverse (trend). So the daily backtest still measures the
+    straddle core, not the scalp — the scalp needs intraday data. (Where the user's "2× daily ATR
+    catches all the back-and-forth" overestimates: the profitable scalp is sub-daily, not big swings.)
+  - assets ?v=41. 68 tests.

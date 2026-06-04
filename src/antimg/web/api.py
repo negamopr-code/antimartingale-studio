@@ -590,6 +590,7 @@ def _run_hi(daily, datr, vm, realized, req):
         dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
         n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
         intraday_frac=req.intraday_frac, scalp_model=req.scalp_model,
+        scalp_recenter_days=req.scalp_recenter_days,
         scalp_efficiency=req.scalp_efficiency, max_rt_per_day=req.max_rt_per_day,
         stuck_penalty=req.stuck_penalty, commission_pct=req.commission_pct,
         slippage_pct=req.slippage_pct, vol_model=vm, realized_vol=realized)

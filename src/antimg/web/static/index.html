@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=40"/>
+  <link rel="stylesheet" href="/style.css?v=41"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -235,14 +235,15 @@
       <label>Start <input name="start" value="2018-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
       <label title="grid = событийная сетка на дневном такте; range = интрадей-эвристика (грубая)">Scalp model <select name="scalp_model"><option value="grid">grid (daily-cadence, faithful)</option><option value="range">range (crude heuristic)</option></select></label>
-      <label title="на каком ТАЙМФРЕЙМЕ брать ATR для шага сетки. weekly/monthly = шаг ШИРЕ дневного диапазона ⇒ дневной бар становится «интрадеем» внутри более крупной осцилляции, многодневные круговые сделки честно видны на дневках (режим «раз в день, крупнее цели»). daily = тесная сетка (нужна внутридневная инфа, которой нет).">Grid ATR TF <select name="grid_timeframe"><option value="weekly">weekly (день=«интрадей»)</option><option value="monthly">monthly (шире)</option><option value="daily">daily (тесная)</option></select></label>
+      <label title="на каком ТАЙМФРЕЙМЕ брать ATR для шага сетки. daily×2 (дефолт) = шаг ~2 дневных ATR (мысль юзера); weekly/monthly = шаг ещё шире.">Grid ATR TF <select name="grid_timeframe"><option value="daily">daily (шаг=×ATR)</option><option value="weekly">weekly (шире)</option><option value="monthly">monthly (ещё шире)</option></select></label>
+      <label title="РЕ-ЦЕНТРИРОВАНИЕ сетки к ТЕКУЩЕЙ цене каждые N дней (закрывая залипшие части): сетка СЛЕДУЕТ за ценой и скальпит текущий диапазон, а не висит на годовалом страйке. 0 = заморозить (старое). ~21 ≈ раз в месяц.">Re-center дней <input name="scalp_recenter_days" type="number" value="21"></label>
       <label title="период ATR в барах выбранного таймфрейма">ATR period <input name="atr_period" type="number" value="14"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label title="бюджет премии = risk% × банк (доктрина: 20% за период)">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
       <label title="срок стреддла: длинный (180–365) = медленная тета, дневной скальп репрезентативен (мысль юзера)">DTE days <input name="dte_days" type="number" value="365"></label>
       <label title="за сколько дней до экспирации перекрыться в новый ATM-страйк">Roll @ d-to-exp 🔁 <input name="roll_buffer_days" type="number" value="10"></label>
       <label title="рабочих частей сетки (современный «универсал» = 5)">Grid parts <input name="n_parts" type="number" value="5"></label>
-      <label title="первый шаг сетки = это × дневной ATR (≈1 ⇒ дневной бар содержит круговую сделку = репрезентативно)">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="1.0"></label>
+      <label title="первый шаг сетки = это × ATR выбранного таймфрейма (дефолт 2× дневного ATR — цель скальпа по мысли юзера)">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="2.0"></label>
       <label title="экспоненциальный множитель между частями (каждая дальше предыдущей)">Grid mult <input name="grid_mult" type="number" step="any" value="2.0"></label>
       <label title="правило трёх третей: интрадейный лимит как доля фьючерсов">Intraday frac <input name="intraday_frac" type="number" step="any" value="0.333"></label>
       <label title="ТОЛЬКО range-модель: КПД скальпа (доля развернувшегося диапазона)">Scalp eff. (range) <input name="scalp_efficiency" type="number" step="any" value="0.5"></label>
@@ -266,6 +267,6 @@
     <div class="tradetable" id="hi-scan-table"></div>
   </section>
 
-  <script src="/app.js?v=40"></script>
+  <script src="/app.js?v=41"></script>
 </body>
 </html>
