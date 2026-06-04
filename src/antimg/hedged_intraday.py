@@ -21,11 +21,12 @@ Construction (per the corpus, confirmed by live consult 2026-06-04):
         one step lower (and vice-versa); each working part holds ≤1 leg so total ≤ the intraday
         limit (never naked); genuinely stuck legs are carried and MtM'd, closed at the roll. No
         efficiency/round-trip/penalty fudge — daily OHLC is *representative* here, not a bound.
-      - **range** — legacy heuristic `part_lots·(min(max_rt·g1, eff·reversed_range) −
-        penalty·max(0,|C−O|−g1))`, reversed_range = (H−L)−|C−O|. A PESSIMISTIC LOWER BOUND for a
-        fast intraday grid on a monthly straddle (daily bars hide ~10 intraday round-trips/day);
-        kept for comparison. At eff=0.5 it recovers ~14% of theta on SPY/GLD, matching the corpus's
-        own "students offset 10–15% of straddle cost/month" figure (a calibration check).
+      - **range** — legacy CRUDE heuristic `part_lots·(min(max_rt·g1, eff·reversed_range) −
+        penalty·max(0,|C−O|−g1))`, reversed_range = (H−L)−|C−O|. NOT mechanically faithful: its
+        magnitude is whatever the eff/max_rt knobs are set to (so it can over- OR under-state the
+        scalp), and it never carries a position. Kept only for comparison — prefer 'grid'. At
+        eff=0.5 it happens to recover ~14% of theta on a SPY/GLD MONTHLY straddle, near the corpus's
+        "students offset 10–15% of straddle cost/month" figure.
     Both: part_lots from the three-thirds rule (intraday limit ≈ intraday_frac of futures / n_parts),
     grid step g1 = grid_atr_frac·dailyATR, spaced exponentially by grid_mult.
 
