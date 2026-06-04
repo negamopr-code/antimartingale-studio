@@ -589,10 +589,10 @@ def _run_hi(daily, datr, vm, realized, req):
         daily, datr, starting_bank=req.starting_bank, risk_pct=req.risk_pct,
         dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
         n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
-        intraday_frac=req.intraday_frac, scalp_efficiency=req.scalp_efficiency,
-        max_rt_per_day=req.max_rt_per_day, stuck_penalty=req.stuck_penalty,
-        commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-        vol_model=vm, realized_vol=realized)
+        intraday_frac=req.intraday_frac, scalp_model=req.scalp_model,
+        scalp_efficiency=req.scalp_efficiency, max_rt_per_day=req.max_rt_per_day,
+        stuck_penalty=req.stuck_penalty, commission_pct=req.commission_pct,
+        slippage_pct=req.slippage_pct, vol_model=vm, realized_vol=realized)
 
 
 def _hi_summary(res, starting_bank: float) -> dict:
@@ -609,6 +609,7 @@ def _hi_summary(res, starting_bank: float) -> dict:
         "max_drawdown": round(res.max_drawdown, 2),
         "worst_period_pnl": round(res.worst_period_pnl, 2),
         "max_premium_at_risk": round(res.max_premium_at_risk, 2),
+        "scalp_round_trips": res.scalp_round_trips,
         # the straddle loss cap holds if the worst single period never lost more than its premium
         "loss_cap_ok": bool(res.worst_period_pnl >= -res.max_premium_at_risk - 1e-6),
     }
@@ -659,6 +660,7 @@ def hedged_intraday(req: HedgedIntradayReq):
             "worst_period_pnl": round(res.worst_period_pnl, 2),
             "max_premium_at_risk": round(res.max_premium_at_risk, 2),
             "total_cost": round(res.total_cost, 2),
+            "scalp_model": res.scalp_model, "scalp_round_trips": res.scalp_round_trips,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
         },
     }

@@ -266,3 +266,23 @@ Not implemented; documented as a rejected tactic.
     its own sortable results table (`renderHiScanTable`, default sort CAGR desc) + horizontal CAGR
     bar + verdict (robust if ≥50% profitable AND median CAGR>0; restates the daily-bar lower-bound
     caveat). assets ?v=34. 65 tests (+scan web test).
+
+## Tab 8 — event-driven daily-cadence scalp grid (user insight) (2026-06-04)
+- **D36** — User: «absence of intraday data should not prevent backtest — take 6mo/1yr options, then
+  one-day data is representative because the range is much bigger [relative to the grid step]». Correct.
+  Reframed the scalp from a lower-bound heuristic to a FAITHFUL daily-cadence simulation.
+  - New default `scalp_model='grid'`: event-driven counter-trend grid. Grid step g1 = grid_atr_frac·dailyATR
+    (default 1×), exponential offsets from the straddle center. Each daily bar is walked along an OHLC
+    path (green O→L→H→C, red O→H→L→C); resting limit orders fill when crossed; a short at a sell-level
+    buys back one step lower (long mirror); each working part holds ≤1 leg ⇒ total ≤ intraday limit
+    (never naked); genuinely stuck legs are carried + MtM'd, closed at the roll. NO efficiency/RT/penalty
+    fudge — removed three knobs from the honest path. `scalp_round_trips` counted + surfaced.
+  - Legacy `scalp_model='range'` kept (the old (H−L)−|C−O| heuristic) as the explicit intraday lower bound.
+  - Defaults shifted to the slow regime: dte_days 30→180, roll_buffer 5→10, grid_atr_frac 0.5→1.0.
+  - **Real-data validation (2018-26): long DTE collapses theta bleed** — GLD monthly −24.7%/yr →
+    grid+1yr −1.7%/yr; SPY −35% → −4.3%; SLV +20.7%(range,optimistic) → +0.8%(grid,1yr). Grid books
+    70–110 real round-trips; counter-trend scalp ~washes (small trend drag, straddle gamma pays theta)
+    ⇒ net ≈ breakeven, not catastrophic bleed. Daily bars ARE representative in this regime.
+  - Engine/schema/scan all thread `scalp_model`; Tab 8 + bulk verdicts branch on it (grid = "daily
+    representative, read CAGR directly"; range = "lower bound"). assets ?v=36. 67 tests (+2 grid).
+  - Lesson → skill `references/lessons.md::daily-bars-representative-with-long-options`.

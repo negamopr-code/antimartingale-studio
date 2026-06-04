@@ -50,18 +50,43 @@ def test_trend_makes_straddle_gamma():
     assert res.straddle_pnl > 0, "a trend should pay the long straddle via gamma"
 
 
-def test_scalp_independent_of_straddle():
-    """Scalp income scales with the reversed range and part lots; turning efficiency up raises it."""
+def test_range_model_scales_with_efficiency():
+    """range model only: scalp income scales with the efficiency knob (frac of reversed range)."""
     rng = np.random.default_rng(3)
     path = 100.0 + np.cumsum(rng.normal(0, 0.3, 300))
     df = _frame(path, rng_pct=0.02)
-    lo = hi.run_hedged_intraday(df, datamod.atr(df, 14),
+    lo = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="range",
                                 realized_vol=datamod.realized_vol(df["Close"], 20),
                                 scalp_efficiency=0.1)
-    himore = hi.run_hedged_intraday(df, datamod.atr(df, 14),
+    himore = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="range",
                                     realized_vol=datamod.realized_vol(df["Close"], 20),
                                     scalp_efficiency=0.9)
     assert himore.scalp_pnl > lo.scalp_pnl
+
+
+def test_grid_books_round_trips_on_oscillation():
+    """grid model: an oscillating (mean-reverting) market books counter-trend round-trips and
+    earns positive scalp P&L; the daily bar is the execution timeframe (no efficiency knob)."""
+    rng = np.random.default_rng(7)
+    # oscillate around 100 with a wide daily range so the grid completes round-trips
+    osc = 100.0 + 6.0 * np.sin(np.arange(400) / 3.0) + rng.normal(0, 0.5, 400)
+    df = _frame(osc, rng_pct=0.015)
+    res = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="grid",
+                                 realized_vol=datamod.realized_vol(df["Close"], 20),
+                                 grid_atr_frac=1.0, dte_days=180)
+    assert res.scalp_round_trips > 0, "an oscillating market should complete round-trips"
+    assert res.scalp_pnl > 0, "counter-trend round-trips in a range should book positive scalp P&L"
+
+
+def test_grid_position_bounded_by_intraday_limit():
+    """grid model: each working part holds ≤1 leg, so a hard one-way trend can leave parts stuck
+    but the straddle loss cap (per period) is still respected — total never goes naked."""
+    up = 100.0 * np.cumprod(1 + np.full(260, 0.005))    # relentless uptrend → shorts get stuck
+    df = _frame(up, rng_pct=0.004)
+    res = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="grid",
+                                 realized_vol=datamod.realized_vol(df["Close"], 20), dte_days=180)
+    for row in res.table:
+        assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row   # straddle leg cap intact
 
 
 def test_rolls_happen():

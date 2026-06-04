@@ -133,17 +133,20 @@ class HedgedIntradayReq(BaseModel):
     atr_period: int = Field(14, ge=2, le=200)                 # DAILY ATR (grid step scale)
     starting_bank: float = Field(10_000.0, gt=0)
     risk_pct: float = Field(0.20, gt=0, le=1.0)               # premium budget = risk_pct·bank
-    dte_days: int = Field(30, ge=7, le=365)                   # monthly straddle by default
-    roll_buffer_days: int = Field(5, ge=1, le=60)             # re-strike ATM this many days before expiry
+    dte_days: int = Field(180, ge=7, le=730)                  # long-dated straddle = slow theta (user's regime)
+    roll_buffer_days: int = Field(10, ge=1, le=90)            # re-strike ATM this many days before expiry
     r: float = Field(0.045, ge=-0.05, le=0.5)
+    # scalp model: 'grid' = event-driven daily-cadence counter-trend grid (daily bars ARE
+    # representative when the step is on the daily scale); 'range' = heuristic intraday lower bound
+    scalp_model: str = Field("grid", pattern="^(grid|range)$")
     # scalping grid (three-thirds + exponential spacing)
     n_parts: int = Field(5, ge=1, le=10)                      # working parts (modern universal = 5)
-    grid_atr_frac: float = Field(0.5, gt=0, le=5)             # first grid step = this × daily ATR
+    grid_atr_frac: float = Field(1.0, gt=0, le=5)             # first grid step = this × daily ATR (≈1 ⇒ daily-representative)
     grid_mult: float = Field(2.0, ge=1.0, le=5)               # exponential spacing between parts
     intraday_frac: float = Field(0.333, gt=0, le=1.0)         # ⅓ rule: scalp limit as a frac of futures
-    scalp_efficiency: float = Field(0.5, ge=0, le=1.0)        # frac of reversed range the grid books
-    max_rt_per_day: float = Field(10.0, ge=0, le=100)         # cap on round-trips/day (~corpus 10)
-    stuck_penalty: float = Field(0.5, ge=0, le=5)             # drag from parts stuck offside in a trend
+    scalp_efficiency: float = Field(0.5, ge=0, le=1.0)        # range model only: frac of reversed range booked
+    max_rt_per_day: float = Field(10.0, ge=0, le=100)         # range model only: cap on round-trips/day
+    stuck_penalty: float = Field(0.5, ge=0, le=5)             # range model only: drag from stuck parts
     # IV surface (same engine as the options tab)
     iv_window: int = Field(20, ge=2, le=500)
     iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
@@ -162,11 +165,12 @@ class HedgedIntradayScanReq(BaseModel):
     atr_period: int = Field(14, ge=2, le=200)
     starting_bank: float = Field(10_000.0, gt=0)
     risk_pct: float = Field(0.20, gt=0, le=1.0)
-    dte_days: int = Field(30, ge=7, le=365)
-    roll_buffer_days: int = Field(5, ge=1, le=60)
+    dte_days: int = Field(180, ge=7, le=730)
+    roll_buffer_days: int = Field(10, ge=1, le=90)
     r: float = Field(0.045, ge=-0.05, le=0.5)
+    scalp_model: str = Field("grid", pattern="^(grid|range)$")
     n_parts: int = Field(5, ge=1, le=10)
-    grid_atr_frac: float = Field(0.5, gt=0, le=5)
+    grid_atr_frac: float = Field(1.0, gt=0, le=5)
     grid_mult: float = Field(2.0, ge=1.0, le=5)
     intraday_frac: float = Field(0.333, gt=0, le=1.0)
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)
