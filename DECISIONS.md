@@ -338,3 +338,16 @@ Not implemented; documented as a rejected tactic.
     straddle core, not the scalp — the scalp needs intraday data. (Where the user's "2× daily ATR
     catches all the back-and-forth" overestimates: the profitable scalp is sub-daily, not big swings.)
   - assets ?v=41. 68 tests.
+
+## Tab 8 — many fine sub-parts: count rises, P&L doesn't (2026-06-04)
+- **D40** — User: the ⅓ scalp limit can be split into many sub-parts, each deblocked only when price
+  travels its (exponential) distance. Confirmed the grid ALREADY does this (cumulative-exponential
+  levels, distance-gated fill, re-arm after round-trip). Raised n_parts cap 10→50 so it can be split
+  fine. **Measured: more sub-parts raise the round-trip COUNT a lot (SPY 19→239/yr, SLV 15→195/yr at
+  40 parts / 0.2×ATR step) — approaching live ПИ frequency — but net scalp P&L does NOT improve**
+  (SPY scalp −201→−494, SLV −399→−464). Reason: profit/round-trip ∝ step, so finer parts just slice
+  the SAME daily-resolvable mean-reversion into smaller pieces (more trips × smaller size ≈ same
+  gross), and trends still drag at every scale. Live ПИ's ~2500 trips/yr profit because they're
+  INTRADAY (many reversals WITHIN each day = large intraday path length) — exactly what a daily OHLC
+  bar discards. So sub-part count can't recover the scalp edge from daily data; it's bounded by the
+  path's mean-reversion content at the daily scale. Same conclusion, new angle.

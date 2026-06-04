@@ -149,7 +149,7 @@ class HedgedIntradayReq(BaseModel):
     # strike. 0 = never re-center (legacy frozen grid). ~21 ≈ monthly.
     scalp_recenter_days: int = Field(21, ge=0, le=365)
     # scalping grid (three-thirds + exponential spacing)
-    n_parts: int = Field(5, ge=1, le=10)                      # working parts (modern universal = 5)
+    n_parts: int = Field(5, ge=1, le=50)                         # working parts (modern universal = 5)
     grid_atr_frac: float = Field(2.0, gt=0, le=10)            # first grid step = this × the chosen-timeframe ATR (≈2× daily)
     grid_mult: float = Field(2.0, ge=1.0, le=5)               # exponential spacing between parts
     intraday_frac: float = Field(0.333, gt=0, le=1.0)         # ⅓ rule: scalp limit as a frac of futures
@@ -180,7 +180,7 @@ class HedgedIntradayScanReq(BaseModel):
     scalp_model: str = Field("grid", pattern="^(grid|range)$")
     grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")
     scalp_recenter_days: int = Field(21, ge=0, le=365)
-    n_parts: int = Field(5, ge=1, le=10)
+    n_parts: int = Field(5, ge=1, le=50)   
     grid_atr_frac: float = Field(2.0, gt=0, le=10)
     grid_mult: float = Field(2.0, ge=1.0, le=5)
     intraday_frac: float = Field(0.333, gt=0, le=1.0)

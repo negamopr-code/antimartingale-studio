@@ -1,0 +1,2 @@
+    n_parts: int = Field(5, ge=1, le=50)                         # working parts (modern universal = 5)
+    n_parts: int = Field(5, ge=1, le=50)   
