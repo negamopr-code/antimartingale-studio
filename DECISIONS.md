@@ -388,3 +388,24 @@ Not implemented; documented as a rejected tactic.
      trend by design"). 70 tests. assets ?v=44.
   - Process note (user): the corpus is for things OUTSIDE the strategy; the strategy rules are in
     the skill refs — APPLY them, don't ping a rate-limited corpus for what's already documented.
+
+## Tab 8/9 — залипшие части rule (profit-gated heal) + regime visualization (2026-06-04)
+- **D43** — User: "how do you decide WHEN to drop which working parts? + show your flat/trend logic on
+  the Tab 9 chart." Implemented the doctrine's залипшие-части rule properly and made it visible.
+  - **Engine:** `heal_with_profit`(on) + `confident_flat_n`(3). When price leaves the WHOLE grid
+    (|price−center|>reach) the stuck parts are HEALED — closed & the grid re-centered to current price —
+    **only if accumulated round-trip profit (`heal_budget`) covers the realized loss**; otherwise CARRY
+    (straddle pays). `clean_streak` counts consecutive clean round-trips → «уверенный флет» at ≥N
+    (scaling allowed); reset on heal/stuck. Emits `scalp_heal` + `confident_flat` trace events;
+    result gains `scalp_heals`, `confident_flat_days`. This is the answer to "when to drop a part":
+    spend accrued profit to unstick, else let the straddle pay — never force-realize (that was the
+    D41 bug). OU regression still green.
+  - **Tab 9 viz:** trend-regime spans (price OUTSIDE BB) shaded red = grid steps aside; white = flat
+    (scalp active); green dotted verticals = «уверенный флет» reached; ✚ = a heal (with the loss it
+    spent). Endpoint returns trend_spans/heals/confident_flat + stats. Reverted the scalp to a single
+    shared P&L axis on Tab 8 & 9 (user: dual axis was confusing). Verified SOL 2021: 19 trend-spans,
+    0 heals (no profit → carried, straddle paid +321k → total +244k). 70 tests. assets ?v=46.
+  - Profitability verdict stated plainly to user: NOT broadly profitable as a daily-measurable backtest
+    (28% of panel, 33% of even target instruments, negative medians); profit concentrates in strong
+    trenders (crypto) via straddle gamma; the scalp that would carry ranging names is unmeasurable on
+    daily bars. Conditionally profitable on the right (volatile/trending) instruments, not universally.

@@ -977,9 +977,20 @@ async function renderHiExec(d) {
                marker: { color: "#5b9dff", symbol: "circle-open", size: 7, line: { width: 1.5 } } };
   const rolls = { x: d.rolls.x, y: d.rolls.y, mode: "markers", name: `◆ ролл (${d.rolls.x.length})`,
                   marker: { color: "#39d0d8", symbol: "diamond", size: 11, line: { color: "#0f1419", width: 1 } } };
-  await plot("hx-exec", [ubT, lbT, price, strike, sh, lo, cl, rolls], layout(
-    `${d.ticker} — исполнение ПИ (полоса Боллинджера = «флет»; вне полосы новые контр-входы не ставятся)`, {
-      height: 440, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
+  const heals = { x: (d.heals || {}).x || [], y: (d.heals || {}).y || [], mode: "markers",
+                  name: `✚ лечение залипших (${((d.heals || {}).x || []).length})`,
+                  marker: { color: "#d29922", symbol: "cross", size: 11, line: { color: "#0f1419", width: 1 } } };
+  // TREND regime spans (price outside the BB) shaded red = grid STEPS ASIDE (no new counter-trend);
+  // unshaded = FLAT (scalp active). Green dotted verticals = «уверенный флет» reached (scaling allowed).
+  const shapes = (d.trend_spans || []).map((sp) => ({
+    type: "rect", xref: "x", yref: "paper", x0: sp.x0, x1: sp.x1, y0: 0, y1: 1,
+    fillcolor: "rgba(248,81,73,0.10)", line: { width: 0 }, layer: "below" }));
+  ((d.confident_flat || {}).x || []).forEach((x) => shapes.push({
+    type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
+    line: { color: "#3fb950", width: 1, dash: "dot" }, layer: "below" }));
+  await plot("hx-exec", [ubT, lbT, price, strike, sh, lo, cl, heals, rolls], layout(
+    `${d.ticker} — ЛОГИКА ПИ: 🟥 тренд (вне BB → скальп в стороне) · бел.=флет (скальп) · 🟢┊=уверенный флет`, {
+      height: 460, shapes, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } } }));
   await plot("hx-pnl", [
     { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл (гамма−тета)", line: { color: "#f0c000", width: 1.5 } },
     { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп", line: { color: "#5b9dff", width: 1.5 } },
@@ -991,8 +1002,15 @@ async function renderHiExec(d) {
     `${up ? "✅ ИТОГО ПЛЮС" : "❌ ИТОГО МИНУС"}  net ${up ? "+" : ""}${f(s.net_pnl)}  (CAGR ${f(s.ann_return_pct)}%, ${s.n_days} дн)\n`
     + `стреддл (гамма−тета) ${s.straddle_pnl >= 0 ? "+" : ""}${f(s.straddle_pnl)}  =  гамма+направление ${s.gamma_dir_pnl >= 0 ? "+" : ""}${f(s.gamma_dir_pnl)} + тета ${f(s.total_theta)}\n`
     + `скальп ${s.scalp_pnl >= 0 ? "+" : ""}${f(s.scalp_pnl)}  ·  контр-входов ${s.scalp_opens}  ·  круговых ${s.scalp_round_trips}  ·  залипло к концу ${s.scalp_stuck_at_end}  ·  роллов ${s.n_rolls}\n`
-    + `BB-гейт: ${d.use_bbands ? "ВКЛ — на пробое полосы новые контр-входы НЕ ставятся (не фейдим тренд, стреддл бежит)" : "ВЫКЛ — фейдим каждый уровень"}\n\n`
-    + `ЧИТАЙ ГРАФИК: 🔻/🔺 = контр-трендовые входы скальпа внутри флета; ○ = их закрытие на возврате; ◆ = ролл стреддла.\n`
+    + `BB-гейт: ${d.use_bbands ? "ВКЛ — на пробое полосы новые контр-входы НЕ ставятся (не фейдим тренд, стреддл бежит)" : "ВЫКЛ — фейдим каждый уровень"}\n`
+    + `лечений залипших частей (за накопл. прибыль): ${s.scalp_heals}  ·  дней «уверенного флета»: ${s.confident_flat_days}  ·  дней в тренде (вне BB): ${s.trend_days}\n\n`
+    + `── МОЯ ЛОГИКА НА ГРАФИКЕ (как определяю флет/тренд и когда бросать части) ──\n`
+    + `🟥 красная заливка = ТРЕНД (цена ВНЕ полосы Боллинджера) → новые контр-трендовые части НЕ ставлю, стреддл бежит.\n`
+    + `   белый фон (цена ВНУТРИ полосы) = ФЛЕТ → скальплю контр-тренд: 🔻шорт у верха / 🔺лонг у низа, ○ выход на возврате.\n`
+    + `🟢┊ зелёный пунктир = «УВЕРЕННЫЙ ФЛЕТ» (≥3 чистых круговых подряд без залипания) — доктрина разрешает наращивать лот.\n`
+    + `✚ оранжевый крест = «ЛЕЧЕНИЕ» залипшей части: цена ушла за всю сетку, но НАКОПЛЕННОЙ ПРИБЫЛИ хватает — закрываю и переношу сетку\n`
+    + `   к текущей цене. Если прибыли НЕ хватает — НЕ трогаю (переношу до ролла, платит стреддл). Это и есть ответ «когда бросать часть».\n`
+    + `◆ = ролл стреддла.\n`
     + (s.straddle_pnl > 0 && s.scalp_pnl < 0
         ? `→ Тренд: стреддл-ГАММА (+${f(s.gamma_dir_pnl)}) забрала движение, контр-скальп залип и в минусе — ИТОГО плюс ЗА СЧЁТ стреддла (это by design: скальп и стреддл — разные стороны тренда).`
         : s.scalp_pnl > 0

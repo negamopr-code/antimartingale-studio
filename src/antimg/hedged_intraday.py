@@ -84,6 +84,8 @@ class HedgedIntradayResult:
     scalp_round_trips: int = 0         # completed counter-trend round-trips (grid model)
     gamma_dir_pnl: float = 0.0         # straddle P&L minus theta = the gamma+directional capture
     breakeven_scalp_cover_pct: float = 0.0  # % of theta the scalp must cover for net=0 (doctrine min ≈100%)
+    scalp_heals: int = 0               # times stuck parts were healed (re-centered) with accumulated profit
+    confident_flat_days: int = 0       # days in "уверенный флет" (≥N clean round-trips, scaling allowed)
 
 
 def _sigma_at(rv: "pd.Series | None", date, default: float) -> float:
@@ -119,6 +121,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 2.0,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
                         scalp_model: str = "grid", scalp_recenter_days: int = 0,
+                        heal_with_profit: bool = True, confident_flat_n: int = 3,
                         use_bbands: bool = True, bb_window: int = 20, bb_k: float = 2.0,
                         scalp_efficiency: float = 0.5,
                         max_rt_per_day: float = 10.0, stuck_penalty: float = 0.5,
@@ -191,6 +194,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     scalp_realized = 0.0          # booked round-trips + stuck legs closed at roll
     scalp_cost_cum = 0.0          # scalp fill costs (separate so cum_scalp nets it once)
     scalp_acc = 0.0               # range-model running net
+    heal_budget = 0.0             # accumulated booked round-trip profit available to "heal" stuck parts
+    clean_streak = 0              # consecutive clean round-trips with no stuck/heal → уверенный флет
     GRID: dict = {}
 
     def setup_grid(center: float, atr_open: float, n_str: float):
@@ -203,14 +208,24 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         buy_lv = [center - o for o in offs]
         lim = max(n_str * intraday_frac, 0.0)
         GRID.clear()
-        GRID.update(sell_lv=sell_lv, buy_lv=buy_lv,
+        GRID.update(center=center, reach=offs[-1] if offs else 0.0,
+                    sell_lv=sell_lv, buy_lv=buy_lv,
                     inner_up=[center] + sell_lv[:-1],     # buy-back target for a short at sell_lv[k]
                     inner_dn=[center] + buy_lv[:-1],      # sell target for a long at buy_lv[k]
                     part_lots=lim / max(1, n_parts),
                     sarm=[True] * n_parts, barm=[True] * n_parts, legs=[])
 
+    def _book_roundtrip(pnl):                             # уверенный флет / heal budget bookkeeping
+        nonlocal heal_budget, clean_streak
+        heal_budget += pnl                                # accrued profit usable to unstick parts
+        clean_streak += 1
+        if clean_streak == confident_flat_n and trace is not None:
+            trace.append({"t": "confident_flat", "date": _book_roundtrip.date,
+                          "streak": clean_streak})
+
     def scalp_walk(o, h, l, c, ub, lb, date):
         nonlocal scalp_realized, scalp_cost_cum
+        _book_roundtrip.date = date.date().isoformat()
         g = GRID
         if not g or g["part_lots"] <= 0:
             return
@@ -237,7 +252,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         pnl = (leg["target"] - leg["entry"]) * leg["lots"]
                         scalp_realized += pnl
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
-                        res.scalp_round_trips += 1; g["barm"][leg["k"]] = True; g["legs"].remove(leg)
+                        res.scalp_round_trips += 1; _book_roundtrip(pnl)
+                        g["barm"][leg["k"]] = True; g["legs"].remove(leg)
                         _rec("scalp_close", side="long", entry=round(leg["entry"], 4),
                              exit=round(leg["target"], 4), pnl=round(pnl, 2))
             elif b < a:                                   # falling segment
@@ -253,7 +269,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         pnl = (leg["entry"] - leg["target"]) * leg["lots"]
                         scalp_realized += pnl
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
-                        res.scalp_round_trips += 1; g["sarm"][leg["k"]] = True; g["legs"].remove(leg)
+                        res.scalp_round_trips += 1; _book_roundtrip(pnl)
+                        g["sarm"][leg["k"]] = True; g["legs"].remove(leg)
                         _rec("scalp_close", side="short", entry=round(leg["entry"], 4),
                              exit=round(leg["target"], 4), pnl=round(pnl, 2))
 
@@ -351,6 +368,26 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         # ---- scalping overlay ----
         if scalp_model == "grid":
             scalp_walk(op, hi, lo, S, ub_np[j], lb_np[j], d)
+            # ---- залипшие части (when to DROP a working part) ----
+            # If price has left the WHOLE grid (all near parts stuck) we HEAL — but ONLY by spending
+            # accumulated round-trip profit (doctrine: "unstick with accrued profit, else let the
+            # straddle pay"). If there isn't enough booked profit, we CARRY the stuck parts to the
+            # roll and the straddle's gamma covers the trend. This is the answer to "when to drop a part".
+            if heal_with_profit and GRID.get("legs") and GRID.get("reach", 0) > 0 \
+                    and abs(S - GRID["center"]) > GRID["reach"]:
+                loss = max(0.0, -scalp_open_mtm(S))       # what closing the stuck legs would realize
+                if heal_budget >= loss:                   # enough accrued profit to "heal" them
+                    scalp_close_all(S)
+                    heal_budget -= loss
+                    clean_streak = 0                      # a heal interrupts the уверенный-флет streak
+                    setup_grid(S, atr_d, st["n_str"])     # move the field hospital to the current range
+                    res.scalp_heals += 1
+                    if trace is not None:
+                        trace.append({"t": "scalp_heal", "date": d.date().isoformat(),
+                                      "spot": round(float(S), 4), "loss": round(loss, 2)})
+                # else: carry the injured parts — the straddle pays (no forced realization)
+            if clean_streak >= confident_flat_n:
+                res.confident_flat_days += 1
         else:                                             # range heuristic (lower bound)
             g1 = grid_atr_frac * atr_d
             part_lots = (st["n_str"] * intraday_frac) / max(1, n_parts)

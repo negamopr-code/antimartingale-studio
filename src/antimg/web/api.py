@@ -694,8 +694,24 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
         raise HTTPException(status_code=422, detail="no straddle period resolved in this window")
     opens = [e for e in trace if e["t"] == "scalp_open"]
     closes = [e for e in trace if e["t"] == "scalp_close"]
+    heals = [e for e in trace if e["t"] == "scalp_heal"]
+    cflat = [e for e in trace if e["t"] == "confident_flat"]
     mid = daily["Close"].rolling(req.bb_window).mean()
     sd = daily["Close"].rolling(req.bb_window).std()
+    ub_s = mid + req.bb_k * sd
+    lb_s = mid - req.bb_k * sd
+    # TREND regime spans = contiguous dates where price is OUTSIDE the Bollinger band (here the
+    # grid STEPS ASIDE — no new counter-trend entries — and lets the straddle run). Inside = FLAT.
+    out = ((daily["Close"] > ub_s) | (daily["Close"] < lb_s)).fillna(False).to_numpy()
+    di = [d.isoformat() for d in daily.index]
+    trend_spans, i0 = [], None
+    for k, flag in enumerate(out):
+        if flag and i0 is None:
+            i0 = k
+        elif not flag and i0 is not None:
+            trend_spans.append({"x0": di[i0], "x1": di[k]}); i0 = None
+    if i0 is not None:
+        trend_spans.append({"x0": di[i0], "x1": di[-1]})
     # straddle strike as a step line over each period (open→close at its strike)
     strike_x, strike_y = [], []
     for row in res.table:
@@ -713,6 +729,9 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
         "scalp_long": {"x": [e["date"] for e in lo], "y": [e["price"] for e in lo]},
         "scalp_close": {"x": [e["date"] for e in closes], "y": [e["exit"] for e in closes],
                         "pnl": [e["pnl"] for e in closes]},
+        "heals": {"x": [e["date"] for e in heals], "y": [e["spot"] for e in heals]},
+        "confident_flat": {"x": [e["date"] for e in cflat]},
+        "trend_spans": trend_spans,
         "rolls": {"x": [rr["date"] for rr in res.rolls], "y": [rr["spot"] for rr in res.rolls]},
         "equity_total": ser.list_xy(res.equity_dates, res.equity_total, MP),
         "equity_straddle": ser.list_xy(res.equity_dates, res.equity_straddle, MP),
@@ -723,6 +742,8 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             "gamma_dir_pnl": round(res.gamma_dir_pnl, 2), "total_theta": round(res.total_theta, 2),
             "scalp_round_trips": res.scalp_round_trips, "n_rolls": res.n_rolls,
             "scalp_opens": len(opens), "scalp_stuck_at_end": len(opens) - len(closes),
+            "scalp_heals": res.scalp_heals, "confident_flat_days": res.confident_flat_days,
+            "trend_days": int(out.sum()),
             "ann_return_pct": round(res.ann_return_pct, 2), "n_days": res.n_days,
             "vol_model": vm.label,
         },
