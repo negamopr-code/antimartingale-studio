@@ -868,7 +868,10 @@ async function renderHiScan(d) {
   _hiScan = { rows: d.results, sort: "cagr_pct", desc: true };
   const s = d.summary;
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
-  const robust = s.profitable_pct >= 50 && s.median_cagr_pct > 0;
+  // ROBUST needs the MEDIAN instrument to actually earn (a >50% hit-rate with a ~0% median is
+  // outlier-carried, not robust) — same bar as the Tab-5 scan verdict.
+  const robust = s.profitable_pct >= 50 && s.median_cagr_pct >= 5;
+  const outlierCarried = s.mean_cagr_pct > 2 * Math.max(s.median_cagr_pct, 0) + 5;  // mean ≫ median
   let verdict =
     `${robust ? "✅ ШИРОКО ПРИБЫЛЬНА (in-sample)" : "⚠ УЗКО / ЗАВИСИТ ОТ ИНСТРУМЕНТА"}   `
     + `${s.profitable}/${s.ok} инструментов в плюсе (${f(s.profitable_pct)}%)\n`
@@ -877,7 +880,16 @@ async function renderHiScan(d) {
     + (s.worst ? `худший  : ${s.worst.ticker}  ${f(s.worst.cagr_pct)}%/год  (net ${f(s.worst.net)})\n` : "")
     + (s.failed ? `не загрузилось : ${s.failed}\n` : "")
     + `медиана покрытия теты скальпом : ${f(s.median_scalp_cover_pct)}%   ·   `
-    + `loss-cap (стреддл ≤ премии) держится : ${f(s.loss_cap_ok_pct)}% инструментов\n\n`
+    + `loss-cap (стреддл ≤ премии) держится : ${f(s.loss_cap_ok_pct)}% инструментов\n`;
+  if (outlierCarried)
+    verdict += `\n⚠ среднее ≫ медианы ⇒ результат тянут НЕСКОЛЬКО выбросов (крипта/extreme-тренды), `
+      + `а типичный инструмент около нуля. Смотри МЕДИАНУ, не среднее.`;
+  if (s.median_cagr_pct < 5)
+    verdict += `\n⚠ медианный CAGR ${f(s.median_cagr_pct)}% — на среднем инструменте стратегия ~плоская `
+      + `(ниже безриска); «прибыльность» сидит в хвосте трендовых имён.`;
+  verdict += `\n⚠ Огромный net на крипте — артефакт КОМПАУНДИНГА: премия пересайзится в 20% растущего `
+    + `банка на ходе подложки ×20+, БЕЗ кэпа нотионала/ликвидности ⇒ нереалистичные абсолютные $. `
+    + `Читай CAGR, не net (как cap_mult в антимартингейл-вкладках).\n\n`
     + `Доктрина зовёт волатильные инструменты (серебро/ETH) — там гамма стреддла окупает тету,\n`
     + `а скальп идёт сверху. ⚠ Скальп смоделирован из ДНЕВНЫХ баров (нижняя оценка, см. вкладку выше),\n`
     + `так что это пессимистичная граница; CAGR vs доктринные 25–40%/год читай с этой поправкой.`;
