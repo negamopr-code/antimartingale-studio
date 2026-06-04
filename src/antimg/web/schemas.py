@@ -133,7 +133,7 @@ class HedgedIntradayReq(BaseModel):
     atr_period: int = Field(14, ge=2, le=200)                 # DAILY ATR (grid step scale)
     starting_bank: float = Field(10_000.0, gt=0)
     risk_pct: float = Field(0.20, gt=0, le=1.0)               # premium budget = risk_pct·bank
-    dte_days: int = Field(180, ge=7, le=730)                  # long-dated straddle = slow theta (user's regime)
+    dte_days: int = Field(365, ge=7, le=730)                  # long-dated straddle = slow theta (user's regime)
     roll_buffer_days: int = Field(10, ge=1, le=90)            # re-strike ATM this many days before expiry
     r: float = Field(0.045, ge=-0.05, le=0.5)
     # scalp model: 'grid' = event-driven daily-cadence counter-trend grid (daily bars ARE
@@ -170,7 +170,7 @@ class HedgedIntradayScanReq(BaseModel):
     atr_period: int = Field(14, ge=2, le=200)
     starting_bank: float = Field(10_000.0, gt=0)
     risk_pct: float = Field(0.20, gt=0, le=1.0)
-    dte_days: int = Field(180, ge=7, le=730)
+    dte_days: int = Field(365, ge=7, le=730)
     roll_buffer_days: int = Field(10, ge=1, le=90)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     scalp_model: str = Field("grid", pattern="^(grid|range)$")

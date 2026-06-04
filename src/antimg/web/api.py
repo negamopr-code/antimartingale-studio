@@ -653,6 +653,8 @@ def hedged_intraday(req: HedgedIntradayReq):
             "scalp_pnl": round(res.scalp_pnl, 2),
             "total_theta": round(res.total_theta, 2),
             "scalp_covers_theta_pct": round(res.scalp_covers_theta_pct, 1),
+            "gamma_dir_pnl": round(res.gamma_dir_pnl, 2),
+            "breakeven_scalp_cover_pct": round(res.breakeven_scalp_cover_pct, 1),
             "ann_return_pct": round(res.ann_return_pct, 2),
             "years": round(res.years, 2),
             "n_rolls": res.n_rolls, "n_days": res.n_days,

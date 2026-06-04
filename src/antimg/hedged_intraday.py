@@ -78,6 +78,8 @@ class HedgedIntradayResult:
     total_cost: float = 0.0
     scalp_model: str = "grid"          # 'grid' = event-driven daily round-trips; 'range' = heuristic
     scalp_round_trips: int = 0         # completed counter-trend round-trips (grid model)
+    gamma_dir_pnl: float = 0.0         # straddle P&L minus theta = the gamma+directional capture
+    breakeven_scalp_cover_pct: float = 0.0  # % of theta the scalp must cover for net=0 (doctrine min ≈100%)
 
 
 def _sigma_at(rv: "pd.Series | None", date, default: float) -> float:
@@ -363,4 +365,9 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         res.ann_return_pct = 100.0 * (growth ** (1.0 / res.years) - 1.0) if growth > 0 else -100.0
     res.max_drawdown = _drawdown(res.equity_total)
     res.scalp_covers_theta_pct = (100.0 * cum_scalp / abs(cum_theta)) if abs(cum_theta) > 1e-9 else 0.0
+    # gamma+directional capture = straddle P&L stripped of theta; and how much of theta the scalp
+    # must cover for the whole construction to break even (the doctrine says scalp's MIN job ≈100%).
+    res.gamma_dir_pnl = realized_straddle - cum_theta
+    res.breakeven_scalp_cover_pct = (100.0 * (-realized_straddle) / abs(cum_theta)
+                                     if realized_straddle < 0 and abs(cum_theta) > 1e-9 else 0.0)
     return res

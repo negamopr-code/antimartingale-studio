@@ -305,3 +305,19 @@ Not implemented; documented as a rejected tactic.
 - **Process:** also persisted a standing memory — ALWAYS consult the governing skill WHILE coding
   (not just at start); the prior-turn wrong verdict came from not doing so. Live corpus consults on
   the ATR-timeframe + instrument-universe questions are QUEUED (NotebookLM rate-limited).
+
+## Tab 8 — straddle breakeven-theta-coverage readout + DTE default 365 (2026-06-04)
+- **D38** — User: "SPY should be positive and is not" (range −7%, grid −13%). Diagnosed honestly:
+  SPY's straddle gamma+directional is strongly POSITIVE (+4.7–5.3k — it catches the big moves);
+  theta (−6.4–8k) only just exceeds it, so the straddle is a hair below breakeven. Net=0 needs the
+  scalp to cover only ~17–33% of theta — far below the doctrine's MINIMUM scalp claim (~100%,
+  «отбивание теты»). ⇒ under the method's design intent SPY IS positive; the daily backtest shows
+  negative only because the grid books ≈0 scalp (can't see SPY's intraday chop) and DTE 180 piled
+  on theta. (range model DTE 365 already shows SPY +1.4%.)
+  - Engine exposes `gamma_dir_pnl` (straddle − theta) and `breakeven_scalp_cover_pct`
+    (= −straddle/|theta|, the % of theta the scalp must cover for net=0). Verdict now leads the
+    decomposition with: gamma vs theta split + "straddle is ~breakeven; scalp needs X% of theta;
+    doctrine min ≈100% ⇒ instrument positive under design intent." Surfaced in /api/hedged-intraday.
+  - Default `dte_days` 180→365 (the user's "even one year"): slower theta, straddle closer to
+    breakeven on indices. assets ?v=40. 68 tests.
+  - Live consult on SPY/index suitability QUEUED (NotebookLM rate-limited).
