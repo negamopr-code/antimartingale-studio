@@ -765,7 +765,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             "scalp_round_trips": res.scalp_round_trips, "n_rolls": res.n_rolls,
             "scalp_opens": len(opens), "scalp_stuck_at_end": len(opens) - len(closes),
             "scalp_heals": res.scalp_heals, "confident_flat_days": res.confident_flat_days,
-            "trend_days": int(out.sum()),
+            "scalp_scaled_max": res.scalp_scaled_max, "trend_days": int(out.sum()),
             "ann_return_pct": round(res.ann_return_pct, 2), "n_days": res.n_days,
             "vol_model": vm.label,
         },

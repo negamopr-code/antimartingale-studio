@@ -86,6 +86,7 @@ class HedgedIntradayResult:
     breakeven_scalp_cover_pct: float = 0.0  # % of theta the scalp must cover for net=0 (doctrine min ≈100%)
     scalp_heals: int = 0               # times stuck parts were healed (re-centered) with accumulated profit
     confident_flat_days: int = 0       # days in "уверенный флет" (≥N clean round-trips, scaling allowed)
+    scalp_scaled_max: float = 1.0      # max working-part lot scale-up reached in уверенный флет (1.0 = never)
 
 
 def _sigma_at(rv: "pd.Series | None", date, default: float) -> float:
@@ -122,6 +123,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
                         scalp_model: str = "grid", scalp_recenter_days: int = 0,
                         heal_with_profit: bool = True, confident_flat_n: int = 3,
+                        confident_flat_scale: bool = True,
                         use_bbands: bool = True, bb_window: int = 20, bb_k: float = 2.0,
                         scalp_efficiency: float = 0.5,
                         max_rt_per_day: float = 10.0, stuck_penalty: float = 0.5,
@@ -242,7 +244,15 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         g = GRID
         if not g or g["part_lots"] <= 0:
             return
+        # УВЕРЕННЫЙ ФЛЕТ / заслуженный риск (doctrine): after ≥confident_flat_n clean cycles, scale the
+        # working-part lot UP — funded by ACCRUED PROFIT only (heal_budget). Capped at ×2 so the total
+        # scalp (n_parts·2·base) never exceeds calls−base ⇒ still never naked.
         pl = g["part_lots"]
+        if confident_flat_scale and clean_streak >= confident_flat_n and st["prem_book"] > 0:
+            scale = 1.0 + min(max(heal_budget, 0.0) / st["prem_book"], 1.0)
+            pl *= scale
+            if scale > res.scalp_scaled_max:
+                res.scalp_scaled_max = round(scale, 3)
         # FLAT gate: don't open a counter-trend leg into a breakout (short above the upper band /
         # long below the lower band) — step aside, let the straddle run. Exits are always allowed.
         gate_short = (lambda lv: not (use_bbands and np.isfinite(ub) and lv > ub))

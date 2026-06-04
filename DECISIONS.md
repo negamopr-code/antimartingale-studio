@@ -436,3 +436,13 @@ Not implemented; documented as a rejected tactic.
   the exponential emergency reserve (rarely hit, by design). Engine emits `grid_setup` trace events;
   Tab 9 now DRAWS the N working-part levels (dotted, labelled ч.1..N) + center, so the split is
   visible and you can see which parts are reachable. 71 tests. assets ?v=50.
+
+## Tab 8/9 — уверенный флет: LITERAL lot scaling (заслуженный риск) (2026-06-04)
+- **D48** — User: "we agreed ALL rules" — confident-flat was still ⚠ (detect only). Implemented the
+  literal rule: after ≥confident_flat_n clean cycles, the working-part lot SCALES UP, funded by
+  ACCRUED PROFIT only (heal_budget): scale = 1 + min(accrued/premium, 1) ∈ [1,2]. Capped ×2 so total
+  scalp (n_parts·2·base) ≤ calls−base ⇒ still never naked. Engine `confident_flat_scale`(on) +
+  `scalp_scaled_max`. Verified OU flat: scaling ON scalp +12.7k vs OFF +5.2k (same RTs, bigger lots),
+  max ×2.00. Visible in the Tab 9 ledger (lot column grows) + panel rule ⚠→✅. 72 tests. assets ?v=52.
+  - Panel now: only conditional ROLLING + daily-scalp-data-limit remain ⚠ (rolling = a real mechanic
+    to add; data-limit is inherent, not fixable in code).

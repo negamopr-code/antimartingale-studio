@@ -141,6 +141,25 @@ def test_three_thirds_literal_base_hedge_and_band():
         assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row
 
 
+def test_confident_flat_scaling_grows_lot_from_profit():
+    """Уверенный флет / заслуженный риск: after ≥N clean cycles the working-part lot scales UP from
+    accrued profit (capped ×2, so total scalp ≤ calls−base ⇒ never naked). On a long mean-reverting
+    flat, scaling ON should book MORE scalp than OFF, with the same round-trips."""
+    rng = np.random.default_rng(1)
+    x, path = 100.0, []
+    for _ in range(3000):
+        x += 0.1 * (100.0 - x) + rng.normal(0, 2.0)
+        path.append(x)
+    df = _frame(np.array(path), rng_pct=0.003)
+    rv = datamod.realized_vol(df["Close"], 20)
+    datr = datamod.atr_on_timeframe(df, "daily", 14)
+    kw = dict(realized_vol=rv, dte_days=365, grid_atr_frac=0.5, grid_mult=2.0, n_parts=5)
+    on = hi.run_hedged_intraday(df, datr, confident_flat_scale=True, **kw)
+    off = hi.run_hedged_intraday(df, datr, confident_flat_scale=False, **kw)
+    assert on.scalp_scaled_max > 1.0 and on.scalp_scaled_max <= 2.0 + 1e-9   # scaled, capped ≤×2 (never naked)
+    assert on.scalp_pnl > off.scalp_pnl                                       # earned-risk scaling books more
+
+
 def test_rolls_happen():
     df = _frame(100.0 + np.random.default_rng(2).normal(0, 0.5, 400))
     res = hi.run_hedged_intraday(df, datamod.atr(df, 14),
