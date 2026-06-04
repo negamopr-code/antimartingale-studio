@@ -631,7 +631,7 @@ def hedged_intraday(req: HedgedIntradayReq):
         daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
     if daily.empty or len(daily) < req.atr_period * 3:
         raise HTTPException(status_code=422, detail="not enough data in this window for the ATR period")
-    datr = datamod.atr(daily, req.atr_period)                 # DAILY ATR = grid step scale
+    datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)  # grid-step ATR (daily/weekly/monthly)
     vm, realized = _build_vol(req, daily)
     res = _run_hi(daily, datr, vm, realized, req)
     if not res.table:
@@ -661,6 +661,7 @@ def hedged_intraday(req: HedgedIntradayReq):
             "max_premium_at_risk": round(res.max_premium_at_risk, 2),
             "total_cost": round(res.total_cost, 2),
             "scalp_model": res.scalp_model, "scalp_round_trips": res.scalp_round_trips,
+            "grid_timeframe": req.grid_timeframe,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
         },
     }
@@ -681,7 +682,7 @@ def hedged_intraday_scan(req: HedgedIntradayScanReq):
                 rows.append({"ticker": ticker, "label": label, "group": group,
                              "ok": False, "error": "not enough data"})
                 continue
-            datr = datamod.atr(daily, req.atr_period)
+            datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
             vm, realized = _build_vol(req, daily, ticker=ticker)
             res = _run_hi(daily, datr, vm, realized, req)
             if not res.table:

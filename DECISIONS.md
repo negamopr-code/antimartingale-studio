@@ -286,3 +286,22 @@ Not implemented; documented as a rejected tactic.
   - Engine/schema/scan all thread `scalp_model`; Tab 8 + bulk verdicts branch on it (grid = "daily
     representative, read CAGR directly"; range = "lower bound"). assets ?v=36. 67 tests (+2 grid).
   - Lesson → skill `references/lessons.md::daily-bars-representative-with-long-options`.
+
+## Tab 8 — grid-step ATR timeframe (daily/weekly/monthly) (2026-06-04)
+- **D37** — User insight: to scalp a wider oscillation that daily bars CAN resolve, base the grid
+  STEP on a longer-timeframe ATR (weekly/monthly) so each daily bar is sub-step "intraday-like"
+  info within a multi-day swing. New `grid_timeframe` (daily|weekly|monthly, default **weekly**);
+  `data.atr_on_timeframe()` computes ATR on the coarse bar, SHIFTS one bar (no look-ahead),
+  ffill-reindexes to daily. Execution still walks daily bars. Also added `data.monthly()`.
+  - **Real-data (DTE 365): coarser TF turns the quiet doctrine instruments positive** — GLD
+    −1.7%(daily)→+4.2%(monthly); SLV +0.8→+7.7; GC −2.0→+4.5; NG −4.5→+3.9. **Honest mechanism:**
+    NOT more scalp (scalp stays ~flat/slightly-neg) — the wide grid TRADES FAR LESS (RT/yr ~9→1),
+    stops over-churning/fighting trends, and lets the STRADDLE carry (the doctrine's "flatten the
+    grid, bigger targets, once-a-day" mode). Straddle remains the engine; the reframe removes the
+    daily grid's self-inflicted cost+trend drag. (CAGR shifts also partly via bank-compounding
+    coupling: less scalp drag → bigger bank → bigger straddle sizing.)
+  - Threaded through single route + bulk scan + both verdicts (show TF + per-year RT). assets ?v=39.
+    68 tests (+grid-timeframe widening test).
+- **Process:** also persisted a standing memory — ALWAYS consult the governing skill WHILE coding
+  (not just at start); the prior-turn wrong verdict came from not doing so. Live corpus consults on
+  the ATR-timeframe + instrument-universe questions are QUEUED (NotebookLM rate-limited).

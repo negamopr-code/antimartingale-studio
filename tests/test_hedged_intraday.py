@@ -89,6 +89,23 @@ def test_grid_position_bounded_by_intraday_limit():
         assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row   # straddle leg cap intact
 
 
+def test_grid_step_timeframe_widens_grid():
+    """A weekly/monthly-ATR grid step is WIDER than a daily-ATR one — so the daily bar becomes
+    sub-step 'intraday-like' info within a larger oscillation the grid scalps over days (user's
+    reframe). The robust invariant is the widening of the step + monotonic daily<weekly<monthly."""
+    rng = np.random.default_rng(11)
+    path = 100.0 + np.cumsum(rng.normal(0, 0.4, 500))
+    df = _frame(path, rng_pct=0.015)
+    rv = datamod.realized_vol(df["Close"], 20)
+    d = datamod.atr_on_timeframe(df, "daily", 14).dropna().mean()
+    w = datamod.atr_on_timeframe(df, "weekly", 14).dropna().mean()
+    m = datamod.atr_on_timeframe(df, "monthly", 14).dropna().mean()
+    assert d < w < m, (d, w, m)            # coarser timeframe ⇒ wider grid step
+    weekly_grid = hi.run_hedged_intraday(df, datamod.atr_on_timeframe(df, "weekly", 14),
+                                         realized_vol=rv, scalp_model="grid", dte_days=180)
+    assert weekly_grid.n_days > 0 and weekly_grid.table
+
+
 def test_rolls_happen():
     df = _frame(100.0 + np.random.default_rng(2).normal(0, 0.5, 400))
     res = hi.run_hedged_intraday(df, datamod.atr(df, 14),

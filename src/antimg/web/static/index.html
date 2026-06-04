@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=38"/>
+  <link rel="stylesheet" href="/style.css?v=39"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -234,8 +234,9 @@
       <label>Instrument <select name="ticker" class="instr"></select></label>
       <label>Start <input name="start" value="2018-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
-      <label title="grid = событийная сетка на дневном такте (дневной бар репрезентативен при длинных опционах); range = интрадей-эвристика (нижняя оценка)">Scalp model <select name="scalp_model"><option value="grid">grid (daily-cadence, faithful)</option><option value="range">range (intraday lower-bound)</option></select></label>
-      <label title="ДНЕВНОЙ ATR — масштаб шага сетки">ATR period <input name="atr_period" type="number" value="14"></label>
+      <label title="grid = событийная сетка на дневном такте; range = интрадей-эвристика (грубая)">Scalp model <select name="scalp_model"><option value="grid">grid (daily-cadence, faithful)</option><option value="range">range (crude heuristic)</option></select></label>
+      <label title="на каком ТАЙМФРЕЙМЕ брать ATR для шага сетки. weekly/monthly = шаг ШИРЕ дневного диапазона ⇒ дневной бар становится «интрадеем» внутри более крупной осцилляции, многодневные круговые сделки честно видны на дневках (режим «раз в день, крупнее цели»). daily = тесная сетка (нужна внутридневная инфа, которой нет).">Grid ATR TF <select name="grid_timeframe"><option value="weekly">weekly (день=«интрадей»)</option><option value="monthly">monthly (шире)</option><option value="daily">daily (тесная)</option></select></label>
+      <label title="период ATR в барах выбранного таймфрейма">ATR period <input name="atr_period" type="number" value="14"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label title="бюджет премии = risk% × банк (доктрина: 20% за период)">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
       <label title="срок стреддла: длинный (180–365) = медленная тета, дневной скальп репрезентативен (мысль юзера)">DTE days <input name="dte_days" type="number" value="180"></label>
@@ -265,6 +266,6 @@
     <div class="tradetable" id="hi-scan-table"></div>
   </section>
 
-  <script src="/app.js?v=38"></script>
+  <script src="/app.js?v=39"></script>
 </body>
 </html>

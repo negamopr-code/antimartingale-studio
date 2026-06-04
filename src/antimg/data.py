@@ -103,6 +103,30 @@ def weekly(df: pd.DataFrame) -> pd.DataFrame:
     return wk
 
 
+def monthly(df: pd.DataFrame) -> pd.DataFrame:
+    """Resample daily OHLC to monthly (calendar month-end)."""
+    agg = {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
+    return df.resample("ME").agg(agg).dropna(how="any")
+
+
+def atr_on_timeframe(daily: pd.DataFrame, timeframe: str, period: int = 14) -> pd.Series:
+    """ATR computed on a coarser bar (daily/weekly/monthly) and aligned back to the DAILY index.
+
+    Used to size a scalping GRID STEP off a longer-timeframe range so that, on a daily-bar
+    backtest, each daily bar is sub-step ("intraday-like") information within the larger
+    weekly/monthly oscillation. The coarse ATR is SHIFTED one bar before reindex (use the last
+    COMPLETED week/month) so there is no look-ahead, then forward-filled onto daily dates.
+    """
+    if timeframe == "weekly":
+        coarse = weekly(daily)
+    elif timeframe == "monthly":
+        coarse = monthly(daily)
+    else:
+        return atr(daily, period)                       # daily: native, no realignment
+    a = atr(coarse, period).shift(1)                    # last completed coarse bar → no look-ahead
+    return a.reindex(daily.index, method="ffill")
+
+
 def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     """Wilder's ATR on whatever timeframe `df` is in."""
     high, low, close = df["High"], df["Low"], df["Close"]
