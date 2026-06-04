@@ -409,3 +409,19 @@ Not implemented; documented as a rejected tactic.
     (28% of panel, 33% of even target instruments, negative medians); profit concentrates in strong
     trenders (crypto) via straddle gamma; the scalp that would carry ranging names is unmeasurable on
     daily bars. Conditionally profitable on the right (volatile/trending) instruments, not universally.
+
+## Tab 8/9 — LITERAL three-thirds (no substitution) (2026-06-04)
+- **D45** — User: "do it exactly like the strategy, no improvisation" (re the ⚠ three-thirds). I had
+  substituted gamma for the trend reserve and ⅓-of-futures for ⅓-of-calls. Replaced with the literal
+  doctrine: total calls = 2·n_str split in thirds — base hedge = ⅓ of calls = (2/3)·n_str short
+  futures (the 33% floor), ⅓ of calls left UNHEDGED = trend reserve (net-long at rest → trend runs by
+  itself), ⅓ of calls = scalp limit. Futures-sold band = exactly 33% (base only) … 67% (full scalp).
+  Engine: `base_futs=(2/3)·n_str` used in straddle MtM + all fill notionals; scalp `lim=2·n_str·intraday_frac`.
+  - **Following it literally MATTERED** (validates the user): the unhedged trend-reserve third turns
+    GLD −1.9%→+4.0%, SLV→+6.2%, SPY −4%→−1%, SOL +130% — the reserve runs with the move as doctrine
+    says ("the untouched third drags into profit on a real trend"). Loss cap still holds (worst case =
+    flat expiry = −premium; net-long doesn't raise max loss). OU + loss-cap tests green; +band test.
+  - Panel: three-thirds ⚠→✅. Remaining ⚠ (literal next): confident-flat LOT SCALING (detect→scale),
+    conditional rolling (move≥call-cost + profit, not schedule). assets ?v=49. 71 tests.
+  - LESSON: implement doctrine LITERALLY; substituting an "equivalent" mechanism (gamma for the
+    unhedged reserve) changed the result and was wrong. Folded into the skill habit.

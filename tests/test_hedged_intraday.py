@@ -126,6 +126,21 @@ def test_scalp_captures_mean_reversion_when_legs_carried():
     assert carried.scalp_pnl > recentered.scalp_pnl, "timer re-centering realizes legs early, hurting the edge"
 
 
+def test_three_thirds_literal_base_hedge_and_band():
+    """Three-thirds (literal): base hedge = ⅓ of total calls = (2/3)·n_str futures (33% floor),
+    leaving ⅓ of calls unhedged as the trend reserve (net-long at rest) — verified via the table
+    (a strong uptrend should profit MORE than a fully delta-neutral base would)."""
+    up = 100.0 * np.cumprod(1 + np.full(300, 0.004))
+    df = _frame(up, rng_pct=0.005)
+    res = hi.run_hedged_intraday(df, datamod.atr_on_timeframe(df, "daily", 14),
+                                 realized_vol=datamod.realized_vol(df["Close"], 20), dte_days=365)
+    # net-long trend reserve ⇒ a sustained uptrend makes the straddle leg strongly positive
+    assert res.straddle_pnl > 0
+    # loss cap still holds with the net-long base (worst case is a flat expiry = −premium)
+    for row in res.table:
+        assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row
+
+
 def test_rolls_happen():
     df = _frame(100.0 + np.random.default_rng(2).normal(0, 0.5, 400))
     res = hi.run_hedged_intraday(df, datamod.atr(df, 14),

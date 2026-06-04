@@ -186,7 +186,14 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         budget = max(risk_pct * bank, 0.0)
         n_str = (budget / prem_per) if prem_per > 1e-12 else 0.0
         prem_book = n_str * prem_per
+        # THREE-THIRDS (literal): total calls = 2·n_str. Permanently hedge only ⅓ of the calls =
+        # (2/3)·n_str short futures (the "33% floor" / delta-neutral base). The other ⅓ of calls is
+        # the UNHEDGED trend reserve (so at rest the position is net-long and a trend runs by itself);
+        # the last ⅓ is the scalp limit, which can add shorts up to the 67% ceiling. (Was 1·n_str =
+        # full delta-neutral, which left no explicit trend reserve — now corrected to the doctrine.)
+        base_futs = (2.0 / 3.0) * n_str
         return {"S0": S0, "date": date, "sig": sig, "K": K, "c0": c0, "n_str": n_str,
+                "base_futs": base_futs,
                 "F0": S0, "prem_book": prem_book, "expiry": date + pd.Timedelta(days=dte_days),
                 "start_i": day_i}
 
@@ -206,7 +213,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
             offs.append(acc)
         sell_lv = [center + o for o in offs]
         buy_lv = [center - o for o in offs]
-        lim = max(n_str * intraday_frac, 0.0)
+        lim = max(2.0 * n_str * intraday_frac, 0.0)       # scalp limit = ⅓ of CALLS (2·n_str·⅓), the 33→67% band
         GRID.clear()
         GRID.update(center=center, reach=offs[-1] if offs else 0.0,
                     sell_lv=sell_lv, buy_lv=buy_lv,
@@ -286,8 +293,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         GRID["legs"] = []
 
     st = open_straddle(i, starting_bank)
-    entry_notional = st["n_str"] * (2.0 * st["c0"] + st["S0"])
-    realized_straddle = -fee * entry_notional             # entry fills: 2 calls + 1 future
+    entry_notional = st["n_str"] * 2.0 * st["c0"] + st["base_futs"] * st["S0"]
+    realized_straddle = -fee * entry_notional             # entry fills: 2 calls + ⅓-of-calls base future
     cum_scalp = 0.0
     cum_theta = 0.0
     cost_total = fee * entry_notional
@@ -302,7 +309,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         T_rem = max((st["expiry"] - d).days / 365.0, 1e-6)
         c = float(opt.call_price(S, st["K"], T_rem, r, st["sig"], qdiv))
         calls = st["n_str"] * 2.0 * c - st["prem_book"]   # long calls vs premium paid
-        fut = st["n_str"] * (-(S - st["F0"]))             # short 1 future per straddle
+        fut = st["base_futs"] * (-(S - st["F0"]))         # short base hedge = ⅓ of calls (33% floor)
         return calls + fut, c, T_rem
 
     def scalp_pnl(S):                                     # cumulative scalp P&L (model-dependent)
@@ -322,7 +329,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
             if scalp_model == "grid":
                 scalp_close_all(S)
             mtm, c_now, _ = straddle_unreal(S, d)
-            roll_cost = fee * st["n_str"] * (2.0 * c_now + S)
+            roll_cost = fee * (st["n_str"] * 2.0 * c_now + st["base_futs"] * S)
             realized_straddle += mtm - roll_cost
             cost_total += roll_cost
             cum_scalp = scalp_pnl(S)
@@ -337,7 +344,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
             res.worst_period_pnl = min(res.worst_period_pnl, period_total)
             period_start_total = realized_straddle + cum_scalp
             st = open_straddle(j, bank_now)
-            open_notional = st["n_str"] * (2.0 * st["c0"] + st["S0"])
+            open_notional = st["n_str"] * 2.0 * st["c0"] + st["base_futs"] * st["S0"]
             realized_straddle -= fee * open_notional
             cost_total += fee * open_notional
             res.max_premium_at_risk = max(res.max_premium_at_risk, st["prem_book"])
@@ -415,8 +422,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         if scalp_model == "grid":
             scalp_close_all(Sf)
         mtm, c_now, _ = straddle_unreal(Sf, last)
-        realized_straddle += mtm - fee * st["n_str"] * (2.0 * c_now + Sf)
-        cost_total += fee * st["n_str"] * (2.0 * c_now + Sf)
+        realized_straddle += mtm - fee * (st["n_str"] * 2.0 * c_now + st["base_futs"] * Sf)
+        cost_total += fee * (st["n_str"] * 2.0 * c_now + st["base_futs"] * Sf)
         cum_scalp = scalp_pnl(Sf)
         period_total = (realized_straddle + cum_scalp) - period_start_total
         res.table.append({
