@@ -201,6 +201,7 @@ def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None =
     to the daily bar. NOTE: 1-min over a multi-year window is ~1 request/1000 bars (slow first
     pull, then cached); pick a coarser `interval` for long windows.
     """
+    import http.client
     import json as _json
     sym = _to_binance_symbol(ticker)
     if sym is None:
@@ -221,21 +222,41 @@ def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None =
     end_ms = (int(pd.Timestamp(end).timestamp() * 1000) if end
               else int(pd.Timestamp.now("UTC").timestamp() * 1000))
 
-    rows: list = []
-    cur, pages, last_err = start_ms, 0, None
-    while cur < end_ms and pages < max_pages:
-        batch = None
-        for host in _BINANCE_HOSTS:
-            url = (f"{host}/api/v3/klines?symbol={sym}&interval={interval}"
-                   f"&startTime={cur}&endTime={end_ms}&limit=1000")
+    # Reuse ONE keep-alive HTTPS connection across all pages — a fresh urlopen() per page pays a
+    # DNS lookup + TLS handshake every time (~4s/req from a container → minutes for a 60d 1m pull);
+    # keep-alive drops that to ~0.3s/req. Rotate to the next host (reconnecting) on any error.
+    hosts = [h.split("://", 1)[-1] for h in _BINANCE_HOSTS]
+    state = {"conn": None, "host": None, "err": None}
+
+    def _get(path):
+        order = ([state["host"]] if state["host"] else []) + [h for h in hosts if h != state["host"]]
+        for host in order:
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "antimg/1.0"})
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    batch = _json.loads(r.read().decode("utf-8"))
-                break
-            except Exception as ex:                       # try next host, then give up the page
-                last_err = ex
-                continue
+                if state["conn"] is None or state["host"] != host:
+                    if state["conn"]:
+                        state["conn"].close()
+                    state["conn"] = http.client.HTTPSConnection(host, timeout=30)
+                    state["host"] = host
+                state["conn"].request("GET", path, headers={"User-Agent": "antimg/1.0"})
+                resp = state["conn"].getresponse()
+                body = resp.read()                        # must fully read to reuse the connection
+                if resp.status != 200:
+                    raise RuntimeError(f"HTTP {resp.status}")
+                return _json.loads(body.decode("utf-8"))
+            except Exception as ex:                       # drop the conn, try the next host
+                state["err"] = ex
+                if state["conn"]:
+                    state["conn"].close()
+                state["conn"] = None
+                state["host"] = None
+        return None
+
+    rows: list = []
+    cur, pages = start_ms, 0
+    while cur < end_ms and pages < max_pages:
+        path = (f"/api/v3/klines?symbol={sym}&interval={interval}"
+                f"&startTime={cur}&endTime={end_ms}&limit=1000")
+        batch = _get(path)
         if not batch:
             break
         rows.extend(batch)
@@ -243,10 +264,12 @@ def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None =
         pages += 1
         if len(batch) < 1000:                             # reached the live tip
             break
+    if state["conn"]:
+        state["conn"].close()
 
     if not rows:
         raise RuntimeError(f"no Binance data for {sym} @ {interval} "
-                           f"(geo-blocked? network? last error: {last_err})")
+                           f"(geo-blocked? network? last error: {state['err']})")
     df = _parse_binance_klines(rows)
     if use_cache:
         df.to_pickle(cp)
