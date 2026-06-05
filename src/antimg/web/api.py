@@ -590,7 +590,7 @@ def _intraday_feed(req):
     - 'daily'  → None (one OHLC bar/day; the scalp is unmeasured).
     - '1m'     → FREE deep 1-minute crypto bars from Binance public REST (keyless; crypto only —
                  ETH/BTC/SOL, the doctrine's ideal instrument). Non-crypto tickers fall back.
-                 Window clamped to the last ANTIMG_HI_1M_DAYS days (default 120) so the paginated
+                 Window clamped to the last ANTIMG_HI_1M_DAYS days (default 60) so the paginated
                  pull stays bounded; earlier days use the daily bar.
     - 'hourly' → yfinance 60m bars (~730d) for any ticker; start clamped to the 725d cutoff.
     """
@@ -601,8 +601,9 @@ def _intraday_feed(req):
         # 1-min over a multi-year window = thousands of sequential Binance requests (minutes →
         # the UI looks hung). Clamp the feed to a recent slice so the pull is bounded; days before
         # the cutoff fall back to the daily bar (full-window straddle/theta, recent-window measured
-        # scalp) — exactly like the hourly clamp. Tunable via ANTIMG_HI_1M_DAYS (default 120).
-        win = int(os.environ.get("ANTIMG_HI_1M_DAYS", "120"))
+        # scalp) — exactly like the hourly clamp. 60d ≈ 86k 1m bars (rich scalp sample) and a cold
+        # pull of ~85 paginated requests (~1-2 min, then cached). Tunable via ANTIMG_HI_1M_DAYS.
+        win = int(os.environ.get("ANTIMG_HI_1M_DAYS", "60"))
         cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=win)).date().isoformat()
         start = max(req.start, cutoff)
         try:
