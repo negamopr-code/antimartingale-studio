@@ -486,3 +486,15 @@ Not implemented; documented as a rejected tactic.
   - Honest scope: free crypto only; SPY/GLD/SLV intraday → Polygon $29/mo, futures → Databento/IQ Feed,
     MOEX (RI/Si) → Finam/ISS (none of the free feeds cover it). 1m over multi-year = slow first pull
     (~1 req/1000 bars) then cached; pick a coarser interval for long windows. assets unchanged.
+
+- **D53** — User: "integrate it in our 9/8 tabs." Made both ПИ tabs **feed-aware** (the dropdown +
+  routing from D52 were in, but the UI hard-coded "часовых баров"/hourly). Backend: both
+  `/api/hedged-intraday` + `/inspect` now surface `scalp_data` in stats. Frontend (app.js): the shared
+  rule-panel «Скальп: внутридневной фид» line + the Tab-8 verdict now branch on `scalp_data` — show
+  "1-МИНУТНЫЙ ФИД (Binance, крипта — БЕСПЛАТНО)" + bar count + "ближе всего к живому ПИ (200–250
+  круг/мес)" when 1m; the daily-fallback hint now points crypto→«1m crypto», else→«hourly». Also made
+  `fetch()`'s Binance **daily** fallback pull FULL history (start=None) so a short first request can't
+  poison the daily cache (the 422 I hit). assets v56→v57. **76 tests green.** Verified LIVE through the
+  route: ETH 120d scalp_data='1m' → HTTP 200, walked **64,800** real 1m bars, scalp +703 vs straddle
+  −668 (net ~0) — first honest read where the scalp actually covered the theta on the doctrine's ideal
+  instrument. (Scan tab still daily-only by design — 80×crypto-1m would be a huge pull.)

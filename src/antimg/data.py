@@ -41,9 +41,11 @@ def fetch(ticker: str, start: str = "1990-01-01", end: str | None = None,
     if df is None or df.empty:
         df = _fetch_stooq(ticker)
     if (df is None or df.empty) and _to_binance_symbol(ticker):
-        # crypto: free Binance daily klines — keeps the crypto path independent of Yahoo (429-prone)
+        # crypto: free Binance daily klines — keeps the crypto path independent of Yahoo (429-prone).
+        # Pull FULL daily history (start=None) regardless of the requested window so a short first
+        # request can't poison the cache; fetch() caches the full df and _slice serves the window.
         try:
-            df = fetch_intraday_crypto(ticker, "1d", start=start, end=end, use_cache=False)
+            df = fetch_intraday_crypto(ticker, "1d", start=None, end=end, use_cache=False)
         except Exception:
             df = None
     if df is None or df.empty:
