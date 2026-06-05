@@ -93,7 +93,8 @@ function gateScalpData(formSel) {
   const ok = isCryptoTicker(tk.value);
   opt.disabled = !ok;
   opt.title = ok ? "" : "только для крипты (Binance); выбери крипто-инструмент";
-  if (!ok && sd.value === "1m") sd.value = "daily";      // reset if 1m was selected for a non-crypto
+  if (ok && sd.value === "daily") sd.value = "1m";       // crypto → measure the scalp on FREE deep 1m by default
+  if (!ok && sd.value === "1m") sd.value = "daily";      // non-crypto can't use 1m → daily
 }
 ["#form-hedged", "#form-hiexec"].forEach((f) => {
   const tk = $(f + " [name=ticker]");
@@ -872,7 +873,9 @@ async function renderHedged(d) {
             + `    осцилляциях — они МЕНЬШЕ дневного ATR и в баре их НЕТ ⇒ бэктест меряет ЛОНГ-ВОЛ СТРЕДДЛ (ядро), не скальп.\n`
             + `  Итог: на этом инструменте ${s.straddle_pnl >= 0 ? "стреддл уже несёт" : "стреддл сам по себе в минусе"} `
             + `(${f(s.straddle_pnl)}); скальп тут ${f(s.scalp_pnl)} — но его вклад в боковике на дневках НЕ виден.\n`
-            + `  Для честного скальпа включи «Scalp data»: крипта (ETH/BTC) → «1m crypto (Binance free)», иначе → «hourly 60m».`);
+            + (isCryptoTicker(d.ticker)
+                ? `  Это КРИПТА → выбери «Scalp data → 1m crypto (Binance free)»: бесплатные глубокие 1-мин бары (любое окно). 1m включается авто при выборе крипты.`
+                : `  ⚠ Для НЕ-крипты (${d.ticker}) бесплатного ГЛУБОКОГО интрадея нет: hourly = только ~2 года (yfinance), глубже — платный вендор (Polygon ≈$29/мес). Бесплатный 1m только у крипты (ETH/BTC).`));
   }
   else
     verdict += `СКАЛЬП-МОДЕЛЬ: range (грубая эвристика).\n`
@@ -1139,7 +1142,9 @@ function renderHiRules(d, s, id) {
     [(s.intraday_bars > 0) ? "ok" : "part", "Скальп: внутридневной фид",
       (s.intraday_bars > 0
         ? `✅ ВКЛЮЧЁН ${s.scalp_data === "1m" ? "1-МИНУТНЫЙ" : "ЧАСОВОЙ"} ФИД${s.scalp_data === "1m" ? " (Binance, крипта — БЕСПЛАТНО)" : " (yfinance ~2 года)"}: грид прошёл ${s.intraday_bars.toLocaleString()} ${s.scalp_data === "1m" ? "1-минутных" : "часовых"} баров → скальп ловит внутридневной чоп, а не 1 разворот в день. Круговых: ${s.scalp_round_trips}.${s.scalp_data === "1m" ? " Это ближе всего к живому ПИ (200–250 круговых/мес)." : ""}`
-        : "дневной OHLC-бар содержит ~1 разворот; живой интрадей-скальп ~10/день ВНУТРИ дня в баре НЕ виден → скальп недо-измерен. Переключи «Scalp data»: для КРИПТЫ (ETH/BTC/SOL) → «1m crypto (Binance free)» = бесплатные глубокие 1-мин бары; иначе → «hourly 60m» (yfinance ~2 года) — тогда ✅.")],
+        : (isCryptoTicker(d.ticker)
+            ? "дневной бар скрывает внутридневной чоп → скальп недо-измерен. Это КРИПТА — выбери «Scalp data → 1m crypto (Binance free)»: бесплатные глубокие 1-мин бары (теперь и история любого окна). При выборе крипто-инструмента 1m включается автоматически."
+            : `дневной бар скрывает внутридневной чоп → скальп недо-измерен. ⚠ Для НЕ-крипты (${d.ticker}) бесплатного ГЛУБОКОГО интрадея НЕТ: «hourly 60m» (yfinance) покрывает только последние ~2 года, для старых окон остаются дневки. Глубокая 1-мин история по акциям/ETF/фьючерсам требует ПЛАТНОГО вендора (Polygon ≈$29/мес, IQ Feed). Бесплатный глубокий 1m есть только у КРИПТЫ (ETH/BTC/SOL) — единственный полностью измеримый инструмент.`))],
   ];
   const ic = { ok: "✅", part: "⚠", no: "❌" };
   const col = { ok: "#3fb950", part: "#d29922", no: "#f85149" };

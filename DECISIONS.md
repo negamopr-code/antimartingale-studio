@@ -576,3 +576,13 @@ Not implemented; documented as a rejected tactic.
   only if it spans [start,end], else fetch & union); (c) **fixed UTF-8 double-encoding** in api.py that
   a prior `perl -0pi` (Cyrillic insert) caused — restored clean from e9b2579 + re-applied D58 via Edit.
   78 tests. Live :8090 rebuilt.
+
+- **D60** — User: "видимо ты не везде починил" (⚠ still shows). Two real gaps, now addressed:
+  (1) **default was `daily`** → every crypto run showed ⚠ until manually switched. Fix: `gateScalpData`
+  now AUTO-selects `1m` when a crypto ticker is chosen (and reverts to daily for non-crypto) — so a
+  crypto backtest measures the scalp by default. (2) **The message was misleading for non-crypto**: it
+  told users to "switch to hourly", but hourly (yfinance) only covers the last ~2y, and there's NO free
+  deep intraday for stocks/ETF/futures at all. Made the ⚠ rule-panel line + Tab-8 verdict
+  INSTRUMENT-AWARE (uses `d.ticker` + `isCryptoTicker`): crypto → "pick 1m (free deep, any window)";
+  non-crypto → honest — "no free deep intraday; hourly = recent ~2y only; deep history needs a paid
+  vendor (Polygon ≈$29/mo, IQ Feed); free deep 1m exists ONLY for crypto." assets v64. 78 tests. Live rebuilt.
