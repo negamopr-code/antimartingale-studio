@@ -140,8 +140,10 @@ class HedgedIntradayReq(BaseModel):
     # representative when the step is on the daily scale); 'range' = heuristic intraday lower bound
     scalp_model: str = Field("grid", pattern="^(grid|range)$")
     # scalp data feed: 'daily' = one OHLC bar/day (intraday chop invisible); 'hourly' = real 60m bars
-    # (yfinance ~730d history) so the grid walks the intraday path and finally MEASURES the scalp.
-    scalp_data: str = Field("daily", pattern="^(daily|hourly)$")
+    # (yfinance ~730d history); '1m' = FREE deep 1-minute crypto bars (Binance public REST, keyless,
+    # crypto tickers only — the doctrine's ideal instrument) so the grid walks the real intraday path
+    # and finally MEASURES the scalp. Non-crypto + '1m' falls back to the daily bar.
+    scalp_data: str = Field("daily", pattern="^(daily|hourly|1m)$")
     # grid-step timeframe: 'weekly'/'monthly' ATR makes the step WIDER than a daily bar, so each
     # daily bar is sub-step "intraday-like" info within a larger oscillation the grid scalps over
     # several days (the doctrine's "flatten the grid, bigger targets, once-a-day" mode). 'daily' =

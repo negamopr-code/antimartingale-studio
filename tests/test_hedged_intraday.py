@@ -166,3 +166,52 @@ def test_rolls_happen():
                                  realized_vol=datamod.realized_vol(df["Close"], 20),
                                  dte_days=30, roll_buffer_days=5)
     assert res.n_rolls >= 5, "≈400 days / 30-day straddle ⇒ many rolls"
+
+
+# --------------------------------------------------------------------------- #
+# Free crypto 1-minute scalp feed (Binance public REST) — see /tradinglivedata.
+# --------------------------------------------------------------------------- #
+def test_binance_symbol_mapping():
+    """Crypto tickers map to Binance USDT pairs; non-crypto returns None (falls back to daily)."""
+    assert datamod._to_binance_symbol("BTC-USD") == "BTCUSDT"
+    assert datamod._to_binance_symbol("ETH-USD") == "ETHUSDT"
+    assert datamod._to_binance_symbol("SOL-USD") == "SOLUSDT"
+    assert datamod._to_binance_symbol("eth/usdt") == "ETHUSDT"
+    for non_crypto in ("SPY", "GC=F", "EURUSD=X", "^GSPC", "000001.SS"):
+        assert datamod._to_binance_symbol(non_crypto) is None
+
+
+def test_parse_binance_klines():
+    """A raw /klines array parses into a sorted, tz-naive OHLCV frame on each bar's open time."""
+    rows = [
+        [1700000000000, "100.0", "101.0", "99.0", "100.5", "12.0", 1700000059999],
+        [1700000060000, "100.5", "102.0", "100.0", "101.5", "8.0", 1700000119999],
+    ]
+    df = datamod._parse_binance_klines(rows)
+    assert list(df.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert len(df) == 2 and df.index.tz is None
+    assert df["Close"].iloc[0] == 100.5 and df["High"].iloc[1] == 102.0
+    assert df.index.is_monotonic_increasing
+
+
+def test_fetch_intraday_crypto_rejects_non_crypto():
+    """The free 1m feed is crypto-only; a non-crypto ticker raises (caller then uses the daily bar)."""
+    with pytest.raises(RuntimeError):
+        datamod.fetch_intraday_crypto("SPY", "1m", start="2024-01-01")
+
+
+@pytest.mark.network
+def test_fetch_intraday_crypto_live_smoke():
+    """LIVE: pull a small recent ETH 1m slice from Binance and walk it through the engine.
+    Skips automatically if Binance is unreachable (offline/geo-blocked CI)."""
+    end = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    start = (end - pd.Timedelta(days=3)).date().isoformat()
+    try:
+        intr = datamod.fetch_intraday_crypto("ETH-USD", "1m", start=start,
+                                             end=end.date().isoformat(), use_cache=False)
+    except RuntimeError:
+        pytest.skip("Binance unreachable (offline / geo-blocked)")
+    assert not intr.empty and list(intr.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert intr.index.tz is None
+    # ~1440 1m bars/day over ~3 days; allow slack for the partial current day
+    assert len(intr) > 1000, f"expected a deep 1m slice, got {len(intr)} bars"

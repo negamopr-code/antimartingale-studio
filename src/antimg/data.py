@@ -40,8 +40,14 @@ def fetch(ticker: str, start: str = "1990-01-01", end: str | None = None,
     df = _fetch_yfinance(ticker, start, end)
     if df is None or df.empty:
         df = _fetch_stooq(ticker)
+    if (df is None or df.empty) and _to_binance_symbol(ticker):
+        # crypto: free Binance daily klines — keeps the crypto path independent of Yahoo (429-prone)
+        try:
+            df = fetch_intraday_crypto(ticker, "1d", start=start, end=end, use_cache=False)
+        except Exception:
+            df = None
     if df is None or df.empty:
-        raise RuntimeError(f"No data for {ticker!r} from yfinance or stooq "
+        raise RuntimeError(f"No data for {ticker!r} from yfinance, stooq, or Binance "
                            f"(network blocked? Yahoo 429? unknown ticker?)")
 
     df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(how="all")
@@ -126,6 +132,120 @@ def fetch_intraday(ticker: str, interval: str = "60m", start: str | None = None,
     if getattr(df.index, "tz", None) is not None:
         df.index = df.index.tz_localize(None)             # tz-naive so _slice/groupby-by-date work
     df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(how="all")
+    if use_cache:
+        df.to_pickle(cp)
+    return _slice(df, start or "1990-01-01", end)
+
+
+# --------------------------------------------------------------------------- #
+# Free deep INTRADAY crypto bars — Binance public REST (keyless, no extra deps).
+# Best free 1-min/tick source for the ПИ scalp; crypto = the doctrine's *ideal*
+# instrument (high vol + divisible lots). See the /tradinglivedata skill.
+# --------------------------------------------------------------------------- #
+_BINANCE_HOSTS = (
+    "https://data-api.binance.vision",   # public market-data mirror, no auth, least geo-blocked
+    "https://api.binance.com",
+)
+_BINANCE_SYMBOL_OVERRIDES = {
+    "BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT", "SOL-USD": "SOLUSDT",
+}
+_BINANCE_INTERVAL_MS = {
+    "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000,
+    "30m": 1_800_000, "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000,
+    "1d": 86_400_000,
+}
+
+
+def _to_binance_symbol(ticker: str) -> str | None:
+    """Map an antimg/yfinance crypto ticker to a Binance USDT spot symbol.
+
+    BTC-USD/ETH-USD/SOL-USD → BTCUSDT/ETHUSDT/SOLUSDT. Returns None for anything that
+    isn't a crypto pair we can serve from Binance (futures `=F`, FX `=X`, indices `^`, equities).
+    """
+    t = ticker.upper().strip()
+    if t in _BINANCE_SYMBOL_OVERRIDES:
+        return _BINANCE_SYMBOL_OVERRIDES[t]
+    if any(c in t for c in ("=", "^", ".")):
+        return None                                       # non-crypto yfinance tickers
+    base = t.replace("/", "-")
+    for sep in ("-USDT", "-USD", "-USDC"):
+        if base.endswith(sep):
+            return base[: -len(sep)].replace("-", "") + "USDT"
+    if base.endswith("USDT"):
+        return base
+    return None
+
+
+def _parse_binance_klines(rows: list) -> pd.DataFrame:
+    """Binance /klines array → OHLCV DataFrame (tz-naive UTC index on each bar's OPEN time)."""
+    cols = ["Open", "High", "Low", "Close", "Volume"]
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    idx = pd.to_datetime([r[0] for r in rows], unit="ms")          # open time, UTC, tz-naive
+    df = pd.DataFrame({c: [float(r[i]) for r in rows]
+                       for i, c in enumerate(cols, start=1)}, index=idx)
+    return df[~df.index.duplicated(keep="last")].sort_index()
+
+
+def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None = None,
+                          end: str | None = None, use_cache: bool = True,
+                          max_pages: int = 4000) -> pd.DataFrame:
+    """FREE deep intraday crypto bars from Binance public REST (keyless, stdlib only).
+
+    Maps a crypto ticker (BTC-USD/ETH-USD/SOL-USD) to a Binance USDT pair and paginates
+    `/api/v3/klines` (1000 bars/request) over [start, end]. tz-naive UTC index so the engine's
+    groupby-by-date path works. Cached per (symbol, interval) — delete the cache file to extend
+    history. Raises on an unmapped ticker or total network failure so the caller can fall back
+    to the daily bar. NOTE: 1-min over a multi-year window is ~1 request/1000 bars (slow first
+    pull, then cached); pick a coarser `interval` for long windows.
+    """
+    import json as _json
+    sym = _to_binance_symbol(ticker)
+    if sym is None:
+        raise RuntimeError(f"{ticker!r} is not a Binance-servable crypto pair "
+                           f"(the free 1m feed is crypto-only; use scalp_data='hourly' otherwise)")
+    step = _BINANCE_INTERVAL_MS.get(interval)
+    if step is None:
+        raise RuntimeError(f"unsupported crypto interval {interval!r}")
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cp = CACHE_DIR / f"binance_{sym}__{interval}.pkl"
+    if use_cache and cp.exists():
+        df = pd.read_pickle(cp)
+        if not df.empty:
+            return _slice(df, start or "1990-01-01", end)
+
+    start_ms = int(pd.Timestamp(start or "2017-08-01").timestamp() * 1000)
+    end_ms = (int(pd.Timestamp(end).timestamp() * 1000) if end
+              else int(pd.Timestamp.now("UTC").timestamp() * 1000))
+
+    rows: list = []
+    cur, pages, last_err = start_ms, 0, None
+    while cur < end_ms and pages < max_pages:
+        batch = None
+        for host in _BINANCE_HOSTS:
+            url = (f"{host}/api/v3/klines?symbol={sym}&interval={interval}"
+                   f"&startTime={cur}&endTime={end_ms}&limit=1000")
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "antimg/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    batch = _json.loads(r.read().decode("utf-8"))
+                break
+            except Exception as ex:                       # try next host, then give up the page
+                last_err = ex
+                continue
+        if not batch:
+            break
+        rows.extend(batch)
+        cur = batch[-1][0] + step                         # next page starts one step past last open
+        pages += 1
+        if len(batch) < 1000:                             # reached the live tip
+            break
+
+    if not rows:
+        raise RuntimeError(f"no Binance data for {sym} @ {interval} "
+                           f"(geo-blocked? network? last error: {last_err})")
+    df = _parse_binance_klines(rows)
     if use_cache:
         df.to_pickle(cp)
     return _slice(df, start or "1990-01-01", end)

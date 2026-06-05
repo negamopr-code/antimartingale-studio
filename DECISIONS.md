@@ -469,3 +469,20 @@ Not implemented; documented as a rejected tactic.
   when an intraday feed is used. Synthetic proof: intraday 62 RT/+2916 vs daily 16 RT/+398.
   - Honest scope: hourly ≈2y only, and 60m is still coarser than live 1-min ПИ — so it's a big step
     closer (sees intraday chop) but not full tick fidelity; recent-window only. 72 tests. assets ?v=56.
+
+- **D52** — User: "start with what is available free" (re: getting true low-timeframe data to MEASURE
+  the scalp — see the new `/tradinglivedata` skill's verdict: crypto 1-min/tick is FREE & deep via
+  Binance, and ETH/BTC is the doctrine's IDEAL instrument). Added `data.fetch_intraday_crypto(ticker,
+  interval='1m', …)` — paginates Binance public `/api/v3/klines` (1000 bars/req) over [start,end] via
+  **stdlib urllib only** (no ccxt/requests dep), hosts `data-api.binance.vision` → `api.binance.com`
+  (both reachable from the container, unlike Yahoo). tz-naive UTC index, cached per (symbol,interval);
+  `_to_binance_symbol` maps BTC-USD/ETH-USD/SOL-USD→…USDT and returns None for non-crypto (graceful
+  fallback). New `scalp_data='1m'` on HedgedIntradayReq → `_intraday_feed` routes crypto to the 1m feed
+  (non-crypto/geo-block → daily). Tab 8 + Tab 9 selects gained the "1m crypto (Binance free)" option.
+  Also gave `fetch()` a **Binance daily fallback** for crypto so the whole crypto path is Yahoo-free.
+  Verified LIVE: ETH full free path (daily+1m both Binance) walked 23,040 real 1m bars; scalp measured
+  (−363 over a trending 20-day window = honest: scalp loses in trend while straddle gamma wins, INV#3).
+  4 new tests (symbol map, klines parse, non-crypto reject, @network live smoke). **76 tests green.**
+  - Honest scope: free crypto only; SPY/GLD/SLV intraday → Polygon $29/mo, futures → Databento/IQ Feed,
+    MOEX (RI/Si) → Finam/ISS (none of the free feeds cover it). 1m over multi-year = slow first pull
+    (~1 req/1000 bars) then cached; pick a coarser interval for long windows. assets unchanged.

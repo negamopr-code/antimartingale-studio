@@ -583,12 +583,26 @@ def inspect(req: InspectReq):
 
 # ----------------------------------------------------------------- tab 8: hedged intraday (ПИ)
 def _intraday_feed(req):
-    """Fetch the hourly scalp feed when req.scalp_data=='hourly' (yfinance ~730d). Returns the
-    intraday DataFrame, or None to fall back to the daily bar (fetch failed / not requested)."""
-    if getattr(req, "scalp_data", "daily") != "hourly":
+    """Fetch the intraday scalp feed per req.scalp_data. Returns the intraday DataFrame, or None
+    to fall back to the daily bar (not requested / fetch failed / wrong asset class).
+
+    - 'daily'  → None (one OHLC bar/day; the scalp is unmeasured).
+    - '1m'     → FREE deep 1-minute crypto bars from Binance public REST (keyless; crypto only —
+                 ETH/BTC/SOL, the doctrine's ideal instrument). Non-crypto tickers fall back.
+    - 'hourly' → yfinance 60m bars (~730d) for any ticker; start clamped to the 725d cutoff.
+    """
+    mode = getattr(req, "scalp_data", "daily")
+    if mode == "daily":
         return None
-    # yfinance refuses hourly older than ~730d — clamp the start so the request succeeds; days before
-    # the cutoff just fall back to the daily bar (partial intraday coverage on the recent portion).
+    if mode == "1m":
+        try:
+            df = datamod.fetch_intraday_crypto(req.ticker, "1m", start=req.start,
+                                               end=getattr(req, "end", None))
+            return df if df is not None and not df.empty else None
+        except Exception:
+            return None                                   # non-crypto / geo-blocked → daily bar
+    # 'hourly': yfinance refuses hourly older than ~730d — clamp the start so the request succeeds;
+    # days before the cutoff fall back to the daily bar (partial intraday coverage on the recent part).
     cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=725)).date().isoformat()
     start = max(req.start, cutoff)
     try:
