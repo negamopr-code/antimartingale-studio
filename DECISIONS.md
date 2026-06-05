@@ -498,3 +498,15 @@ Not implemented; documented as a rejected tactic.
   route: ETH 120d scalp_data='1m' → HTTP 200, walked **64,800** real 1m bars, scalp +703 vs straddle
   −668 (net ~0) — first honest read where the scalp actually covered the theta on the doctrine's ideal
   instrument. (Scan tab still daily-only by design — 80×crypto-1m would be a huge pull.)
+
+- **D54** — User: "in tab 9 nothing happens when push run button." Root cause: 1m + a multi-year window
+  (they reused Tab 8's ~8-yr range) = thousands of sequential Binance requests → the request hung for
+  many minutes (looked dead; could hit the gunicorn 900s timeout). Backend + assets were fine (deployed
+  /inspect returns 200). Fix: **clamp the 1m feed to the last `ANTIMG_HI_1M_DAYS` days (default 120)** —
+  mirrors the hourly 725d clamp; full-window straddle/theta, recent-window measured scalp. Verified: ETH
+  2018→now + 1m on /inspect now 200 in 0.5s (was ~20 min unbounded). Also added an **immediate toast**
+  on Tab 8/9 submit when an intraday feed is chosen ("Качаю 1-мин историю…") so it never looks hung, and
+  imported `os` in api.py. assets v58. 76 tests.
+  - First honest 1m ПИ reads (180d): ETH scalp +223/straddle −490 (cover 68%, CAGR −8.9%); BTC scalp
+    −537/straddle −354 (cover −138%, −18.6%). Loss cap held (worst ≥ −premium). Confirms the skill: the
+    scalp does NOT reliably pay theta even on crypto 1m — needs a ranging regime; gamma carries trends.

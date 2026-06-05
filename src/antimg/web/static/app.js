@@ -859,8 +859,15 @@ async function renderHedged(d) {
   renderHiRules(d, s, "hi-rules");          // same doctrine-compliance panel as Tab 9 (auto-parity)
   renderTable("hi-table", d.table);
 }
+// intraday feeds (1m/hourly) fetch market data on first run — tell the user it's working, not hung
+function intradayNotice(form) {
+  const sd = ($(form + " [name=scalp_data]") || {}).value;
+  if (sd === "1m") toast("Качаю 1-мин историю с Binance (только крипта; первый прогон ~до минуты, дальше из кэша)…", true);
+  else if (sd === "hourly") toast("Качаю часовую историю (yfinance ~2 года; первый прогон несколько сек)…", true);
+}
 $("#form-hedged").onsubmit = (e) => {
   e.preventDefault();
+  intradayNotice("#form-hedged");
   withBusy(e.submitter, async () =>
     renderHedged(await post("/api/hedged-intraday", formData(e.target))));
 };
@@ -1122,6 +1129,7 @@ function renderHiRules(d, s, id) {
 }
 $("#form-hiexec").onsubmit = (e) => {
   e.preventDefault();
+  intradayNotice("#form-hiexec");
   withBusy(e.submitter, async () =>
     renderHiExec(await post("/api/hedged-intraday/inspect", formData(e.target))));
 };

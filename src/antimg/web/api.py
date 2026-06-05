@@ -7,6 +7,7 @@ runs them in a threadpool, keeping the event loop free.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -589,14 +590,23 @@ def _intraday_feed(req):
     - 'daily'  → None (one OHLC bar/day; the scalp is unmeasured).
     - '1m'     → FREE deep 1-minute crypto bars from Binance public REST (keyless; crypto only —
                  ETH/BTC/SOL, the doctrine's ideal instrument). Non-crypto tickers fall back.
+                 Window clamped to the last ANTIMG_HI_1M_DAYS days (default 120) so the paginated
+                 pull stays bounded; earlier days use the daily bar.
     - 'hourly' → yfinance 60m bars (~730d) for any ticker; start clamped to the 725d cutoff.
     """
     mode = getattr(req, "scalp_data", "daily")
     if mode == "daily":
         return None
     if mode == "1m":
+        # 1-min over a multi-year window = thousands of sequential Binance requests (minutes →
+        # the UI looks hung). Clamp the feed to a recent slice so the pull is bounded; days before
+        # the cutoff fall back to the daily bar (full-window straddle/theta, recent-window measured
+        # scalp) — exactly like the hourly clamp. Tunable via ANTIMG_HI_1M_DAYS (default 120).
+        win = int(os.environ.get("ANTIMG_HI_1M_DAYS", "120"))
+        cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=win)).date().isoformat()
+        start = max(req.start, cutoff)
         try:
-            df = datamod.fetch_intraday_crypto(req.ticker, "1m", start=req.start,
+            df = datamod.fetch_intraday_crypto(req.ticker, "1m", start=start,
                                                end=getattr(req, "end", None))
             return df if df is not None and not df.empty else None
         except Exception:
