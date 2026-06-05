@@ -517,3 +517,20 @@ Not implemented; documented as a rejected tactic.
   fully read each response to reuse the socket). Result (deployed, fresh SOL ticker): **COLD 63s**
   (was 352s, 5.6×), **WARM 0.8s**. Default clamp 120→60d (v59). With the submit toast + spinner, the
   one-time ~60s cold pull is acceptable; cached after. assets v60. 76 tests. Live :8090 rebuilt.
+
+- **D56** — User: "price drops 60k→17k and the straddle is NEGATIVE — nonsense!" + 3 more asks.
+  - **STRADDLE SYMMETRY BUGFIX (the big one):** `base_futs` was `(2/3)·n_str` (hedge only ⅓ of the
+    2·n_str calls = 33% floor = permanently **net-LONG** core, from the 2026-06-04 "trend reserve"
+    change). That tilt bled the straddle on DOWN moves — BTC 61k→17k showed straddle −223. Corpus
+    (20 cites) is unambiguous: the core is **delta-neutral & symmetric** ("30 Колл − 15 Фьюч" = sell
+    calls/2), three-thirds is the SCALP limit (band centered on neutral), NOT a core tilt. Fix:
+    `base_futs = 1.0·n_str`. Verified: BTC −72% straddle −223→**+1,270**; +496%→+30,553; GLD +47%→
+    +3,009; loss cap intact. New regression test (crash AND rally must have gamma_dir>0). Superseded
+    the wrong skill lesson. **77 tests.**
+  - **More Binance assets:** Crypto catalog 3→30 coins (BTC/ETH/SOL/BNB/XRP/ADA/DOGE/AVAX/LINK/DOT/
+    LTC/BCH/TRX/ATOM/… all map to Binance USDT for the free 1m feed) + a "Crypto (equity wrappers)"
+    group (BITO/IBIT/MSTR/COIN). 111 catalog tickers.
+  - **UI gate:** the `1m` scalp-data option is now **disabled for non-crypto tickers** (JS
+    `isCryptoTicker` + per-form gate on ticker change; resets to daily) — was selectable for SPY etc.
+    even though the feed is crypto-only.
+  assets v61. Live :8090 rebuilt.

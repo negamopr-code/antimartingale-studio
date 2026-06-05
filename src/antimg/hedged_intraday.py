@@ -197,12 +197,15 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         budget = max(risk_pct * bank, 0.0)
         n_str = (budget / prem_per) if prem_per > 1e-12 else 0.0
         prem_book = n_str * prem_per
-        # THREE-THIRDS (literal): total calls = 2·n_str. Permanently hedge only ⅓ of the calls =
-        # (2/3)·n_str short futures (the "33% floor" / delta-neutral base). The other ⅓ of calls is
-        # the UNHEDGED trend reserve (so at rest the position is net-long and a trend runs by itself);
-        # the last ⅓ is the scalp limit, which can add shorts up to the 67% ceiling. (Was 1·n_str =
-        # full delta-neutral, which left no explicit trend reserve — now corrected to the doctrine.)
-        base_futs = (2.0 / 3.0) * n_str
+        # DELTA-NEUTRAL CORE (the doctrine — corpus-confirmed): the synthetic straddle is symmetric,
+        # 2·n_str calls hedged by n_str short futures (e.g. "30 Колл − 15 Фьюч": sell EXACTLY calls/2 so
+        # the position is a *ровный стреддл* with zero net delta) → it profits on a big move EITHER way
+        # via gamma (a −72% crash MUST win, same as a rally). The three-thirds is the SCALP LIMIT
+        # (how many futures the scalp sells counter-trend within the 33→67% band), NOT a permanent
+        # directional tilt of the core. (Bugfix: was (2/3)·n_str = the 33% FLOOR = net-LONG core, which
+        # silently bled the straddle on DOWN moves — BTC 60k→17k showed a near-flat/negative straddle,
+        # nonsense for long-vol. The earlier "net-long trend reserve" lesson over-fit to up-movers.)
+        base_futs = 1.0 * n_str
         return {"S0": S0, "date": date, "sig": sig, "K": K, "c0": c0, "n_str": n_str,
                 "base_futs": base_futs,
                 "F0": S0, "prem_book": prem_book, "expiry": date + pd.Timedelta(days=dte_days),
@@ -338,7 +341,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         T_rem = max((st["expiry"] - d).days / 365.0, 1e-6)
         c = float(opt.call_price(S, st["K"], T_rem, r, st["sig"], qdiv))
         calls = st["n_str"] * 2.0 * c - st["prem_book"]   # long calls vs premium paid
-        fut = st["base_futs"] * (-(S - st["F0"]))         # short base hedge = ⅓ of calls (33% floor)
+        fut = st["base_futs"] * (-(S - st["F0"]))         # short base hedge = calls/2 (delta-neutral)
         return calls + fut, c, T_rem
 
     def scalp_pnl(S):                                     # cumulative scalp P&L (model-dependent)

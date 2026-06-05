@@ -126,19 +126,18 @@ def test_scalp_captures_mean_reversion_when_legs_carried():
     assert carried.scalp_pnl > recentered.scalp_pnl, "timer re-centering realizes legs early, hurting the edge"
 
 
-def test_three_thirds_literal_base_hedge_and_band():
-    """Three-thirds (literal): base hedge = ⅓ of total calls = (2/3)·n_str futures (33% floor),
-    leaving ⅓ of calls unhedged as the trend reserve (net-long at rest) — verified via the table
-    (a strong uptrend should profit MORE than a fully delta-neutral base would)."""
+def test_delta_neutral_core_base_hedge():
+    """The core is DELTA-NEUTRAL (corpus: 2·n_str calls hedged by EXACTLY n_str futures = "30 Колл −
+    15 Фьюч"), NOT net-long. The three-thirds is the SCALP limit, not a permanent core tilt. Verify
+    base_futs == n_str via the resolved straddle state, and that a trend still pays via gamma + the
+    loss cap holds. (Regression for the net-long-tilt bug that bled the straddle on down moves.)"""
     up = 100.0 * np.cumprod(1 + np.full(300, 0.004))
     df = _frame(up, rng_pct=0.005)
     res = hi.run_hedged_intraday(df, datamod.atr_on_timeframe(df, "daily", 14),
                                  realized_vol=datamod.realized_vol(df["Close"], 20), dte_days=365)
-    # net-long trend reserve ⇒ a sustained uptrend makes the straddle leg strongly positive
-    assert res.straddle_pnl > 0
-    # loss cap still holds with the net-long base (worst case is a flat expiry = −premium)
+    assert res.straddle_pnl > 0                       # symmetric long-gamma still captures the trend
     for row in res.table:
-        assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row
+        assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row   # loss cap intact
 
 
 def test_confident_flat_scaling_grows_lot_from_profit():
@@ -215,3 +214,20 @@ def test_fetch_intraday_crypto_live_smoke():
     assert intr.index.tz is None
     # ~1440 1m bars/day over ~3 days; allow slack for the partial current day
     assert len(intr) > 1000, f"expected a deep 1m slice, got {len(intr)} bars"
+
+
+def test_straddle_symmetric_wins_on_crash_and_rally():
+    """The synthetic straddle is DELTA-NEUTRAL → long gamma → it must capture a big move EITHER way
+    (gamma_dir_pnl > 0 on both a strong crash and a strong rally). Regression for the net-long-tilt
+    bug where base_futs=(2/3)·n_str made the core net-LONG and bled on down moves (BTC 60k→17k showed
+    a negative straddle — nonsense for long-vol)."""
+    n = 260
+    crash = _frame(60000.0 * (1 - 0.7 * np.arange(n) / n), rng_pct=0.02)   # -70% one-way down
+    rally = _frame(20000.0 * (1 + 2.0 * np.arange(n) / n), rng_pct=0.02)   # +200% one-way up
+    for df, name in [(crash, "crash"), (rally, "rally")]:
+        rv = datamod.realized_vol(df["Close"], 20).bfill().fillna(0.6)
+        r = hi.run_hedged_intraday(df, datamod.atr(df, 14), realized_vol=rv,
+                                   dte_days=365, roll_buffer_days=10, n_parts=5)
+        assert r.gamma_dir_pnl > 0, f"straddle gamma must capture the {name} (got {r.gamma_dir_pnl:.0f})"
+        # loss cap still holds (delta-neutral doesn't raise max loss above the premium)
+        assert r.worst_period_pnl >= -r.max_premium_at_risk - 1e-6

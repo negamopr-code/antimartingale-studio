@@ -61,9 +61,24 @@ CATALOG: dict[str, list[tuple[str, str]]] = {
         ("USDJPY=X", "USD/JPY"), ("USDCHF=X", "USD/CHF"), ("AUDUSD=X", "AUD/USD"),
         ("USDCAD=X", "USD/CAD"), ("DX=F", "US Dollar index"),
     ],
-    "Crypto": [
+    # Crypto: any of these works with the FREE 1-minute scalp feed (Binance public REST, keyless) —
+    # the doctrine's ideal instrument (high vol + divisible lots). Tickers are yfinance "-USD" style
+    # and map to Binance USDT pairs (BTC-USD→BTCUSDT…) for both the daily fallback and the 1m feed.
+    "Crypto (Binance free 1m)": [
         ("BTC-USD", "Bitcoin"), ("ETH-USD", "Ethereum"), ("SOL-USD", "Solana"),
-        ("BITO", "Bitcoin strategy ETF"),
+        ("BNB-USD", "BNB"), ("XRP-USD", "XRP"), ("ADA-USD", "Cardano"),
+        ("DOGE-USD", "Dogecoin"), ("AVAX-USD", "Avalanche"), ("LINK-USD", "Chainlink"),
+        ("DOT-USD", "Polkadot"), ("LTC-USD", "Litecoin"), ("BCH-USD", "Bitcoin Cash"),
+        ("TRX-USD", "Tron"), ("ATOM-USD", "Cosmos"), ("ETC-USD", "Ethereum Classic"),
+        ("XLM-USD", "Stellar"), ("NEAR-USD", "NEAR"), ("FIL-USD", "Filecoin"),
+        ("UNI-USD", "Uniswap"), ("AAVE-USD", "Aave"), ("ICP-USD", "Internet Computer"),
+        ("APT-USD", "Aptos"), ("ARB-USD", "Arbitrum"), ("OP-USD", "Optimism"),
+        ("INJ-USD", "Injective"), ("SUI-USD", "Sui"), ("HBAR-USD", "Hedera"),
+        ("VET-USD", "VeChain"), ("ALGO-USD", "Algorand"), ("SHIB-USD", "Shiba Inu"),
+    ],
+    "Crypto (equity wrappers)": [
+        ("BITO", "Bitcoin strategy ETF"), ("IBIT", "iShares Bitcoin ETF"),
+        ("MSTR", "MicroStrategy"), ("COIN", "Coinbase"),
     ],
     "Mega-cap stocks": [
         ("AAPL", "Apple"), ("MSFT", "Microsoft"), ("NVDA", "Nvidia"),

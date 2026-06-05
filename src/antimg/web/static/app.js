@@ -74,8 +74,31 @@ async function loadInstruments() {
         sel.appendChild(og);
       }
     });
+    ["#form-hedged", "#form-hiexec"].forEach(gateScalpData);   // 1m is crypto-only — gate per default ticker
   } catch (e) { console.error(e); }
 }
+
+// the FREE 1m feed is crypto-only (Binance) — disable the "1m" scalp_data option for non-crypto
+// tickers so it can't be chosen for SPY/GLD/futures/FX (the server would just fall back to daily).
+function isCryptoTicker(t) {
+  t = (t || "").toUpperCase().trim();
+  if (/[=^.]/.test(t)) return false;                     // futures =F / FX =X / indices ^ / .SS
+  return /-(USD|USDT|USDC)$/.test(t) || /USDT$/.test(t); // BTC-USD, ETH-USDT, …
+}
+function gateScalpData(formSel) {
+  const tk = $(formSel + " [name=ticker]"), sd = $(formSel + " [name=scalp_data]");
+  if (!tk || !sd) return;
+  const opt = [...sd.options].find((o) => o.value === "1m");
+  if (!opt) return;
+  const ok = isCryptoTicker(tk.value);
+  opt.disabled = !ok;
+  opt.title = ok ? "" : "только для крипты (Binance); выбери крипто-инструмент";
+  if (!ok && sd.value === "1m") sd.value = "daily";      // reset if 1m was selected for a non-crypto
+}
+["#form-hedged", "#form-hiexec"].forEach((f) => {
+  const tk = $(f + " [name=ticker]");
+  if (tk) tk.addEventListener("change", () => gateScalpData(f));
+});
 
 const statsText = (s) => Object.entries(s)
   .map(([k, v]) => `${k.padEnd(18)}: ${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}`)
