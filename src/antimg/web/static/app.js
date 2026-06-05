@@ -797,10 +797,11 @@ async function renderHedged(d) {
       line: { color: "#5b9dff", width: 1.5 } },
     { x: d.theta_path.x, y: d.theta_path.y, mode: "lines", name: "тета уплачено (накоп.)",
       line: { color: "#8b949e", width: 1, dash: "dot" } },
-    { x: d.equity_total.x, y: d.equity_total.y, mode: "lines", name: "ИТОГО P&L счёта",
+    { x: d.equity_total.x, y: d.equity_total.y.map((v) => v - s.starting_bank), mode: "lines",
+      name: "ИТОГО P&L (= стреддл + скальп)",
       line: { color: up ? "#3fb950" : "#f85149", width: 2.5 },
       fill: "tozeroy", fillcolor: up ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
-  ], layout("Разложение P&L: стреддл (гамма−тета) + скальп = ИТОГО", {
+  ], layout(`Разложение P&L (от 0): стреддл + скальп = ИТОГО  ·  старт банка $${f(s.starting_bank)}`, {
     height: 380, xaxis: { gridcolor: "#2a3340" },
     yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L (от 0)" },
              zeroline: true, zerolinecolor: "#8b949e" } }));
@@ -1045,9 +1046,9 @@ async function renderHiExec(d) {
   await plot("hx-pnl", [
     { x: d.equity_straddle.x, y: d.equity_straddle.y, mode: "lines", name: "стреддл (гамма−тета)", line: { color: "#f0c000", width: 1.5 } },
     { x: d.equity_scalp.x, y: d.equity_scalp.y, mode: "lines", name: "скальп", line: { color: "#5b9dff", width: 1.5 } },
-    { x: d.equity_total.x, y: d.equity_total.y, mode: "lines", name: "ИТОГО", line: { color: s.net_pnl >= 0 ? "#3fb950" : "#f85149", width: 2.5 }, fill: "tozeroy", fillcolor: s.net_pnl >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
-  ], layout("P&L: стреддл + скальп = ИТОГО (одна ось)", {
-    height: 300, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L" }, zeroline: true, zerolinecolor: "#8b949e" } }));
+    { x: d.equity_total.x, y: d.equity_total.y.map((v) => v - s.starting_bank), mode: "lines", name: "ИТОГО (= стреддл + скальп)", line: { color: s.net_pnl >= 0 ? "#3fb950" : "#f85149", width: 2.5 }, fill: "tozeroy", fillcolor: s.net_pnl >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
+  ], layout(`P&L (от 0): стреддл + скальп = ИТОГО  ·  старт банка $${(+s.starting_bank).toLocaleString()}`, {
+    height: 300, xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L (от 0)" }, zeroline: true, zerolinecolor: "#8b949e" } }));
   const up = s.net_pnl >= 0;
   $("#hx-stats").textContent =
     `${up ? "✅ ИТОГО ПЛЮС" : "❌ ИТОГО МИНУС"}  net ${up ? "+" : ""}${f(s.net_pnl)}  (CAGR ${f(s.ann_return_pct)}%, ${s.n_days} дн)\n`

@@ -534,3 +534,19 @@ Not implemented; documented as a rejected tactic.
     `isCryptoTicker` + per-form gate on ticker change; resets to daily) — was selectable for SPY etc.
     even though the feed is crypto-only.
   assets v61. Live :8090 rebuilt.
+
+- **D57** — User: "closest approach to original strategy philosophy" for the regime/feed coupling +
+  plot P&L from 0.
+  - **Intraday flat/trend gate (doctrine-faithful):** corpus (34 cites) — "решения на ВНУТРИДНЕВНОМ
+    таймфрейме в реальном времени; дневные бары скрывают шум; флет = цену зажали в диапазоне на час/
+    день; галоп = выход → отойти." So when an intraday feed is on, the BB flat/trend gate is now
+    computed on the INTRADAY bars (rolling ~1-day band, win=max(bb_window, bars_per_day), k=bb_k) and
+    each intraday bar is gated against its OWN band — not one daily verdict for the whole day. Price
+    breaking the intraday range mid-day ⇒ step aside (galloping), inside ⇒ scalp. Falls back to the
+    daily band when no intraday feed. Regime and feed are now consciously COUPLED (was independent by
+    simplification).
+  - **P&L from 0:** scalp + straddle already plotted from 0; the TOTAL was the bank curve (~$10k
+    offset) on a "от 0" axis with fill-to-zero → dominated the chart. Now plot total as
+    `equity_total − starting_bank` so all three start at 0 and total = straddle + scalp visually;
+    chart title notes "старт банка $10,000". Surfaced `starting_bank` in both stats. Tab 8 + Tab 9.
+  assets v62. 77 tests. Live :8090 rebuilt.

@@ -174,12 +174,26 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     lb_np = (_mid - bb_k * _sd).to_numpy(float)
     # optional INTRADAY feed for the scalp: group bars by calendar day → the grid walks the real
     # intraday path (many round-trips) instead of one daily OHLC bar. Straddle/theta/rolls stay daily.
+    # FLAT/TREND gate goes INTRADAY too (doctrine: "решения на внутридневном таймфрейме в реальном
+    # времени; дневные бары скрывают шум"): identify the range on the intraday feed itself — a rolling
+    # ~1-day Bollinger band ("цену зажали в диапазоне на протяжении часа/дня"). Price breaking it
+    # intraday = a "галоп"/trend → step aside, let the straddle run; inside it = flat → scalp.
     intraday_by_day: dict = {}
     if intraday is not None and not intraday.empty:
         idf = intraday.sort_index()
         ohlc = idf[["Open", "High", "Low", "Close"]].to_numpy(float)
-        for ts, row in zip(idf.index, ohlc):
-            intraday_by_day.setdefault(ts.normalize(), []).append(row)
+        # intraday range band: window ≈ one day of this feed (≥ bb_window), k = bb_k σ
+        n_days_i = max(idf.index.normalize().nunique(), 1)
+        bars_per_day = max(int(round(len(idf) / n_days_i)), 1)
+        win_i = max(bb_window, bars_per_day)
+        _ic = idf["Close"]
+        _mid_i = _ic.rolling(win_i, min_periods=bb_window).mean()
+        _sd_i = _ic.rolling(win_i, min_periods=bb_window).std()
+        ub_i = (_mid_i + bb_k * _sd_i).to_numpy(float)
+        lb_i = (_mid_i - bb_k * _sd_i).to_numpy(float)
+        for k_i, (ts, row) in enumerate(zip(idf.index, ohlc)):
+            # carry each bar's OWN intraday band so the scalp gate is intraday, not the daily verdict
+            intraday_by_day.setdefault(ts.normalize(), []).append((row, ub_i[k_i], lb_i[k_i]))
 
     # warm up until ATR is finite
     i = 0
@@ -408,10 +422,11 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         if scalp_model == "grid":
             bars = intraday_by_day.get(d.normalize())
             if bars:                                       # walk the real intraday path of this day
-                for (io, ih, il, ic) in bars:
-                    scalp_walk(io, ih, il, ic, ub_np[j], lb_np[j], d)
+                for (row, ub_b, lb_b) in bars:             # row=(O,H,L,C); ub_b/lb_b = INTRADAY band
+                    io, ih, il, ic = row
+                    scalp_walk(io, ih, il, ic, ub_b, lb_b, d)   # intraday flat/trend gate
                     res.intraday_bars += 1
-            else:                                          # no intraday feed → the daily bar
+            else:                                          # no intraday feed → daily bar + daily band
                 scalp_walk(op, hi, lo, S, ub_np[j], lb_np[j], d)
             # ---- залипшие части (when to DROP a working part) ----
             # If price has left the WHOLE grid (all near parts stuck) we HEAL — but ONLY by spending
