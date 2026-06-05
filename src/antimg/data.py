@@ -189,44 +189,14 @@ def _parse_binance_klines(rows: list) -> pd.DataFrame:
     return df[~df.index.duplicated(keep="last")].sort_index()
 
 
-def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None = None,
-                          end: str | None = None, use_cache: bool = True,
-                          max_pages: int = 4000) -> pd.DataFrame:
-    """FREE deep intraday crypto bars from Binance public REST (keyless, stdlib only).
-
-    Maps a crypto ticker (BTC-USD/ETH-USD/SOL-USD) to a Binance USDT pair and paginates
-    `/api/v3/klines` (1000 bars/request) over [start, end]. tz-naive UTC index so the engine's
-    groupby-by-date path works. Cached per (symbol, interval) — delete the cache file to extend
-    history. Raises on an unmapped ticker or total network failure so the caller can fall back
-    to the daily bar. NOTE: 1-min over a multi-year window is ~1 request/1000 bars (slow first
-    pull, then cached); pick a coarser `interval` for long windows.
-    """
+def _binance_rest_rows(sym: str, interval: str, start_ms: int, end_ms: int, max_pages: int = 4000) -> list:
+    """Paginate Binance /api/v3/klines over [start_ms, end_ms] with ONE keep-alive HTTPS connection
+    (a fresh urlopen per page pays DNS+TLS handshake each time → minutes; keep-alive ≈0.3s/req)."""
     import http.client
     import json as _json
-    sym = _to_binance_symbol(ticker)
-    if sym is None:
-        raise RuntimeError(f"{ticker!r} is not a Binance-servable crypto pair "
-                           f"(the free 1m feed is crypto-only; use scalp_data='hourly' otherwise)")
-    step = _BINANCE_INTERVAL_MS.get(interval)
-    if step is None:
-        raise RuntimeError(f"unsupported crypto interval {interval!r}")
-
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cp = CACHE_DIR / f"binance_{sym}__{interval}.pkl"
-    if use_cache and cp.exists():
-        df = pd.read_pickle(cp)
-        if not df.empty:
-            return _slice(df, start or "1990-01-01", end)
-
-    start_ms = int(pd.Timestamp(start or "2017-08-01").timestamp() * 1000)
-    end_ms = (int(pd.Timestamp(end).timestamp() * 1000) if end
-              else int(pd.Timestamp.now("UTC").timestamp() * 1000))
-
-    # Reuse ONE keep-alive HTTPS connection across all pages — a fresh urlopen() per page pays a
-    # DNS lookup + TLS handshake every time (~4s/req from a container → minutes for a 60d 1m pull);
-    # keep-alive drops that to ~0.3s/req. Rotate to the next host (reconnecting) on any error.
+    step = _BINANCE_INTERVAL_MS.get(interval, 60_000)
     hosts = [h.split("://", 1)[-1] for h in _BINANCE_HOSTS]
-    state = {"conn": None, "host": None, "err": None}
+    state = {"conn": None, "host": None}
 
     def _get(path):
         order = ([state["host"]] if state["host"] else []) + [h for h in hosts if h != state["host"]]
@@ -239,38 +209,135 @@ def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None =
                     state["host"] = host
                 state["conn"].request("GET", path, headers={"User-Agent": "antimg/1.0"})
                 resp = state["conn"].getresponse()
-                body = resp.read()                        # must fully read to reuse the connection
+                body = resp.read()
                 if resp.status != 200:
                     raise RuntimeError(f"HTTP {resp.status}")
                 return _json.loads(body.decode("utf-8"))
-            except Exception as ex:                       # drop the conn, try the next host
-                state["err"] = ex
+            except Exception:
                 if state["conn"]:
                     state["conn"].close()
                 state["conn"] = None
                 state["host"] = None
         return None
 
-    rows: list = []
-    cur, pages = start_ms, 0
+    rows, cur, pages = [], start_ms, 0
     while cur < end_ms and pages < max_pages:
-        path = (f"/api/v3/klines?symbol={sym}&interval={interval}"
-                f"&startTime={cur}&endTime={end_ms}&limit=1000")
-        batch = _get(path)
+        batch = _get(f"/api/v3/klines?symbol={sym}&interval={interval}"
+                     f"&startTime={cur}&endTime={end_ms}&limit=1000")
         if not batch:
             break
         rows.extend(batch)
-        cur = batch[-1][0] + step                         # next page starts one step past last open
+        cur = batch[-1][0] + step
         pages += 1
-        if len(batch) < 1000:                             # reached the live tip
+        if len(batch) < 1000:
             break
     if state["conn"]:
         state["conn"].close()
+    return rows
 
+
+_BINANCE_BULK_HOST = "data.binance.vision"
+
+
+def _binance_monthly_rows(sym: str, interval: str, year: int, month: int) -> "list | None":
+    """Download ONE monthly kline dump (data.binance.vision) → rows, or None if not published yet
+    (404). One ~2-3 MB zip per month = ~30× fewer requests than REST for deep history. Handles the
+    2025 timestamp-unit change (some dumps switched open-time from ms to µs)."""
+    import http.client
+    import zipfile, io, csv
+    path = f"/data/spot/monthly/klines/{sym}/{interval}/{sym}-{interval}-{year:04d}-{month:02d}.zip"
+    try:
+        conn = http.client.HTTPSConnection(_BINANCE_BULK_HOST, timeout=60)
+        conn.request("GET", path, headers={"User-Agent": "antimg/1.0"})
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        if resp.status != 200:
+            return None
+        zf = zipfile.ZipFile(io.BytesIO(body))
+        rows = []
+        with zf.open(zf.namelist()[0]) as fh:
+            for rec in csv.reader(io.TextIOWrapper(fh, "utf-8")):
+                if not rec or not rec[0].lstrip("-").isdigit():
+                    continue                               # skip a header line if present
+                t = int(rec[0])
+                if t > 1e14:                               # µs (post-2025 dumps) → ms
+                    t //= 1000
+                rows.append([t, rec[1], rec[2], rec[3], rec[4], rec[5]])
+        return rows
+    except Exception:
+        return None
+
+
+def _binance_1m_rows(sym: str, start_ms: int, end_ms: int) -> list:
+    """Deep 1-minute history: monthly DUMPS for complete past months (fast, ~1 zip/month) + REST for
+    the current incomplete month or any month whose dump is missing. Each month is filled independently
+    so a missing dump can't trigger a runaway multi-year REST pull."""
+    rows = []
+    now = pd.Timestamp.now("UTC").tz_localize(None)
+    cur_month = pd.Timestamp(now.year, now.month, 1)
+    m = pd.Timestamp(pd.Timestamp(start_ms, unit="ms").year, pd.Timestamp(start_ms, unit="ms").month, 1)
+    end = pd.Timestamp(end_ms, unit="ms")
+    while m <= end and m <= cur_month:
+        m_next = m + pd.offsets.MonthBegin(1)
+        seg_start = max(int(m.timestamp() * 1000), start_ms)
+        seg_end = min(int(m_next.timestamp() * 1000), end_ms)
+        if seg_start < seg_end:
+            mr = _binance_monthly_rows(sym, "1m", m.year, m.month) if m < cur_month else None
+            if mr:
+                rows.extend(r for r in mr if seg_start <= r[0] < seg_end)
+            else:                                          # current month or missing dump → REST (bounded to the month)
+                rows.extend(_binance_rest_rows(sym, "1m", seg_start, seg_end))
+        m = m_next
+    return rows
+
+
+def fetch_intraday_crypto(ticker: str, interval: str = "1m", start: str | None = None,
+                          end: str | None = None, use_cache: bool = True,
+                          max_pages: int = 4000) -> pd.DataFrame:
+    """FREE deep intraday crypto bars from Binance (keyless, stdlib only).
+
+    Maps a crypto ticker (BTC-USD/ETH-USD/SOL-USD) to a Binance USDT pair. For **1-minute** it pulls
+    DEEP history from the **bulk monthly dumps** (data.binance.vision, ~1 zip/month) for complete
+    months + REST for the recent tail — so multi-year 1m works (≈1 download/month vs ~43k REST
+    calls/month). Other intervals use plain REST pagination. tz-naive UTC index so the engine's
+    groupby-by-date path works. Cached per (symbol, interval) — delete the cache file to refresh.
+    Raises on an unmapped ticker or total network failure so the caller can fall back to the daily bar.
+    """
+    sym = _to_binance_symbol(ticker)
+    if sym is None:
+        raise RuntimeError(f"{ticker!r} is not a Binance-servable crypto pair "
+                           f"(the free 1m feed is crypto-only; use scalp_data='hourly' otherwise)")
+    if interval not in _BINANCE_INTERVAL_MS:
+        raise RuntimeError(f"unsupported crypto interval {interval!r}")
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cp = CACHE_DIR / f"binance_{sym}__{interval}.pkl"
+    now = pd.Timestamp.now("UTC").tz_localize(None)
+    req_start = pd.Timestamp(start or "2017-08-01")
+    req_end = pd.Timestamp(end) if end else now
+    # COVERAGE-aware cache (keyed by symbol+interval): only reuse it if it actually spans the
+    # requested window — otherwise a recent-data cache would slice to EMPTY for a historical window.
+    cached = None
+    if use_cache and cp.exists():
+        cached = pd.read_pickle(cp)
+        if (not cached.empty and cached.index.min() <= req_start + pd.Timedelta(days=1)
+                and cached.index.max() >= min(req_end, now - pd.Timedelta(days=1)) - pd.Timedelta(days=1)):
+            return _slice(cached, start or "1990-01-01", end)
+
+    start_ms = int(req_start.timestamp() * 1000)
+    end_ms = int(req_end.timestamp() * 1000)
+
+    # 1-minute over a long window: use the BULK monthly dumps (deep history, ~1 zip/month) + REST for
+    # the recent tail. Other intervals (1d daily fallback, etc.) are small → plain REST pagination.
+    rows = (_binance_1m_rows(sym, start_ms, end_ms) if interval == "1m"
+            else _binance_rest_rows(sym, interval, start_ms, end_ms, max_pages))
     if not rows:
-        raise RuntimeError(f"no Binance data for {sym} @ {interval} "
-                           f"(geo-blocked? network? last error: {state['err']})")
+        raise RuntimeError(f"no Binance data for {sym} @ {interval} (geo-blocked? network?)")
     df = _parse_binance_klines(rows)
+    if cached is not None and not cached.empty:           # MERGE so a new window never shrinks the cache
+        df = pd.concat([cached, df])
+        df = df[~df.index.duplicated(keep="last")].sort_index()
     if use_cache:
         df.to_pickle(cp)
     return _slice(df, start or "1990-01-01", end)

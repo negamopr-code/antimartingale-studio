@@ -563,3 +563,16 @@ Not implemented; documented as a rejected tactic.
   −6186) — answers "роллирование должно было привести к другим результатам." Regression test added.
   Note: 365-DTE "period"=a year, so the 5–7%/mo doctrine target fits SHORT DTE (monthly straddle);
   for annual straddles use a higher target. assets v63. 78 tests. Live :8090 rebuilt.
+
+- **D59** — User: "I thought we fixed the 1min issue" — the rule panel still showed ⚠ on a HISTORICAL
+  backtest. Root cause: the free 1m feed was clamped to the **last 60 days from TODAY** (paginated REST
+  perf limit), so any historical/multi-year window got NO 1m → silent daily fallback → ⚠. Real fix =
+  **deep 1m via Binance BULK monthly dumps** (`data.binance.vision`, ~1 zip/month, ~2.4MB, handles the
+  2025 ms→µs ts change): `_binance_1m_rows` uses monthly dumps for complete months + REST for the tail;
+  `_binance_rest_rows`/`_binance_monthly_rows` factored out. Verified: BTC 2021-11→2022-05 1m = 260,640
+  bars in 12s (was empty). **Three sub-bugs fixed:** (a) clamp made WINDOW-relative (`end−win`, not
+  `today−win`) so old windows get 1m; default 60→**730d**; (b) cache was symbol+interval keyed →
+  recent-data cache sliced to EMPTY for a historical window → made **coverage-aware + MERGE** (reuse
+  only if it spans [start,end], else fetch & union); (c) **fixed UTF-8 double-encoding** in api.py that
+  a prior `perl -0pi` (Cyrillic insert) caused — restored clean from e9b2579 + re-applied D58 via Edit.
+  78 tests. Live :8090 rebuilt.
