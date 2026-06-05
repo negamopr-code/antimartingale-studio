@@ -510,3 +510,10 @@ Not implemented; documented as a rejected tactic.
   - First honest 1m ПИ reads (180d): ETH scalp +223/straddle −490 (cover 68%, CAGR −8.9%); BTC scalp
     −537/straddle −354 (cover −138%, −18.6%). Loss cap held (worst ≥ −premium). Confirms the skill: the
     scalp does NOT reliably pay theta even on crypto 1m — needs a ranging regime; gamma carries trends.
+
+- **D55** — Perf: the 1m cold pull was still ~6 min even clamped to 60d (deployed: 352s). Root cause:
+  `urllib.urlopen()` per page = fresh DNS+TLS handshake every request (~4s/req from the container).
+  Fix: reuse ONE **keep-alive** `http.client.HTTPSConnection` across all pages (rotate hosts on error,
+  fully read each response to reuse the socket). Result (deployed, fresh SOL ticker): **COLD 63s**
+  (was 352s, 5.6×), **WARM 0.8s**. Default clamp 120→60d (v59). With the submit toast + spinner, the
+  one-time ~60s cold pull is acceptable; cached after. assets v60. 76 tests. Live :8090 rebuilt.
