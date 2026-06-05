@@ -1,4 +1,4 @@
-"""FastAPI app — JSON API + static Plotly frontend.
+"""FastAPI app â JSON API + static Plotly frontend.
 
 Stateless request handlers (no per-process session state) so the app scales horizontally:
 run N replicas behind a load balancer; shared state lives in the SignalStore (swap SQLite
@@ -143,13 +143,13 @@ def backtest_linear(req: BacktestReq):
 
 
 def _build_vol(req, daily, ticker: str | None = None):
-    """Construct the IV surface (real CBOE term structure + fixed-β skew) for the option model.
+    """Construct the IV surface (real CBOE term structure + fixed-Î² skew) for the option model.
 
     Falls back to the asset's realized vol when no vol index is available (non-S&P/-VXN/etc),
     and to a flat constant when iv_source='constant'. With use_term_structure=False only the
     nearest tenor is used (flat in T). Returns a vol.VolModel (see src/antimg/vol.py).
 
-    `ticker` overrides `req.ticker` — used by the hedged-intraday scan, whose request has no
+    `ticker` overrides `req.ticker` â used by the hedged-intraday scan, whose request has no
     single ticker (it iterates the catalog), so each instrument builds its own surface.
     """
     ticker = ticker or req.ticker
@@ -181,7 +181,7 @@ def _coinflip_payload(daily, res, double_target):
             "n_cycles": res.n_cycles, "total_cost": res.total_cost,
             "profit_factor": (round(pf, 3) if pf is not None else None),
             "double_target": double_target,
-            "model": "long-call coin-flip (premium=bet, risk≤b)",
+            "model": "long-call coin-flip (premium=bet, riskâ¤b)",
         },
     }
 
@@ -190,7 +190,7 @@ def _coinflip_payload(daily, res, double_target):
 def backtest_options(req: OptionsReq):
     daily, weekly, watr = _load(req.ticker, req.start, req.atr_period)
     if req.opt_model == "coinflip":
-        # long-call coin-flip: premium is the bet (risk ≤ b), real per-date realized vol as IV
+        # long-call coin-flip: premium is the bet (risk â¤ b), real per-date realized vol as IV
         realized = datamod.realized_vol(daily["Close"], req.iv_window)
         res = strat.run_call_coinflip(daily, weekly, watr, base_bet=req.base_bet,
                                       target_streak=req.target_streak, mult=req.mult,
@@ -205,7 +205,7 @@ def backtest_options(req: OptionsReq):
     vm, realized = _build_vol(req, daily)
     # same campaign, but each lot is a delta-normalised long call (no -1ATR stop on the option;
     # the trailing stop caps risk at the initial b, convexity softens losses). IV from the
-    # surface: real CBOE vol-index term structure interpolated to the tenor, + fixed-β skew.
+    # surface: real CBOE vol-index term structure interpolated to the tenor, + fixed-Î² skew.
     res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
                              target_streak=req.target_streak, mult=req.mult,
                              instrument="calls", mode=req.mode, realized_vol=realized, r=req.r,
@@ -249,7 +249,7 @@ def _detrend(daily: pd.DataFrame) -> pd.DataFrame:
     Remove the mean daily log-return from Close so the detrended path has ZERO net drift
     (a true fair coin), then scale Open/High/Low by the same per-day factor so intraday ranges
     are preserved. Running the strategy on this is the control: any profit here is NOT a
-    directional edge (there is no direction) — it's the option-pricing/fill floor. The gap
+    directional edge (there is no direction) â it's the option-pricing/fill floor. The gap
     between the real result and this control is the part that's purely drift (regime-dependent).
     """
     import numpy as np
@@ -275,7 +275,7 @@ def _shuffle_surrogate(daily: pd.DataFrame, seed: int, keep_drift: bool) -> pd.D
     keeping the exact marginal bar distribution. `keep_drift=False` also zeroes the mean log-return.
 
     This is the control the drift-strip should have been: a stop-and-pyramid on a driftless series
-    with INDEPENDENT increments is EV≈0 by the martingale-free identity, so any profit that survives
+    with INDEPENDENT increments is EVâ0 by the martingale-free identity, so any profit that survives
     the shuffle is a fill/barrier artifact, not edge. Comparing base vs shuffle-with-drift vs
     shuffle-zero-drift cleanly splits net into trend / drift / floor without the detrend reversal artifact.
     """
@@ -332,8 +332,8 @@ def _coinflip_net(daily, weekly, watr, req, iv_markup: float) -> float:
 def _breakeven_markup(daily, weekly, watr, req, lo=0.5, hi=3.0, iters=6):
     """The IV markup at which this instrument's coin-flip net P&L = 0 (bisection; net is
     decreasing in markup). Returns (value_in[lo,hi], flag) where flag is '' if it crossed,
-    'lo' if it loses even at the cheapest markup (be < lo ⇒ never profitable on real options),
-    or 'hi' if it stays profitable even at the richest (be > hi ⇒ robust to pricing)."""
+    'lo' if it loses even at the cheapest markup (be < lo â never profitable on real options),
+    or 'hi' if it stays profitable even at the richest (be > hi â robust to pricing)."""
     nlo, nhi = _coinflip_net(daily, weekly, watr, req, lo), _coinflip_net(daily, weekly, watr, req, hi)
     if nlo <= 0:
         return lo, "lo"
@@ -371,12 +371,12 @@ def scan_all(req: ScanReq):
     """One-click robustness sweep across the whole catalog with identical params.
 
     `model='shares'` runs the linear ATR pyramid; `model='coinflip'` runs the long-call
-    coin-flip (premium = bet, real per-date IV × markup). Per-instrument bottom-line summary.
-    Sequential by design — yfinance/Yahoo rate-limits a server IP (429), so we do NOT fan out.
+    coin-flip (premium = bet, real per-date IV Ã markup). Per-instrument bottom-line summary.
+    Sequential by design â yfinance/Yahoo rate-limits a server IP (429), so we do NOT fan out.
     Per-ticker failures are captured (ok=False) instead of aborting the sweep.
 
     `stress=True` adds, per instrument, a DRIFT-STRIPPED control (same strategy on detrended,
-    zero-drift prices) and — for coinflip — the breakeven IV markup. These separate a real
+    zero-drift prices) and â for coinflip â the breakeven IV markup. These separate a real
     structural edge from "we were long things that went up in a 20-year bull market".
     """
     rows = []
@@ -405,7 +405,7 @@ def scan_all(req: ScanReq):
                         row["drift_ret_pct"] = round(100.0 * drift_part / bank, 2)
                         row["trend_ret_pct"] = round(100.0 * trend_part / bank, 2)
                         row["floor_net"] = round(floor_m, 2)
-                    # naive detrend kept as a labelled REFERENCE (over-corrects on trends — see note)
+                    # naive detrend kept as a labelled REFERENCE (over-corrects on trends â see note)
                     dd = _detrend(daily); dw = datamod.weekly(dd); dwatr = datamod.atr(dw, req.atr_period)
                     row["detrend_ret_pct"] = round(
                         100.0 * (_scan_run(req, dd, dw, dwatr).final_bank - req.starting_bank) / bank, 2)
@@ -469,8 +469,8 @@ def _jsonable(events: list[dict]) -> list[dict]:
 def explain(req: ExplainReq):
     """Step-by-step trace of the first campaign on a synthetic flat/up/down path.
 
-    shares → the average-based pyramid (grid view); calls → the long-call COIN-FLIP
-    (premium = the bet, risk ≤ b by construction, dynamic doubling target). The trace
+    shares â the average-based pyramid (grid view); calls â the long-call COIN-FLIP
+    (premium = the bet, risk â¤ b by construction, dynamic doubling target). The trace
     comes from the real engine so the money mechanics can be inspected directly.
     """
     daily = scenarios.scenario(req.scenario, atr_period=req.atr_period,
@@ -550,7 +550,7 @@ def inspect(req: InspectReq):
                                       iv_markup=req.iv_markup, trace=trace)
         model, instrument = "coinflip", "calls"
     elif req.model == "calls":
-        # pyramid of delta-normalised long calls WITH auto-roll near expiry — the model whose
+        # pyramid of delta-normalised long calls WITH auto-roll near expiry â the model whose
         # roll mechanic is otherwise invisible. Uses realized vol as IV (no surface), like coinflip.
         realized = datamod.realized_vol(daily["Close"], req.iv_window)
         res = strat.run_campaign(daily, weekly, watr, base_bet=req.base_bet,
@@ -582,26 +582,26 @@ def inspect(req: InspectReq):
     }
 
 
-# ----------------------------------------------------------------- tab 8: hedged intraday (ПИ)
+# ----------------------------------------------------------------- tab 8: hedged intraday (ÐÐ)
 def _intraday_feed(req):
     """Fetch the intraday scalp feed per req.scalp_data. Returns the intraday DataFrame, or None
     to fall back to the daily bar (not requested / fetch failed / wrong asset class).
 
-    - 'daily'  → None (one OHLC bar/day; the scalp is unmeasured).
-    - '1m'     → FREE deep 1-minute crypto bars from Binance public REST (keyless; crypto only —
+    - 'daily'  â None (one OHLC bar/day; the scalp is unmeasured).
+    - '1m'     â FREE deep 1-minute crypto bars from Binance public REST (keyless; crypto only â
                  ETH/BTC/SOL, the doctrine's ideal instrument). Non-crypto tickers fall back.
                  Window clamped to the last ANTIMG_HI_1M_DAYS days (default 60) so the paginated
                  pull stays bounded; earlier days use the daily bar.
-    - 'hourly' → yfinance 60m bars (~730d) for any ticker; start clamped to the 725d cutoff.
+    - 'hourly' â yfinance 60m bars (~730d) for any ticker; start clamped to the 725d cutoff.
     """
     mode = getattr(req, "scalp_data", "daily")
     if mode == "daily":
         return None
     if mode == "1m":
-        # 1-min over a multi-year window = thousands of sequential Binance requests (minutes →
+        # 1-min over a multi-year window = thousands of sequential Binance requests (minutes â
         # the UI looks hung). Clamp the feed to a recent slice so the pull is bounded; days before
         # the cutoff fall back to the daily bar (full-window straddle/theta, recent-window measured
-        # scalp) — exactly like the hourly clamp. 60d ≈ 86k 1m bars (rich scalp sample) and a cold
+        # scalp) â exactly like the hourly clamp. 60d â 86k 1m bars (rich scalp sample) and a cold
         # pull of ~85 paginated requests (~1-2 min, then cached). Tunable via ANTIMG_HI_1M_DAYS.
         win = int(os.environ.get("ANTIMG_HI_1M_DAYS", "60"))
         cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=win)).date().isoformat()
@@ -611,8 +611,8 @@ def _intraday_feed(req):
                                                end=getattr(req, "end", None))
             return df if df is not None and not df.empty else None
         except Exception:
-            return None                                   # non-crypto / geo-blocked → daily bar
-    # 'hourly': yfinance refuses hourly older than ~730d — clamp the start so the request succeeds;
+            return None                                   # non-crypto / geo-blocked â daily bar
+    # 'hourly': yfinance refuses hourly older than ~730d â clamp the start so the request succeeds;
     # days before the cutoff fall back to the daily bar (partial intraday coverage on the recent part).
     cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=725)).date().isoformat()
     start = max(req.start, cutoff)
@@ -624,11 +624,12 @@ def _intraday_feed(req):
 
 
 def _run_hi(daily, datr, vm, realized, req, trace=None, intraday=None):
-    """Call the ПИ engine with the knobs from a HedgedIntradayReq or HedgedIntradayScanReq
+    """Call the ÐÐ engine with the knobs from a HedgedIntradayReq or HedgedIntradayScanReq
     (they share field names). Returns the HedgedIntradayResult."""
     return hi.run_hedged_intraday(
         daily, datr, starting_bank=req.starting_bank, risk_pct=req.risk_pct,
-        dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days, r=req.r,
+        dte_days=req.dte_days, roll_buffer_days=req.roll_buffer_days,
+        roll_profit_pct=getattr(req, "roll_profit_pct", 0.0), r=req.r,
         n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
         intraday_frac=req.intraday_frac, scalp_model=req.scalp_model,
         scalp_recenter_days=req.scalp_recenter_days, use_bbands=req.use_bbands,
@@ -640,7 +641,7 @@ def _run_hi(daily, datr, vm, realized, req, trace=None, intraday=None):
 
 
 def _hi_summary(res, starting_bank: float) -> dict:
-    """Per-instrument bottom line for the ПИ scan (one row)."""
+    """Per-instrument bottom line for the ÐÐ scan (one row)."""
     net = res.final_bank - starting_bank
     return {
         "net": round(net, 2),
@@ -661,8 +662,8 @@ def _hi_summary(res, starting_bank: float) -> dict:
 
 @app.post("/api/hedged-intraday")
 def hedged_intraday(req: HedgedIntradayReq):
-    """Прикрытый Интрадей (Korovin): a long synthetic straddle (2 ATM calls − 1 future) whose
-    theta is paid by a counter-trend intraday scalping grid. Daily-bar backtest — the straddle
+    """ÐÑÐ¸ÐºÑÑÑÑÐ¹ ÐÐ½ÑÑÐ°Ð´ÐµÐ¹ (Korovin): a long synthetic straddle (2 ATM calls â 1 future) whose
+    theta is paid by a counter-trend intraday scalping grid. Daily-bar backtest â the straddle
     is BS-marked daily and rolled ATM near expiry; the scalp overlay harvests the reversed part
     of each day's range. Returns separated straddle / scalp / total streams (judge by the total).
     """
@@ -711,6 +712,8 @@ def hedged_intraday(req: HedgedIntradayReq):
             "scalp_scaled_max": res.scalp_scaled_max, "n_parts": req.n_parts, "intraday_bars": res.intraday_bars,
             "scalp_data": getattr(req, "scalp_data", "daily"),
             "starting_bank": res.starting_bank,
+            "roll_profit_pct": getattr(req, "roll_profit_pct", 0.0),
+            "profit_rolls": sum(1 for x in res.rolls if x.get("reason") == "профит-цель"),
             "grid_timeframe": req.grid_timeframe, "use_bbands": req.use_bbands,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
         },
@@ -720,9 +723,9 @@ def hedged_intraday(req: HedgedIntradayReq):
 
 @app.post("/api/hedged-intraday/inspect")
 def hedged_intraday_inspect(req: HedgedIntradayReq):
-    """Watch the ПИ strategy EXECUTE over a chosen window: price + Bollinger flat-band, the ATM
+    """Watch the ÐÐ strategy EXECUTE over a chosen window: price + Bollinger flat-band, the ATM
     straddle strike (step line), every counter-trend scalp entry/exit, rolls, and the P&L
-    decomposition — so the rules (don't fade a breakout, carry stuck parts, straddle runs the
+    decomposition â so the rules (don't fade a breakout, carry stuck parts, straddle runs the
     trend) can be audited visually. Use a short window (e.g. 3 months) to see each trade."""
     try:
         daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
@@ -745,14 +748,14 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
     cflat = [e for e in trace if e["t"] == "confident_flat"]
     setups = [e for e in trace if e["t"] == "grid_setup"]
     g0 = setups[0] if setups else None                   # the n_parts working-part levels (first period)
-    # ── per-part scalp LEDGER: every entry/exit in order, with a running cumulative scalp P&L ──
+    # ââ per-part scalp LEDGER: every entry/exit in order, with a running cumulative scalp P&L ââ
     ledger, cum, per_part, open_parts = [], 0.0, {}, []
-    def _open_str():                                      # current open position, e.g. "ч.1+ч.2"
-        return "+".join(f"ч.{p}" for p in sorted(set(open_parts))) if open_parts else "—"
+    def _open_str():                                      # current open position, e.g. "Ñ.1+Ñ.2"
+        return "+".join(f"Ñ.{p}" for p in sorted(set(open_parts))) if open_parts else "â"
     for e in trace:
         if e["t"] == "scalp_open":
             open_parts.append(e["part"])
-            ledger.append({"date": e["date"], "kind": "вход", "part": e["part"], "side": e["side"],
+            ledger.append({"date": e["date"], "kind": "Ð²ÑÐ¾Ð´", "part": e["part"], "side": e["side"],
                            "price": e["price"], "lots": e["lots"], "pnl": 0.0, "cum": round(cum, 2),
                            "streak": e.get("streak", 0), "conf_flat": e.get("conf_flat", False),
                            "scale": e.get("scale", 1.0), "open": _open_str()})
@@ -760,7 +763,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             cum += e["pnl"]
             if e["part"] in open_parts:
                 open_parts.remove(e["part"])
-            ledger.append({"date": e["date"], "kind": "выход", "part": e["part"], "side": e["side"],
+            ledger.append({"date": e["date"], "kind": "Ð²ÑÑÐ¾Ð´", "part": e["part"], "side": e["side"],
                            "price": e["exit"], "lots": e["lots"], "pnl": e["pnl"], "cum": round(cum, 2),
                            "streak": e.get("streak", 0), "conf_flat": e.get("conf_flat", False),
                            "scale": e.get("scale", 1.0), "open": _open_str()})
@@ -775,7 +778,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
     ub_s = mid + req.bb_k * sd
     lb_s = mid - req.bb_k * sd
     # TREND regime spans = contiguous dates where price is OUTSIDE the Bollinger band (here the
-    # grid STEPS ASIDE — no new counter-trend entries — and lets the straddle run). Inside = FLAT.
+    # grid STEPS ASIDE â no new counter-trend entries â and lets the straddle run). Inside = FLAT.
     out = ((daily["Close"] > ub_s) | (daily["Close"] < lb_s)).fillna(False).to_numpy()
     di = [d.isoformat() for d in daily.index]
     trend_spans, i0 = [], None
@@ -786,7 +789,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             trend_spans.append({"x0": di[i0], "x1": di[k]}); i0 = None
     if i0 is not None:
         trend_spans.append({"x0": di[i0], "x1": di[-1]})
-    # straddle strike as a step line over each period (open→close at its strike)
+    # straddle strike as a step line over each period (openâclose at its strike)
     strike_x, strike_y = [], []
     for row in res.table:
         strike_x += [row["open"], row["close"]]
@@ -824,6 +827,8 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             "scalp_scaled_max": res.scalp_scaled_max, "trend_days": int(out.sum()), "intraday_bars": res.intraday_bars,
             "scalp_data": getattr(req, "scalp_data", "daily"),
             "starting_bank": res.starting_bank,
+            "roll_profit_pct": getattr(req, "roll_profit_pct", 0.0),
+            "profit_rolls": sum(1 for x in res.rolls if x.get("reason") == "профит-цель"),
             "ann_return_pct": round(res.ann_return_pct, 2), "n_days": res.n_days,
             "vol_model": vm.label,
         },
@@ -832,7 +837,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
 
 @app.post("/api/hedged-intraday/scan")
 def hedged_intraday_scan(req: HedgedIntradayScanReq):
-    """Bulk ПИ backtest across the WHOLE catalog with identical params — to see on which
+    """Bulk ÐÐ backtest across the WHOLE catalog with identical params â to see on which
     instruments the synthetic straddle + scalping holds up (the corpus flags silver/ETH as the
     volatile sweet spot, gold as the beginner pick). Sequential (Yahoo 429); per-ticker failures
     are captured, not fatal. Heavier than the shares scan (daily BS reprice per instrument)."""
@@ -869,8 +874,8 @@ def hedged_intraday_scan(req: HedgedIntradayScanReq):
         "profitable_pct": round(100.0 * len(profitable) / len(ok), 1) if ok else 0.0,
         "median_cagr_pct": round(median(cagrs), 2),
         "mean_cagr_pct": round(sum(cagrs) / len(cagrs), 2) if cagrs else 0.0,
-        # mean with the single BEST instrument dropped — exposes how much the headline rests on one
-        # outlier (e.g. SOL). If this is ≪ the full mean, the average is outlier-carried.
+        # mean with the single BEST instrument dropped â exposes how much the headline rests on one
+        # outlier (e.g. SOL). If this is âª the full mean, the average is outlier-carried.
         "mean_cagr_ex_best_pct": round(sum(cagrs[:-1]) / len(cagrs[:-1]), 2) if len(cagrs) > 1 else 0.0,
         "median_scalp_cover_pct": round(median(covers), 1),
         "loss_cap_ok_pct": round(100.0 * sum(1 for r in ok if r["loss_cap_ok"]) / len(ok), 1) if ok else 0.0,
@@ -916,7 +921,7 @@ def next_bet(strategy_id: str = "default",
              base_bet: float = Query(100.0, gt=0),
              target_streak: int = Query(10, ge=1, le=settings.max_target_streak),
              cap_mult: float | None = Query(None, gt=0)):
-    """Live antimartingale sizing — the closed loop. A TradingView Pine alert (or any client)
+    """Live antimartingale sizing â the closed loop. A TradingView Pine alert (or any client)
     reads this back AFTER its closed-trade alerts have streamed into the SignalStore to learn
     how big the NEXT order should be, given the current win streak. Pure read (no mutation):
     replays the stored win/loss outcomes through the pyramid state machine.
@@ -929,10 +934,10 @@ def next_bet(strategy_id: str = "default",
     st_ = strat.pyramid_state(outcomes, base_bet, target_streak, cap_mult)
     mult = round(st_["next_bet"] / base_bet, 4) if base_bet else None
     note = (f"{st_['streak']} consecutive win(s); place the next bet at "
-            f"{st_['next_bet']:g} (= {mult}×base)." if st_["streak"] > 0
-            else ("after a loss — reset to base." if st_["last_outcome"] == "loss"
-                  else ("target streak booked — reset to base." if st_["target_streak_completions"]
-                        else "no signals yet — start at base.")))
+            f"{st_['next_bet']:g} (= {mult}Ãbase)." if st_["streak"] > 0
+            else ("after a loss â reset to base." if st_["last_outcome"] == "loss"
+                  else ("target streak booked â reset to base." if st_["target_streak_completions"]
+                        else "no signals yet â start at base.")))
     return {"strategy_id": strategy_id, "base_bet": base_bet, "target_streak": target_streak,
             "cap_mult": cap_mult, "next_bet_mult": mult, **st_, "note": note}
 

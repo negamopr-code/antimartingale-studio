@@ -135,6 +135,10 @@ class HedgedIntradayReq(BaseModel):
     risk_pct: float = Field(0.20, gt=0, le=1.0)               # premium budget = risk_pct·bank
     dte_days: int = Field(365, ge=7, le=730)                  # long-dated straddle = slow theta (user's regime)
     roll_buffer_days: int = Field(10, ge=1, le=90)            # re-strike ATM this many days before expiry
+    # doctrine roll (modules 26/27): roll IN PROFIT when the period's gain hits this % of the deposit
+    # (≈ 5–7%/mo ref) — close the whole construction, re-open fresh ATM, compound, scrap stuck parts.
+    # 0 = OFF (schedule-only roll at expiry).
+    roll_profit_pct: float = Field(0.0, ge=0, le=100)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     # scalp model: 'grid' = event-driven daily-cadence counter-trend grid (daily bars ARE
     # representative when the step is on the daily scale); 'range' = heuristic intraday lower bound
@@ -186,6 +190,7 @@ class HedgedIntradayScanReq(BaseModel):
     risk_pct: float = Field(0.20, gt=0, le=1.0)
     dte_days: int = Field(365, ge=7, le=730)
     roll_buffer_days: int = Field(10, ge=1, le=90)
+    roll_profit_pct: float = Field(0.0, ge=0, le=100)        # doctrine profit-target roll (0 = off)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     scalp_model: str = Field("grid", pattern="^(grid|range)$")
     grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")

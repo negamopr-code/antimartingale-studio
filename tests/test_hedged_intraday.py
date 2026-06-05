@@ -231,3 +231,21 @@ def test_straddle_symmetric_wins_on_crash_and_rally():
         assert r.gamma_dir_pnl > 0, f"straddle gamma must capture the {name} (got {r.gamma_dir_pnl:.0f})"
         # loss cap still holds (delta-neutral doesn't raise max loss above the premium)
         assert r.worst_period_pnl >= -r.max_premium_at_risk - 1e-6
+
+
+def test_profit_target_roll_fires_and_re_centers():
+    """Doctrine roll (module 26/27): with roll_profit_pct>0 the straddle rolls IN THE PROFIT ZONE
+    when the period's gain hits the target — closing the whole construction and re-opening ATM, so a
+    strong trend produces MORE rolls than schedule-only, some tagged 'профит-цель'."""
+    up = 100.0 * np.cumprod(1 + np.full(400, 0.006))      # strong uptrend → straddle gains fast
+    df = _frame(up, rng_pct=0.005)
+    rv = datamod.realized_vol(df["Close"], 20).bfill().fillna(0.4)
+    base = hi.run_hedged_intraday(df, datamod.atr(df, 14), realized_vol=rv,
+                                  dte_days=365, roll_buffer_days=10, roll_profit_pct=0.0)
+    tgt = hi.run_hedged_intraday(df, datamod.atr(df, 14), realized_vol=rv,
+                                 dte_days=365, roll_buffer_days=10, roll_profit_pct=10.0)
+    profit_rolls = sum(1 for x in tgt.rolls if x.get("reason") == "профит-цель")
+    assert profit_rolls >= 1, "a strong trend should hit the profit target and roll"
+    assert tgt.n_rolls > base.n_rolls, "profit-target rolling adds rolls beyond the expiry schedule"
+    for row in tgt.table:                                  # loss cap still respected per period
+        assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row

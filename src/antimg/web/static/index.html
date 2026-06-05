@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=62"/>
+  <link rel="stylesheet" href="/style.css?v=63"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -244,6 +244,7 @@
       <label title="бюджет премии = risk% × банк (доктрина: 20% за период)">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
       <label title="срок стреддла: длинный (180–365) = медленная тета, дневной скальп репрезентативен (мысль юзера)">DTE days <input name="dte_days" type="number" value="365"></label>
       <label title="за сколько дней до экспирации перекрыться в новый ATM-страйк">Roll @ d-to-exp 🔁 <input name="roll_buffer_days" type="number" value="10"></label>
+      <label title="ДОКТРИНА (модуль 26/27): роллить В ПЛЮСЕ при достижении целевой прибыли = % от депозита за период (Коровин ≈ 5–7%/мес). Закрываю всю конструкцию, переоткрываюсь ATM, компаундю банк, залипшие части — в утиль. 0 = выключено (ролл только по экспирации)">Roll @ profit-target % 🎯 <input name="roll_profit_pct" type="number" step="any" value="0" min="0" max="100"></label>
       <label title="рабочих частей сетки (современный «универсал» = 5)">Grid parts <input name="n_parts" type="number" value="5"></label>
       <label title="первый шаг сетки = это × ATR выбранного таймфрейма (дефолт 2× дневного ATR — цель скальпа по мысли юзера)">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="0.5"></label>
       <label title="экспоненциальный множитель между частями (каждая дальше предыдущей)">Grid mult <input name="grid_mult" type="number" step="any" value="2.0"></label>
@@ -289,6 +290,7 @@
       <label>BB k (σ) <input name="bb_k" type="number" step="any" value="2.0"></label>
       <label title="srok стреддла">DTE days <input name="dte_days" type="number" value="365"></label>
       <label title="бюджет премии = risk% × банк">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
+      <label title="ДОКТРИНА (модуль 26/27): роллить В ПЛЮСЕ при достижении целевой прибыли = % от депозита за период (≈5–7%/мес). Закрываю всю конструкцию, переоткрываюсь ATM, компаундю, залипшие — в утиль. 0 = только по экспирации">Roll @ profit % 🎯 <input name="roll_profit_pct" type="number" step="any" value="0" min="0" max="100"></label>
       <label>Grid parts <input name="n_parts" type="number" value="5"></label>
       <label title="первый шаг = ×ATR">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="0.5"></label>
       <label>Grid mult <input name="grid_mult" type="number" step="any" value="2.0"></label>
@@ -304,6 +306,6 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=62"></script>
+  <script src="/app.js?v=63"></script>
 </body>
 </html>

@@ -119,7 +119,8 @@ def _drawdown(equity: list[float]) -> float:
 
 def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         starting_bank: float = 10_000.0, risk_pct: float = 0.20,
-                        dte_days: int = 365, roll_buffer_days: int = 10, r: float = 0.045,
+                        dte_days: int = 365, roll_buffer_days: int = 10,
+                        roll_profit_pct: float = 0.0, r: float = 0.045,
                         qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 0.5,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
                         scalp_model: str = "grid", scalp_recenter_days: int = 0,
@@ -370,8 +371,18 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         if not (np.isfinite(atr_d) and atr_d > 0):
             atr_d = abs(S) * 0.01                         # fallback step ~1% if ATR missing mid-series
 
-        # ---- roll near expiry: crystallize the straddle (and any stuck scalp legs), re-strike ATM ----
-        if (st["expiry"] - d).days <= roll_buffer_days:
+        # ---- ROLL: near expiry (schedule) OR planned profit reached (doctrine module 26/27: roll
+        # IN THE PROFIT ZONE after a strong move — close the WHOLE construction incl stuck scalp legs,
+        # re-open a fresh ATM delta-neutral straddle, compound the bank, scrap stuck parts. Target =
+        # roll_profit_pct % of the deposit at risk this period; doctrine ref ≈ 5–7%/mo. 0 = OFF). ----
+        expiry_due = (st["expiry"] - d).days <= roll_buffer_days
+        profit_due = False
+        if roll_profit_pct > 0 and not expiry_due:
+            mtm_chk, _, _ = straddle_unreal(S, d)
+            live_profit = mtm_chk + (realized_straddle + scalp_pnl(S)) - period_start_total
+            target = (roll_profit_pct / 100.0) * (starting_bank + period_start_total)
+            profit_due = target > 0 and live_profit >= target
+        if expiry_due or profit_due:
             if scalp_model == "grid":
                 scalp_close_all(S)
             mtm, c_now, _ = straddle_unreal(S, d)
@@ -386,7 +397,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                 "close": d.date().isoformat(), "strike": round(st["K"], 2),
                 "iv": round(st["sig"], 4), "n_straddles": round(st["n_str"], 3),
                 "premium": round(st["prem_book"], 2), "straddle_pnl": round(mtm, 2),
-                "period_pnl": round(period_total, 2), "bank": round(bank_now, 2)})
+                "period_pnl": round(period_total, 2), "bank": round(bank_now, 2),
+                "roll_reason": "профит-цель" if profit_due else "экспирация"})
             res.worst_period_pnl = min(res.worst_period_pnl, period_total)
             period_start_total = realized_straddle + cum_scalp
             st = open_straddle(j, bank_now)
@@ -397,7 +409,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
             res.n_rolls += 1
             res.rolls.append({"n": res.n_rolls, "date": d.date().isoformat(),
                               "spot": round(float(S), 4), "new_strike": round(st["K"], 4),
-                              "iv": round(st["sig"], 4), "n_straddles": round(st["n_str"], 3)})
+                              "iv": round(st["sig"], 4), "n_straddles": round(st["n_str"], 3),
+                              "reason": "профит-цель" if profit_due else "экспирация"})
             if scalp_model == "grid":
                 setup_grid(st["K"], atr_d, st["n_str"], date=d)
                 last_recenter = d

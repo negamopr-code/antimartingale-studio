@@ -550,3 +550,16 @@ Not implemented; documented as a rejected tactic.
     `equity_total − starting_bank` so all three start at 0 and total = straddle + scalp visually;
     chart title notes "старт банка $10,000". Surfaced `starting_bank` in both stats. Tab 8 + Tab 9.
   assets v62. 77 tests. Live :8090 rebuilt.
+
+- **D58** — User: "роллирование по достижении целевой прибыли — добавь ползунок, чтобы соответствовать
+  духу стратегии" (+ CAGR = annual? yes). Corpus (modules 26/27, 17 cites): roll IN THE PROFIT ZONE
+  after a strong move (≥ call cost) → close the WHOLE construction (calls+futs+ALL stuck scalp parts),
+  re-open fresh ATM delta-neutral, compound the bank, scrap stuck parts. Planned-profit ref ≈ 5–7%/mo
+  (~30–40%/yr). Roll = take-profit & CONTINUE (vs module-27 Exit = stop). Implemented `roll_profit_pct`
+  (engine + schema + _run_hi + Tab 8/9 slider "Roll @ profit-target % 🎯", 0=off): when the period's
+  live gain (straddle MtM + scalp) ≥ roll_profit_pct% of the period's deposit → roll, tagged
+  'профит-цель' in table/rolls; rule-panel «Роллирование» flips ⚠→✅. Materially changes results
+  (BTC 2018-24: rp=0 net +434/6 expiry-rolls; rp=15 net +1893/3 profit-rolls; rp=6 over-rolls to
+  −6186) — answers "роллирование должно было привести к другим результатам." Regression test added.
+  Note: 365-DTE "period"=a year, so the 5–7%/mo doctrine target fits SHORT DTE (monthly straddle);
+  for annual straddles use a higher target. assets v63. 78 tests. Live :8090 rebuilt.
