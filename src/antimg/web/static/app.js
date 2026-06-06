@@ -1053,6 +1053,48 @@ async function renderHiScan(d) {
 $("#hedged-scan-btn").onclick = (e) => withBusy(e.target, async () =>
   renderHiScan(await post("/api/hedged-intraday/scan", formData($("#form-hedged")))));
 
+// ---- 🧮 profit attribution (the closed-form mathematical model) ----
+async function renderHiAttr(d) {
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 0 }));
+  const m = d.measured, cf = d.closed_form, st = d.state, p = d.model_params;
+  // stacked decomposition: theta (cost, red) + gamma-trend (green) + scalp-flat (blue) → total
+  const cats = ["измерено (бэктест)", "модель (закрытая форма)"];
+  await plot("hi-attr", [
+    { x: cats, y: [m.theta, cf.theta], name: "тета (издержка)", type: "bar", marker: { color: "#f85149" } },
+    { x: cats, y: [m.gamma_trend, cf.gamma_trend], name: "гамма (ТРЕНД)", type: "bar", marker: { color: "#3fb950" } },
+    { x: cats, y: [m.scalp_flat, cf.scalp_flat], name: "скальп (ФЛЕТ)", type: "bar", marker: { color: "#5b9dff" } },
+    { x: cats, y: [m.total, cf.total], name: "ИТОГО", type: "scatter", mode: "markers",
+      marker: { color: "#f0c000", symbol: "diamond", size: 13, line: { color: "#0f1419", width: 1 } } },
+  ], Object.assign(layout(`${d.ticker} — из чего складывается P&L: тета + гамма(тренд) + скальп(флет)`, {
+    height: 360, yaxis: { gridcolor: "#2a3340", title: { text: "$ P&L" }, zeroline: true, zerolinecolor: "#8b949e" },
+    xaxis: { gridcolor: "#2a3340" } }), { barmode: "relative" }));
+
+  const txt =
+    `🧮 МАТ-МОДЕЛЬ ПИ — что строит какую часть прибыли\n`
+    + `\nСостояние волатильности: σ_I(implied)=${st.sigma_implied}  σ_R(realized)=${st.sigma_realized}  `
+    + `vr=σ_R/σ_I=${st.vr}  ·  банк $${f(st.bank)} · риск ${(st.risk_pct*100).toFixed(0)}% · DTE ${st.dte_years}г · ${st.years}л\n`
+    + `\nЗАКРЫТАЯ ФОРМА (годовые потоки, sized to ρ·B):\n`
+    + `   тета  Θ = −a            ,  a = ρB/2T = ${f(p.a_theta_rate)}      (издержка; в $ НЕ зависит от σ)\n`
+    + `   гамма Γ = +a·vr²·g      ,  g(капт.гаммы)=${p.gamma_capture_g}        (∝ vr² — ВЫПУКЛО → строит профит в ТРЕНДЕ)\n`
+    + `   скальп Σ = +C_s·ρB·vr   ,  C_s=${p.c_s}              (∝ vr — ЛИНЕЙНО → платит тету во ФЛЕТЕ)\n`
+    + `   ─────────────────────────────────────\n`
+    + `   ИТОГО = Γ + Σ + Θ ;  ПРИБЫЛЬНО ⟺ vr²·g + 2T·C_s·vr > 1  (сейчас = ${p.profitable_condition} ${p.profitable_condition > 1 ? "✅" : "❌"})\n`
+    + `\n── РАЗЛОЖЕНИЕ (измерено бэктестом — это истина; модель его воспроизводит) ──\n`
+    + `   тета (издержка)   : ${f(m.theta)}\n`
+    + `   гамма (ТРЕНД)     : +${f(m.gamma_trend)}   ← строит ${m.pct_from_trend}% валовой прибыли\n`
+    + `   скальп (ФЛЕТ)     : ${m.scalp_flat >= 0 ? "+" : ""}${f(m.scalp_flat)}   ← строит ${m.pct_from_flat}% валовой прибыли\n`
+    + `   ИТОГО             : ${m.total >= 0 ? "+" : ""}${f(m.total)}   [${m.regime}]\n`
+    + `   модель (закр.форма): тета ${f(cf.theta)} · гамма +${f(cf.gamma_trend)} · скальп ${cf.scalp_flat>=0?"+":""}${f(cf.scalp_flat)} · итого ${cf.total>=0?"+":""}${f(cf.total)}\n`
+    + `\n💡 ВЫВОД: ${m.conclusion}\n`
+    + `\n(Закрытая форма: a и C_s — из первых принципов ATM-опциона ±~20%; g калибрована к бэктесту; `
+    + `вывод/проценты — на ИЗМЕРЕННЫХ потоках. Структура: ТРЕНД→гамма (∝vr²), ФЛЕТ→скальп (∝vr), тета=пост. издержка.)`;
+  $("#hi-attr-stats").textContent = txt;
+}
+$("#hedged-attr-btn").onclick = (e) => withBusy(e.target, async () => {
+  intradayNotice("#form-hedged");
+  renderHiAttr(await post("/api/hedged-intraday/attribution", formData($("#form-hedged"))));
+});
+
 // ---- tab 9: ПИ Execution — watch the strategy run on a window
 async function renderHiExec(d) {
   const s = d.stats;

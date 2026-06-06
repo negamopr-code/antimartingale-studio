@@ -624,3 +624,19 @@ Not implemented; documented as a rejected tactic.
 - **Cross-instrument (K=0.02, 2019–23):** coverage 0.24 (EURUSD quiet) → 0.72 (BTC); SLV/crypto top
   = the doctrine's volatile-oscillator sweet spot; none ≥1 at modest edge ⇒ profit rides gamma.
 - 86 tests (+4). Skill: INVARIANT #7 caveat + lesson. assets v66.
+
+## D63 — Closed-form P&L ATTRIBUTION model: what part builds which part of profit (2026-06-06)
+- **Ask:** a mathematical model that approximately reproduces the backtest and concludes which part
+  builds which part of the profit.
+- **Model (`src/antimg/pi_model.py`), annual, sized to P=ρB:** Θ=−a (a=ρB/2T, vol-indep cost),
+  Γ=+a·vr²·g (vr=σ_R/σ_I; CONVEX → trend builds it via straddle gamma), Σ=+C_s·ρB·vr
+  (C_s=K·f·√252/0.4√T; LINEAR → scalp pays theta in the flat). Total=Γ+Σ+Θ; profitable ⟺
+  vr²·g + 2T·C_s·vr > 1. g = gamma-capture (trend slice of realized variance), per-instrument.
+- **Validation (engine GLD/SLV/SPY 2019–22):** theta & scalp within ~10–20% from first-principles
+  constants (ATM call≈0.4σS√T); g fit from the run reproduces gamma exactly. SPY g≈0.68 (trends),
+  SLV g≈0.28 (chops).
+- **Built:** pi_model.py (closed_form/attribute_measured/calibrate_gamma_capture);
+  /api/hedged-intraday/attribution (measured truth + closed-form reproduction + conclusion); Tab-8
+  «🧮 Атрибуция прибыли» button + stacked-bar (theta/gamma-trend/scalp-flat) + verdict. assets v67.
+- **Conclusion it outputs:** net = TREND(gamma ∝vr²) + FLAT(scalp ∝vr) − theta(const); attributes %
+  of gross profit to each, names the regime (trend-built / flat-built / bleeding). 91 tests (+5).

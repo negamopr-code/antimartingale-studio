@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import atr_strategy as strat
 from .. import data as datamod
 from .. import hedged_intraday as hi
+from .. import pi_model as pim
 from .. import vol as volmod
 from .. import instruments, scenarios, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
@@ -769,6 +770,61 @@ def hedged_intraday(req: HedgedIntradayReq):
             "coinflip": _coinflip_projection(res, req.assumed_capture),
         },
         "use_bbands": req.use_bbands,
+    }
+
+
+@app.post("/api/hedged-intraday/attribution")
+def hedged_intraday_attribution(req: HedgedIntradayReq):
+    """The MATHEMATICAL MODEL: decompose the ПИ P&L into theta (cost), gamma (trend), scalp (flat) and
+    CONCLUDE which part builds which part of the profit. Runs the backtest for the MEASURED streams,
+    then fits the closed-form model (a=ρB/2T, Σ=C_s·ρB·vr, Γ=a·vr²·g) — theta & scalp from first
+    principles, the gamma-capture g calibrated to the run — so the closed-form reproduces the backtest
+    and exposes the vol-dependence (Γ∝vr² convex/trend, Σ∝vr linear/flat, Θ=−a constant cost)."""
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < req.atr_period * 3:
+        raise HTTPException(status_code=422, detail="not enough data in this window for the ATR period")
+    datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
+    vm, realized = _build_vol(req, daily)
+    res = _run_hi(daily, datr, vm, realized, req, intraday=_intraday_feed(req))
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no straddle periods resolved for these params")
+    # vol state: σ_I = mean ATM IV actually paid across the rolled straddles; σ_R = mean realized vol
+    ivs = [row["iv"] for row in res.table if row.get("iv")]
+    sig_I = (sum(ivs) / len(ivs)) if ivs else req.iv_const
+    rv_clean = realized.dropna() if realized is not None else None
+    sig_R = float(rv_clean.mean()) if rv_clean is not None and not rv_clean.empty else sig_I
+    yrs = max(res.years, 1e-6)
+    T = req.dte_days / 365.0
+    # MEASURED decomposition (the real backtest) → the attribution / conclusion rests on these
+    measured = pim.attribute_measured(res.total_theta, res.gamma_dir_pnl, res.scalp_pnl, dte_years=T)
+    # CLOSED-FORM model that reproduces it (g calibrated to the measured gamma leg)
+    g = pim.calibrate_gamma_capture(res.gamma_dir_pnl, req.starting_bank, req.risk_pct, T, sig_I, sig_R, yrs)
+    cf = pim.closed_form(req.starting_bank, req.risk_pct, T, sig_I, sig_R,
+                         scalp_k=getattr(req, "scalp_k", hi.SCALP_K_DEFAULT),
+                         intraday_frac=req.intraday_frac, gamma_capture=g, years=yrs)
+    def _dump(a):
+        return {"theta": round(float(a.theta), 2), "gamma_trend": round(float(a.gamma_trend), 2),
+                "scalp_flat": round(float(a.scalp_flat), 2), "total": round(float(a.total), 2),
+                "pct_from_trend": round(float(a.pct_from_trend), 1),
+                "pct_from_flat": round(float(a.pct_from_flat), 1),
+                "profitable": bool(a.profitable), "regime": a.regime, "conclusion": a.conclusion}
+    return {
+        "ticker": req.ticker, "scalp_model": res.scalp_model,
+        "state": {"sigma_implied": round(sig_I, 4), "sigma_realized": round(sig_R, 4),
+                  "vr": round(sig_R / max(sig_I, 1e-9), 3), "years": round(yrs, 2),
+                  "bank": req.starting_bank, "risk_pct": req.risk_pct, "dte_years": round(T, 3)},
+        "model_params": {"a_theta_rate": round(cf.a, 2), "c_s": round(cf.c_s, 4),
+                         "gamma_capture_g": round(g, 3),
+                         "profitable_condition": round(cf.profitable_condition, 3),
+                         "scalp_k": getattr(req, "scalp_k", hi.SCALP_K_DEFAULT)},
+        "measured": _dump(measured),         # from the backtest streams (theta/gamma_dir/scalp)
+        "closed_form": _dump(cf),            # the equations, reproducing the backtest
     }
 
 

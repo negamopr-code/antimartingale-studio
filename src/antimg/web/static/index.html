@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=66"/>
+  <link rel="stylesheet" href="/style.css?v=67"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -262,10 +262,14 @@
       <label>Slippage % /fill <input name="slippage_pct" type="number" step="any" value="0"></label>
       <button type="submit">Прогнать ПИ-бэктест</button>
       <button type="button" id="hedged-scan-btn" title="Прогнать ПИ на ВСЕХ инструментах каталога с этими же параметрами (последовательно — Yahoo 429; первый прогон медленный). Инструмент/End игнорируются.">📊 Bulk: прогнать на всех инструментах</button>
+      <button type="button" id="hedged-attr-btn" title="Математическая модель: разложить прибыль на тету (издержка) / гамму (тренд) / скальп (флет) и сделать вывод, ЧТО строит какую часть прибыли. Закрытая форма Θ=−a, Γ=a·vr²·g, Σ=C_s·ρB·vr, воспроизводящая бэктест.">🧮 Атрибуция прибыли (модель)</button>
     </form>
     <div class="results"><div class="plots"><div id="hi-equity"></div><div id="hi-price"></div></div>
       <pre class="stats" id="hi-stats"></pre></div>
     <div class="tradetable" id="hi-table"></div>
+    <h3 style="margin:16px 0 4px;font-size:14px;color:#8b949e">🧮 Атрибуция прибыли (мат-модель: тета / гамма-тренд / скальп-флет) ↓</h3>
+    <div class="results"><div class="plots"><div id="hi-attr"></div></div>
+      <pre class="stats" id="hi-attr-stats"></pre></div>
     <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">📋 Проверка правил доктрины (rule-by-rule) — те же правила, что на вкладке 9 ↓</h3>
     <div class="tradetable" id="hi-rules"></div>
     <h3 style="margin:16px 0 4px;font-size:14px;color:#8b949e">📊 Bulk-тест по всему каталогу (CAGR на инструмент) ↓</h3>
@@ -308,6 +312,6 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=66"></script>
+  <script src="/app.js?v=67"></script>
 </body>
 </html>

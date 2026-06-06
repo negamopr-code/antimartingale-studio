@@ -384,3 +384,55 @@ def test_api_analytic_model_runs_without_intraday():
     assert s["scalp_model"] == "analytic"
     assert s["intraday_bars"] == 0                       # vol-driven: no intraday feed used
     assert "coverage_ratio" in s["coinflip"]
+
+
+# ---- closed-form profit ATTRIBUTION model (pi_model) -------------------------------------------
+
+def test_pi_model_decomposition_signs_and_total():
+    from antimg import pi_model as pm
+    r = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.30, scalp_k=0.02, gamma_capture=0.5, years=1.0)
+    assert r.theta < 0                                   # theta is a cost
+    assert r.gamma_trend > 0 and r.scalp_flat > 0
+    assert r.total == pytest.approx(r.theta + r.gamma_trend + r.scalp_flat, rel=1e-9)
+    assert r.pct_from_trend + r.pct_from_flat == pytest.approx(100.0, abs=1e-6)
+
+
+def test_pi_model_gamma_convex_scalp_linear():
+    """Γ ∝ vr² (convex) vs Σ ∝ vr (linear): doubling vol 4×'s gamma but 2×'s scalp."""
+    from antimg import pi_model as pm
+    base = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.20, scalp_k=0.02, gamma_capture=1.0, years=1.0)
+    dbl = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.40, scalp_k=0.02, gamma_capture=1.0, years=1.0)
+    assert dbl.gamma_trend == pytest.approx(4.0 * base.gamma_trend, rel=1e-6)   # quadratic
+    assert dbl.scalp_flat == pytest.approx(2.0 * base.scalp_flat, rel=1e-6)     # linear
+    assert base.theta == pytest.approx(dbl.theta, rel=1e-9)                     # theta vol-independent in $
+
+
+def test_pi_model_calibrate_reproduces_gamma():
+    from antimg import pi_model as pm
+    g = pm.calibrate_gamma_capture(2806.0, 10000, 0.2, 0.5, 0.14, 0.14, 2.94)
+    cf = pm.closed_form(10000, 0.2, 0.5, 0.14, 0.14, scalp_k=0.02, gamma_capture=g, years=2.94)
+    assert cf.gamma_trend == pytest.approx(2806.0, rel=1e-3)
+
+
+def test_pi_model_conclusion_regimes():
+    from antimg import pi_model as pm
+    win = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.50, scalp_k=0.02, gamma_capture=1.0)
+    assert win.profitable and "ПРИБЫЛЬНО" in win.conclusion
+    lose = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.20, scalp_k=0.0, gamma_capture=0.1)
+    assert not lose.profitable and "УБЫТОК" in lose.conclusion
+
+
+def test_api_attribution_endpoint():
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    r = c.post("/api/hedged-intraday/attribution",
+               json={"ticker": "SPY", "start": "2019-01-01", "end": "2022-01-01",
+                     "dte_days": 180, "scalp_model": "analytic", "scalp_k": 0.02})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    for k in ("state", "model_params", "measured", "closed_form"):
+        assert k in d
+    m = d["measured"]
+    assert m["total"] == pytest.approx(m["theta"] + m["gamma_trend"] + m["scalp_flat"], rel=1e-2)
+    assert "conclusion" in m and m["regime"]
