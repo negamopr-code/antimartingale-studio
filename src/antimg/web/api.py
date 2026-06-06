@@ -888,6 +888,8 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
                 "cagr_pct": _fin(res.ann_return_pct, 1),
                 "pct_from_trend": _fin(att.pct_from_trend),
                 "pct_from_flat": _fin(att.pct_from_flat),
+                "win_rate": _fin(res.period_win_rate, 3),   # coin-flip p: fraction of straddle periods green
+                "n_periods": len(res.table),
                 "regime": att.regime, "profitable": bool(net > 0)})
         except Exception as ex:
             rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
@@ -904,6 +906,9 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
         "n_bleeding": sum(1 for r in ok if r["regime"] == "bleeding (theta wins)"),
         "median_scalp_cover_pct": med("scalp_cover_pct"),
         "median_net_cover_pct": med("net_cover_pct"),
+        # the coin-flip reduction: p = win-rate of straddle periods (>0.5 ⇒ "0.6-type" edge)
+        "median_win_rate": med("win_rate"),
+        "n_p_above_half": sum(1 for r in ok if r["win_rate"] > 0.5),
     }
     return {"rows": ok, "aggregate": agg}
 

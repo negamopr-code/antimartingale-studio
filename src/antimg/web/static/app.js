@@ -1127,19 +1127,21 @@ function renderHiExtrap(d) {
     + `   Всё в % ОТ ТЕТЫ (аренды) — это compounding-инвариантно (абсурдный крипто-компаундинг сокращается).\n`
     + `\nРЕЖИМЫ: флет-построено (скальп) ${a.n_flat_built} · тренд-построено (гамма) ${a.n_trend_built} · кровит (тета) ${a.n_bleeding}\n`
     + `прибыльных: ${a.n_profitable}/${a.n}   ·   медиана: скальп платит ${a.median_scalp_cover_pct}% теты, ЧИСТЫЙ профит = ${a.median_net_cover_pct}% теты\n`
+    + `🪙 МОНЕТКА: медианный p(плюсовой период) = ${a.median_win_rate}   ·   p>0.5 у ${a.n_p_above_half}/${a.n}   ⇒ ${a.median_win_rate > 0.5 ? `«${a.median_win_rate >= 0.6 ? "0.6+" : "~0.5"}-монетка» (есть перевес)` : "«0.45-монетка» (нет перевеса)"} — но платёж АСИММЕТРИЧЕН (убыток ≤ премии, гамма выпукла), поэтому +EV даже при p≈0.5\n`
     + `\n💡 ВЫВОД: «скальп %тета» = на сколько % выигрышные скальп-сделки отбивают аренду стреддла.\n`
     + `   ≥100% ⇒ скальп САМ кормит тету (плюсовой флет — что и обещает доктрина); + гамма сверху = чистый профит.\n`
     + `   Чистый = скальп% + гамма% − 100%. Сортировка по чистому. Линейно по Capture — двинь его и пересчитай.\n`
     + `   ⚠ Capture=0.5 оптимистичен (те же коллы и дают гамму, и прикрывают залипший скальп — лёгкий двойной зачёт);\n`
     + `   реальный 1m-грид на ETH давал ~76% покрытия при ~64% capture. Истина между гридом и этой оценкой.`;
-  const cols = [["ticker","инстр"],["group","класс"],["sigma_R","σR"],["scalp_cover_pct","скальп %тета"],
-    ["gamma_cover_pct","гамма %тета"],["net_cover_pct","ЧИСТ %тета"],["cagr_pct","CAGR%"],
-    ["pct_from_trend","тренд%"],["regime","режим"]];
+  const cols = [["ticker","инстр"],["group","класс"],["sigma_R","σR"],["win_rate","p(монетка)"],
+    ["scalp_cover_pct","скальп %тета"],["gamma_cover_pct","гамма %тета"],["net_cover_pct","ЧИСТ %тета"],
+    ["cagr_pct","CAGR%"],["pct_from_trend","тренд%"],["regime","режим"]];
   const sgn = (v) => (v >= 0 ? "#3fb950" : "#f85149");
   let h = "<table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
   for (const r of rows) {
     h += "<tr>"
       + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.sigma_R}</td>`
+      + `<td style="color:${r.win_rate > 0.5 ? "#3fb950" : "#f85149"};font-weight:600">${r.win_rate}</td>`
       + `<td style="color:${sgn(r.scalp_cover_pct)};font-weight:600">${f(r.scalp_cover_pct)}%</td>`
       + `<td style="color:${sgn(r.gamma_cover_pct)}">${f(r.gamma_cover_pct)}%</td>`
       + `<td style="color:${sgn(r.net_cover_pct)};font-weight:600">${f(r.net_cover_pct)}%</td>`
