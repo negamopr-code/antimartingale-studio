@@ -55,6 +55,19 @@ import pandas as pd
 
 from . import options as opt
 
+# Default scalp efficiency constant K for the vol-driven ANALYTIC scalp model (scalp_model='analytic').
+# scalp_income/day ≈ K · L_total · σ$(t)  where σ$ = daily realized $-vol and L_total = scalp lots.
+# K folds the Brownian crossing-number constant × the capture fraction × the real intraday
+# mean-reversion edge into one dimensionless number, CALIBRATED against the free 1m crypto ground
+# truth (calibrate_scalp_k below). ⚠ ONLY THE MAGNITUDE SCALING (scalp ∝ lots·σ$) is vol-invariant —
+# K itself embeds the intraday mean-reversion-vs-trend EDGE, which differs by instrument/regime:
+# 1m calibration (Oct'24–Jun'26, gaf 0.03) gave ETH +0.061 (ranged), SOL +0.0004, BTC −0.006 (trended,
+# scalp bled). So K is an ASSUMPTION about the edge, NOT a universal constant: the analytic model gives
+# the ПИ behaviour of any instrument from its vol *for a chosen edge K*; the result scales linearly in
+# K. Default = a MODEST positive edge (between SOL and ETH). Re-derive with calibrate_scalp_k().
+SCALP_K_DEFAULT = 0.02
+TRADING_DAYS = 252
+
 
 @dataclass
 class HedgedIntradayResult:
@@ -135,7 +148,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         roll_profit_pct: float = 0.0, r: float = 0.045,
                         qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 0.5,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
-                        scalp_model: str = "grid", scalp_recenter_days: int = 0,
+                        scalp_model: str = "grid", scalp_k: float = SCALP_K_DEFAULT,
+                        scalp_recenter_days: int = 0,
                         heal_with_profit: bool = True, confident_flat_n: int = 3,
                         confident_flat_scale: bool = True,
                         use_bbands: bool = True, bb_window: int = 20, bb_k: float = 2.0,
@@ -243,7 +257,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     scalp_cost_cum = 0.0          # scalp fill costs (separate so cum_scalp nets it once)
     scalp_avail_pts = 0.0         # Σ daily (High−Low) over scalped days → "the range the market gave"
     scalp_harvest_pts = 0.0       # Σ per-round-trip gap (price points) → "the range we caught"
-    scalp_acc = 0.0               # range-model running net
+    scalp_acc = 0.0               # range/analytic-model running net
     heal_budget = 0.0             # accumulated booked round-trip profit available to "heal" stuck parts
     clean_streak = 0              # consecutive clean round-trips with no stuck/heal → уверенный флет
     GRID: dict = {}
@@ -479,7 +493,27 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                 # else: carry the injured parts — the straddle pays (no forced realization)
             if clean_streak >= confident_flat_n:
                 res.confident_flat_days += 1
-        else:                                             # range heuristic (lower bound)
+        elif scalp_model == "analytic":
+            # ---- VOL-DRIVEN ANALYTIC scalp (approximate ANY instrument from its realized vol) ----
+            # We have no intraday data for most instruments, but the scalp income is determined by
+            # how much the price OSCILLATES, which is set by realized vol. From the Brownian crossing
+            # math: # of h-sized round-trips/day ≈ (σ$/h)², each booking h·lots → gross ≈ σ$²/h·lots;
+            # with the grid step h ∝ σ$ this collapses to gross ≈ K·L_total·σ$ — i.e. the scalp income
+            # tracks the instrument's realized $-vol at each time, scaled by ONE calibrated constant K
+            # (= crossing-const × capture × the real intraday mean-reversion edge), fitted to the 1m
+            # crypto ground truth. The straddle theta+gamma above are EXACT (real path); only the
+            # otherwise-unmeasurable scalp is vol-approximated. Vol-driven ⇒ it is naturally
+            # time-varying with σ(t) and works for every instrument with no intraday feed.
+            sig_ann = _sigma_at(realized_vol, d, default_sigma)
+            dvol = (sig_ann / np.sqrt(TRADING_DAYS)) * S       # daily realized $-vol (1σ daily move)
+            L_total = max(2.0 * st["n_str"] * intraday_frac, 0.0)   # scalp lots (three-thirds band)
+            gross = scalp_k * L_total * dvol                   # vol-driven scalp income for the day
+            scalp_acc += gross
+            scalp_avail_pts += max(hi - lo, 0.0)               # range context (not a capture denom here)
+            # NOTE: the analytic model estimates scalp INCOME (→ coverage), not a trade COUNT — the
+            # Brownian crossing count is unreliable for a tight exponential grid, so trades_per_month
+            # and capture_fraction stay 0 for this model (they are grid-model measurements).
+        else:                                                 # range heuristic (lower bound)
             g1 = grid_atr_frac * atr_d
             part_lots = (st["n_str"] * intraday_frac) / max(1, n_parts)
             reversed_range = max((hi - lo) - abs(S - op), 0.0)
@@ -569,3 +603,40 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
         wins = sum(1 for row in res.table if row.get("period_pnl", 0.0) > 0)
         res.period_win_rate = wins / len(res.table)
     return res
+
+
+def calibrate_scalp_k(daily: pd.DataFrame, daily_atr: pd.Series, *,
+                      intraday: "pd.DataFrame", realized_vol: "pd.Series | None" = None,
+                      grid_atr_frac: float = 0.03, **kw) -> "float | None":
+    """Fit the analytic model's K to the 1m-crypto GROUND TRUTH.
+
+    Runs the real event-driven **grid** on the intraday (1m) feed for the GROUND-TRUTH scalp P&L, then
+    finds the K for which the **analytic** vol-driven model reproduces it on the SAME daily data + sizing.
+    Solved by bisection (not a single ratio) because the analytic scalp COMPOUNDS into straddle sizing
+    — scalp profit grows the bank, which sizes the next straddle, so scalp_pnl is monotone but not
+    exactly linear in K. With K=K* the analytic model reproduces the measured 1m scalp income — and
+    because the *magnitude* scaling is vol-invariant, the same K projects onto any instrument by its vol
+    (K still carries the regime-specific edge, so it is an assumption, not a universal constant).
+    `grid_atr_frac` should reproduce the doctrine's ~200–250 trades/mo on this feed (ETH ≈ 0.03).
+    Returns None if the target is degenerate. kw passes through to both runs.
+    """
+    grid = run_hedged_intraday(daily, daily_atr, scalp_model="grid", intraday=intraday,
+                               realized_vol=realized_vol, grid_atr_frac=grid_atr_frac, **kw)
+    target = grid.scalp_pnl
+
+    def scalp_at(k):
+        return run_hedged_intraday(daily, daily_atr, scalp_model="analytic", scalp_k=k,
+                                   realized_vol=realized_vol, grid_atr_frac=grid_atr_frac,
+                                   **kw).scalp_pnl
+
+    lo, hi_k = -10.0, 10.0                         # scalp_pnl is monotone increasing in K
+    f_lo, f_hi = scalp_at(lo) - target, scalp_at(hi_k) - target
+    if f_lo > 0 or f_hi < 0 or abs(f_hi - f_lo) < 1e-12:
+        return None                                # target outside the bracket / degenerate
+    for _ in range(60):
+        mid = 0.5 * (lo + hi_k)
+        if scalp_at(mid) - target > 0:
+            hi_k = mid
+        else:
+            lo = mid
+    return 0.5 * (lo + hi_k)

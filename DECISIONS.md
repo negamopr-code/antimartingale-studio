@@ -603,3 +603,24 @@ Not implemented; documented as a rejected tactic.
   on the (trending) ETH window ⇒ flat scalp doesn't fully pay theta; profit rides gamma →
   "0.45-to-0.5-type", regime-dependent. Over-tightening (gaf<0.02) collapses coverage.
 - **Regression test:** coverage holds within 15% at 10× the $-vol (the invariance). 82 tests. v65.
+
+## D62 — Vol-driven ANALYTIC scalp model: approximate any instrument from its volatility (2026-06-06)
+- **Ask:** "mimic mathematically the approximate behaviour of all instruments based on their
+  volatility at a given time" — i.e. estimate ПИ for instruments where free 1m data is absent.
+- **Decision/model:** `scalp_model='analytic'` — scalp income/day ≈ **K · L_total · σ$(t)** (σ$ =
+  daily realized $-vol, L_total = scalp lots sized to risk budget). Grounded in the Brownian
+  crossing math (# h-round-trips/day ≈ (σ$/h)², gross ∝ σ$²/h, h ∝ σ$ ⇒ ∝ σ$·lots). Straddle
+  theta+gamma stay EXACT (real path); only the unmeasurable scalp is vol-approximated. Needs NO
+  intraday feed → runs for every instrument, time-varying with σ(t).
+- **Calibration:** `calibrate_scalp_k()` bisects K so the analytic model reproduces the 1m-grid
+  ground-truth scalp P&L (scalp compounds into straddle sizing → monotone, not exactly linear).
+- **⚠ Honesty:** ONLY the magnitude scaling (∝ lots·σ$) is vol-invariant; K carries the intraday
+  mean-reversion EDGE, which is NOT universal — 1m calib gave ETH +0.061 / SOL +0.0004 / BTC −0.0055
+  (BTC trended, scalp lost). So the model is a SCENARIO at a chosen edge K (slider, default 0.02
+  modest), result linear in K — not a prediction. High vol ≠ scalp wins (INVARIANT #3).
+- **Built:** schema scalp_model+='analytic', scalp_k field (both req + scan); _run_hi passes scalp_k;
+  Tab-8 model option + Scalp-K input + analytic verdict & coin-flip panel branches (coverage valid,
+  trades/capture marked grid-only); scan uses analytic → every instrument gets a vol-driven estimate.
+- **Cross-instrument (K=0.02, 2019–23):** coverage 0.24 (EURUSD quiet) → 0.72 (BTC); SLV/crypto top
+  = the doctrine's volatile-oscillator sweet spot; none ≥1 at modest edge ⇒ profit rides gamma.
+- 86 tests (+4). Skill: INVARIANT #7 caveat + lesson. assets v66.

@@ -877,6 +877,17 @@ async function renderHedged(d) {
                 ? `  Это КРИПТА → выбери «Scalp data → 1m crypto (Binance free)»: бесплатные глубокие 1-мин бары (любое окно). 1m включается авто при выборе крипты.`
                 : `  ⚠ Для НЕ-крипты (${d.ticker}) бесплатного ГЛУБОКОГО интрадея нет: hourly = только ~2 года (yfinance), глубже — платный вендор (Polygon ≈$29/мес). Бесплатный 1m только у крипты (ETH/BTC).`));
   }
+  else if (s.scalp_model === "analytic") {
+    const K = $("#form-hedged [name=scalp_k]").value;
+    verdict += `СКАЛЬП-МОДЕЛЬ: analytic (ВОЛ-ПРИВОД) — оценка ЛЮБОГО инструмента из его волатильности.\n`
+      + `  доход скальпа/день ≈ K·лоты·σ$(t), K=${K}. Тета и ГАММА стреддла — ТОЧНЫЕ (реальный путь);\n`
+      + `  приближается только неизмеримый иначе скальп. По мат-ву Броуновских пересечений доход ∝ σ$ →\n`
+      + `  трекает реализованную волатильность инструмента во времени, БЕЗ интрадей-фида.\n`
+      + `  ⚠ Вол-инвариантна только ВЕЛИЧИНА (∝ лоты·σ$); K несёт edge (mean-reversion vs тренд) и\n`
+      + `    НЕ универсальна: калибровка 1m крипты — ETH +0.06 (боковик) / SOL ~0 / BTC −0.006 (тренд).\n`
+      + `    Результат линеен по K ⇒ это СЦЕНАРИЙ при выбранном edge, а не предсказание. Для измерения\n`
+      + `    скальпа на крипте — модель «grid» + «1m crypto». Издержки в analytic не моделируются.`;
+  }
   else
     verdict += `СКАЛЬП-МОДЕЛЬ: range (грубая эвристика).\n`
       + `⚠ НЕ механически точная: величина скальпа = что задашь в КПД (${$("#form-hedged [name=scalp_efficiency]").value}) / Max RT\n`
@@ -907,6 +918,19 @@ async function renderHedged(d) {
       + `   покрытие ≈ ${cf.coverage_at_assumed == null ? "—" : f(cf.coverage_at_assumed)}  ${cf.coverage_at_assumed != null && cf.coverage_at_assumed >= 1 ? "(плюсовой флет)" : "(нужен тренд)"}\n`
       + `эмпирический p (доля плюсовых периодов стреддла) : ${f(cf.period_win_rate)}  → ${cf.flip_type}`;
     verdict += cfTxt;
+  } else if (cf && s.scalp_model === "analytic") {   // analytic: coverage valid (calibrated), no trade-count
+    const cov = cf.coverage_ratio, winning = cov >= 1.0;
+    verdict +=
+      `\n\n════════ ЭКВИВАЛЕНТ МОНЕТКИ (0.6 или 0.45?) — ВОЛ-ОЦЕНКА ════════\n`
+      + `Прибыльность из волатильности инструмента (модель analytic, K=${$("#form-hedged [name=scalp_k]").value}):\n`
+      + `доход скальпа/мес : ${cf.scalp_per_month >= 0 ? "+" : ""}${f(cf.scalp_per_month)}$   vs   тета/мес ${f(cf.theta_per_month)}$\n`
+      + `── ПОКРЫТИЕ = доход скальпа ÷ |тета| = ${f(cov)}  ${winning ? "≥ 1 ✅" : "< 1 ⚠"}\n`
+      + `   ${winning
+            ? "0.6-ТИПА (при этом edge K): скальп сам платит тету — плюсовой флет, тренд = бонус."
+            : `0.45-ТИПА (при этом edge K): флет покрывает ${f(100 * cov)}% теты — нужен тренд/гамма.`}\n`
+      + `эмпирический p (доля плюсовых периодов стреддла) : ${f(cf.period_win_rate)}  → ${cf.flip_type}\n`
+      + `⚠ Покрытие ЛИНЕЙНО по K — это сценарий при выбранном intraday-edge, не предсказание\n`
+      + `  (сделок/мес и φ модель analytic не считает — это измерения модели grid на реальном фиде).`;
   }
   $("#hi-stats").textContent = verdict;
   renderHiRules(d, s, "hi-rules");          // same doctrine-compliance panel as Tab 9 (auto-parity)

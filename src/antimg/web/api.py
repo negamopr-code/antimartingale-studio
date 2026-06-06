@@ -635,6 +635,7 @@ def _run_hi(daily, datr, vm, realized, req, trace=None, intraday=None):
         roll_profit_pct=getattr(req, "roll_profit_pct", 0.0), r=req.r,
         n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
         intraday_frac=req.intraday_frac, scalp_model=req.scalp_model,
+        scalp_k=getattr(req, "scalp_k", hi.SCALP_K_DEFAULT),
         scalp_recenter_days=req.scalp_recenter_days, use_bbands=req.use_bbands,
         bb_window=req.bb_window, bb_k=req.bb_k,
         scalp_efficiency=req.scalp_efficiency, max_rt_per_day=req.max_rt_per_day,

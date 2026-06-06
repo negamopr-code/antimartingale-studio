@@ -140,9 +140,17 @@ class HedgedIntradayReq(BaseModel):
     # 0 = OFF (schedule-only roll at expiry).
     roll_profit_pct: float = Field(0.0, ge=0, le=100)
     r: float = Field(0.045, ge=-0.05, le=0.5)
-    # scalp model: 'grid' = event-driven daily-cadence counter-trend grid (daily bars ARE
-    # representative when the step is on the daily scale); 'range' = heuristic intraday lower bound
-    scalp_model: str = Field("grid", pattern="^(grid|range)$")
+    # 'grid' = event-driven daily/intraday counter-trend grid (measures the scalp on a real feed);
+    # 'analytic' = VOL-DRIVEN approximation (scalp income = scalp_k·lots·daily-realized-$vol) so ANY
+    # instrument gets an estimated ПИ behaviour from its own volatility with NO intraday feed — K is
+    # calibrated to the free 1m-crypto ground truth (but embeds the edge, so it is an assumption — see
+    # scalp_k); 'range' = legacy heuristic lower bound.
+    scalp_model: str = Field("grid", pattern="^(grid|analytic|range)$")
+    # analytic model only: the scalp-efficiency / intraday-edge constant K (scalp ∝ K·lots·σ$).
+    # ⚠ NOT universal — 1m crypto calibration gave ETH +0.06 / SOL ~0 / BTC −0.006; the result scales
+    # linearly in K. Default = a modest positive edge; raise for a ranging name, drop/negative for a
+    # trending one. Magnitude (∝ lots·σ$) is vol-invariant; K is the edge assumption.
+    scalp_k: float = Field(0.02, ge=-1.0, le=5.0)
     # scalp data feed: 'daily' = one OHLC bar/day (intraday chop invisible); 'hourly' = real 60m bars
     # (yfinance ~730d history); '1m' = FREE deep 1-minute crypto bars (Binance public REST, keyless,
     # crypto tickers only — the doctrine's ideal instrument) so the grid walks the real intraday path
@@ -198,7 +206,8 @@ class HedgedIntradayScanReq(BaseModel):
     roll_buffer_days: int = Field(10, ge=1, le=90)
     roll_profit_pct: float = Field(0.0, ge=0, le=100)        # doctrine profit-target roll (0 = off)
     r: float = Field(0.045, ge=-0.05, le=0.5)
-    scalp_model: str = Field("grid", pattern="^(grid|range)$")
+    scalp_model: str = Field("grid", pattern="^(grid|analytic|range)$")
+    scalp_k: float = Field(0.02, ge=-1.0, le=5.0)           # analytic edge constant (see HedgedIntradayReq)
     grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")
     scalp_recenter_days: int = Field(0, ge=0, le=365)
     use_bbands: bool = True

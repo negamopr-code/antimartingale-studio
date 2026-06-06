@@ -323,3 +323,64 @@ def test_api_coinflip_projection_present():
     if cf["capture_fraction"] > 0 and cf["coverage_at_assumed"] is not None:
         assert cf["coverage_at_assumed"] == pytest.approx(
             cf["coverage_ratio"] * (cf["assumed_capture"] / cf["capture_fraction"]), rel=1e-2)
+
+
+# ---- vol-driven ANALYTIC scalp model (approximate any instrument from its volatility) ---------
+
+def test_analytic_scalp_linear_in_k_and_vol():
+    """Analytic scalp income is linear in K and scales with realized vol — and needs NO intraday feed."""
+    path = 100.0 + np.cumsum(np.random.default_rng(5).normal(0, 0.4, 400))
+    df = _frame(path, rng_pct=0.02)
+    datr = datamod.atr(df, 14)
+    rv = datamod.realized_vol(df["Close"], 20)
+    a1 = hi.run_hedged_intraday(df, datr, scalp_model="analytic", scalp_k=0.02, realized_vol=rv, dte_days=180)
+    a2 = hi.run_hedged_intraday(df, datr, scalp_model="analytic", scalp_k=0.04, realized_vol=rv, dte_days=180)
+    assert a1.scalp_pnl > 0 and a2.scalp_pnl > 0
+    # ~linear in K (small compounding feedback: scalp grows the bank, which sizes the next straddle)
+    assert a2.scalp_pnl == pytest.approx(2.0 * a1.scalp_pnl, rel=0.05)
+    # higher realized vol → larger scalp income (same K, 2× the vol of the series)
+    hi_vol = hi.run_hedged_intraday(df, datr, scalp_model="analytic", scalp_k=0.02,
+                                    realized_vol=rv * 2.0, dte_days=180)
+    assert hi_vol.scalp_pnl > a1.scalp_pnl
+
+
+def test_analytic_negative_k_loses():
+    """A negative edge K (trending instrument, counter-trend bleeds) makes the analytic scalp lose —
+    the model can represent BTC's measured −0.006 regime, not only winners."""
+    path = 100.0 + np.cumsum(np.random.default_rng(9).normal(0, 0.4, 300))
+    df = _frame(path, rng_pct=0.02)
+    res = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="analytic", scalp_k=-0.02,
+                                 realized_vol=datamod.realized_vol(df["Close"], 20), dte_days=180)
+    assert res.scalp_pnl < 0
+
+
+def test_calibrate_scalp_k_reproduces_grid_coverage():
+    """calibrate_scalp_k fits K so the analytic model reproduces the grid's scalp P&L on the same
+    data — the calibration identity that anchors the projection to the 1m ground truth."""
+    rng = np.random.default_rng(7)
+    osc = 100.0 + 6.0 * np.sin(np.arange(400) / 3.0) + rng.normal(0, 0.5, 400)
+    df = _frame(osc, rng_pct=0.015)
+    datr = datamod.atr(df, 14)
+    rv = datamod.realized_vol(df["Close"], 20)
+    # use the daily bars themselves as the "intraday" feed for the grid (self-consistent calibration)
+    K = hi.calibrate_scalp_k(df, datr, intraday=df, realized_vol=rv, grid_atr_frac=1.0, dte_days=180)
+    assert K is not None
+    grid = hi.run_hedged_intraday(df, datr, scalp_model="grid", intraday=df,
+                                  realized_vol=rv, grid_atr_frac=1.0, dte_days=180)
+    ana = hi.run_hedged_intraday(df, datr, scalp_model="analytic", scalp_k=K,
+                                 realized_vol=rv, dte_days=180)
+    assert ana.scalp_pnl == pytest.approx(grid.scalp_pnl, rel=1e-6)
+
+
+def test_api_analytic_model_runs_without_intraday():
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    r = c.post("/api/hedged-intraday",
+               json={"ticker": "GLD", "start": "2019-01-01", "end": "2021-06-01",
+                     "dte_days": 180, "scalp_model": "analytic", "scalp_k": 0.02})
+    assert r.status_code == 200, r.text
+    s = r.json()["stats"]
+    assert s["scalp_model"] == "analytic"
+    assert s["intraday_bars"] == 0                       # vol-driven: no intraday feed used
+    assert "coverage_ratio" in s["coinflip"]
