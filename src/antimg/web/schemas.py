@@ -145,7 +145,13 @@ class HedgedIntradayReq(BaseModel):
     # instrument gets an estimated ПИ behaviour from its own volatility with NO intraday feed — K is
     # calibrated to the free 1m-crypto ground truth (but embeds the edge, so it is an assumption — see
     # scalp_k); 'range' = legacy heuristic lower bound.
-    scalp_model: str = Field("grid", pattern="^(grid|analytic|range)$")
+    # 'capture' = the SIMPLE direct estimate: scalp = scalp_capture × actual daily range × part_lots,
+    # summed over real history, POSITIVE-ONLY (we close just wins; losers carried, capped by the
+    # premium). The recommended honest model.
+    scalp_model: str = Field("grid", pattern="^(grid|capture|analytic|range)$")
+    # capture model: fraction of each day's (High−Low) the scalp books (doctrine ideal ~0.5, "catch
+    # >50% of the move", achieved with ~200–250 trades/mo). The result is linear in it.
+    scalp_capture: float = Field(0.5, ge=0, le=3.0)
     # analytic model only: the scalp-efficiency / intraday-edge constant K (scalp ∝ K·lots·σ$).
     # ⚠ NOT universal — 1m crypto calibration gave ETH +0.06 / SOL ~0 / BTC −0.006; the result scales
     # linearly in K. Default = a modest positive edge; raise for a ranging name, drop/negative for a
@@ -206,7 +212,8 @@ class HedgedIntradayScanReq(BaseModel):
     roll_buffer_days: int = Field(10, ge=1, le=90)
     roll_profit_pct: float = Field(0.0, ge=0, le=100)        # doctrine profit-target roll (0 = off)
     r: float = Field(0.045, ge=-0.05, le=0.5)
-    scalp_model: str = Field("grid", pattern="^(grid|analytic|range)$")
+    scalp_model: str = Field("grid", pattern="^(grid|capture|analytic|range)$")
+    scalp_capture: float = Field(0.5, ge=0, le=3.0)         # capture model: frac of daily range booked
     scalp_k: float = Field(0.02, ge=-1.0, le=5.0)           # analytic edge constant (see HedgedIntradayReq)
     grid_timeframe: str = Field("daily", pattern="^(daily|weekly|monthly)$")
     scalp_recenter_days: int = Field(0, ge=0, le=365)

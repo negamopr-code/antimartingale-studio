@@ -481,3 +481,36 @@ def test_extrapolate_attribution_from_data_only():
                          scalp_k=pm.scalp_k_from_vr(0.5),
                          gamma_capture=pm.gamma_capture_from_vr(0.5), years=1.0)
     assert cf2.scalp_flat > 0                       # mean-reversion → scalp positive
+
+
+# ---- direct capture scalp model (positive-only, from real daily ranges) ------------------------
+
+def test_capture_model_positive_and_linear():
+    """capture model: scalp = capture × daily range × part_lots, POSITIVE-ONLY (we close just wins),
+    linear in capture, and needs no intraday feed."""
+    rng = np.random.default_rng(4)
+    path = 100.0 + np.cumsum(rng.normal(0, 0.4, 150))      # short window + long DTE ⇒ ONE straddle
+    df = _frame(path, rng_pct=0.02)                         # period (no roll-compounding) → exactly linear
+    datr = datamod.atr(df, 14); rv = datamod.realized_vol(df["Close"], 20)
+    a = hi.run_hedged_intraday(df, datr, scalp_model="capture", scalp_capture=0.5, realized_vol=rv, dte_days=365)
+    b = hi.run_hedged_intraday(df, datr, scalp_model="capture", scalp_capture=1.0, realized_vol=rv, dte_days=365)
+    assert a.scalp_pnl > 0                                  # only wins booked → always ≥ 0
+    assert b.scalp_pnl == pytest.approx(2.0 * a.scalp_pnl, rel=1e-3)   # linear in capture (single period)
+    # capture_fraction output equals the input (harvest = capture × range)
+    assert a.capture_fraction == pytest.approx(0.5, rel=1e-6)
+    zero = hi.run_hedged_intraday(df, datr, scalp_model="capture", scalp_capture=0.0, realized_vol=rv, dte_days=365)
+    assert zero.scalp_pnl == pytest.approx(0.0, abs=1e-9)   # no capture → no scalp (never negative)
+
+
+def test_capture_model_uses_real_range():
+    """Doubling the daily range (more realized movement) doubles the captured scalp."""
+    rng = np.random.default_rng(5)
+    path = 100.0 + np.cumsum(rng.normal(0, 0.4, 300))
+    narrow = _frame(path, rng_pct=0.01)
+    wide = _frame(path, rng_pct=0.02)                       # 2× the daily High−Low
+    rv = datamod.realized_vol(narrow["Close"], 20)
+    n = hi.run_hedged_intraday(narrow, datamod.atr(narrow, 14), scalp_model="capture",
+                               scalp_capture=0.5, realized_vol=rv, dte_days=180)
+    w = hi.run_hedged_intraday(wide, datamod.atr(wide, 14), scalp_model="capture",
+                               scalp_capture=0.5, realized_vol=rv, dte_days=180)
+    assert w.scalp_pnl > n.scalp_pnl

@@ -888,6 +888,14 @@ async function renderHedged(d) {
       + `    Результат линеен по K ⇒ это СЦЕНАРИЙ при выбранном edge, а не предсказание. Для измерения\n`
       + `    скальпа на крипте — модель «grid» + «1m crypto». Издержки в analytic не моделируются.`;
   }
+  else if (s.scalp_model === "capture") {
+    const cap = $("#form-hedged [name=scalp_capture]").value;
+    verdict += `СКАЛЬП-МОДЕЛЬ: capture (ПРОСТАЯ, из реальных дневных ходов) — ловим ${(cap*100).toFixed(0)}% дневного H−L.\n`
+      + `  скальп = ${(cap*100).toFixed(0)}% × (дневной размах) × лоты части, СУММА по истории — ТОЛЬКО ПЛЮСЫ:\n`
+      + `  закрываем лишь прибыль (доктрина: ответные заявки книжат возврат); убыточные ноги ПЕРЕНОСЯТСЯ,\n`
+      + `  их риск ≤ премии стреддла (= та тета, что мы и так платим, + хедж длинных коллов). Тета и ГАММА —\n`
+      + `  точные из реального пути. ⇒ Прибыльность = (скальп-плюсы + гамма) − тета; «catch X%» — твой ввод.`;
+  }
   else
     verdict += `СКАЛЬП-МОДЕЛЬ: range (грубая эвристика).\n`
       + `⚠ НЕ механически точная: величина скальпа = что задашь в КПД (${$("#form-hedged [name=scalp_efficiency]").value}) / Max RT\n`
@@ -918,6 +926,18 @@ async function renderHedged(d) {
       + `   покрытие ≈ ${cf.coverage_at_assumed == null ? "—" : f(cf.coverage_at_assumed)}  ${cf.coverage_at_assumed != null && cf.coverage_at_assumed >= 1 ? "(плюсовой флет)" : "(нужен тренд)"}\n`
       + `эмпирический p (доля плюсовых периодов стреддла) : ${f(cf.period_win_rate)}  → ${cf.flip_type}`;
     verdict += cfTxt;
+  } else if (cf && s.scalp_model === "capture") {    // capture: positive-only scalp, coverage from real ranges
+    const cov = cf.coverage_ratio, winning = cov >= 1.0, capv = $("#form-hedged [name=scalp_capture]").value;
+    verdict +=
+      `\n\n════════ ЭКВИВАЛЕНТ МОНЕТКИ (0.6 или 0.45?) — ПРОСТАЯ ОЦЕНКА ════════\n`
+      + `Ловим ${(capv*100).toFixed(0)}% дневного хода, только плюсы (~200–250 сделок/мес):\n`
+      + `доход скальпа/мес : +${f(cf.scalp_per_month)}$   vs   тета/мес ${f(cf.theta_per_month)}$\n`
+      + `── ПОКРЫТИЕ = скальп ÷ |тета| = ${f(cov)}  ${winning ? "≥ 1 ✅" : "< 1 ⚠"}\n`
+      + `   ${winning
+            ? "0.6-ТИПА: выигрышные скальп-сделки САМИ платят тету — плюсовой флет, тренд = бонус."
+            : `0.45-ТИПА: скальп-плюсы покрывают ${f(100 * cov)}% теты — остаток должна добрать гамма (тренд).`}\n`
+      + `эмпирический p (доля плюсовых периодов стреддла) : ${f(cf.period_win_rate)}  → ${cf.flip_type}\n`
+      + `⇒ Если ловить ${(capv*100).toFixed(0)}% хода, скальп строит ${f(Math.min(100*cov,100))}% от «аренды» (теты); линейно по capture.`;
   } else if (cf && s.scalp_model === "analytic") {   // analytic: coverage valid (calibrated), no trade-count
     const cov = cf.coverage_ratio, winning = cov >= 1.0;
     verdict +=
@@ -1100,28 +1120,28 @@ function renderHiExtrap(d) {
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 0 }));
   const a = d.aggregate, rows = d.rows;
   $("#hi-extrap-stats").textContent =
-    `🌐 ЭКСТРАПОЛЯЦИЯ НА ВСЕ ИНСТРУМЕНТЫ — без бэктеста, из данных (σ_I, σ_R, VR63→g,K) через закрытую форму\n`
-    + `${a.n} инструментов (${a.n_failed} не загрузилось) · база K=${a.base_k} · DTE ${a.dte_years}г · годовые $ на банк $10k\n`
+    `🌐 ЭКСТРАПОЛЯЦИЯ НА ВСЕ ИНСТРУМЕНТЫ — из РЕАЛЬНЫХ дневных ходов истории (без интрадей-фида)\n`
+    + `${a.n} инструментов (${a.n_failed} не загрузилось) · ловим ${(a.capture*100).toFixed(0)}% дневного хода (High−Low), ~200–250 сделок/мес · DTE ${a.dte_years}г · годовые $ на банк $10k\n`
+    + `\nМОДЕЛЬ (просто): СКАЛЬП = ${(a.capture*100).toFixed(0)}% × (дневной H−L) × лоты части, СУММА по истории — ТОЛЬКО ПЛЮСЫ\n`
+    + `   (закрываем лишь прибыль; убыточные ноги переносятся, риск ≤ премии = той самой теты). Тета и ГАММА\n`
+    + `   стреддла — точные из реального пути. ИТОГО = гамма(тренд) + скальп(флет, +) − тета.\n`
     + `\nРЕЖИМЫ: тренд-построено (гамма) ${a.n_trend_built} · флет-построено (скальп) ${a.n_flat_built} · кровит (тета) ${a.n_bleeding}\n`
-    + `прибыльных: ${a.n_profitable}/${a.n}   ·   медианный годовой ${a.median_ret_pct}%   ·   медианная g(доля тренда)=${a.median_g}\n`
-    + `\n💡 ВЫВОД: для каждого инструмента ГАММА (тренд, ∝vr²·g) и СКАЛЬП (флет, ∝vr·K) бьют тету (−a, пост.).\n`
-    + `   g=VR/(VR+1) из variance ratio — данные-driven доля тренда (валидирована к бэктест-гамме, corr≈0.4);\n`
-    + `   ⚠ ГАММА/g обоснована (дневной бэктест меряет её честно); СКАЛЬП/K — грубая нога (истинный\n`
-    + `   интрадей-edge только у крипты на 1m; знак K из VR верен, величина — якорь по крипте).\n`
-    + `   Сортировка по ИТОГО (годовой P&L модели). Тета у всех ≈ −a; кто в плюсе — тот, у кого гамма+скальп > a.`;
-  // table
-  const cols = [["ticker", "инстр"], ["group", "класс"], ["VR63", "VR63"], ["g_data", "g(тренд)"],
-    ["k_data", "K"], ["vr", "σR/σI"], ["theta", "тета"], ["gamma_trend", "гамма(тренд)"],
-    ["scalp_flat", "скальп(флет)"], ["total", "ИТОГО/год"], ["pct_from_trend", "тренд%"], ["regime", "режим"]];
+    + `прибыльных: ${a.n_profitable}/${a.n}   ·   медианный годовой ${a.median_ret_pct}%   ·   медианное покрытие теты скальпом ${a.median_cover_pct}%\n`
+    + `\n💡 ВЫВОД: «покрытие» = скальп ÷ |тета| = на сколько % выигрышные скальп-сделки отбивают аренду стреддла.\n`
+    + `   ≥100% ⇒ скальп САМ кормит тету (плюсовой флет); <100% ⇒ нужен тренд (гамма ловит «большую рыбу»).\n`
+    + `   Сортировка по ИТОГО/год. Подними/опусти Capture — результат линеен по нему.`;
+  const cols = [["ticker","инстр"],["group","класс"],["sigma_R","σR"],["cover_pct","скальп/тета %"],
+    ["theta","тета/год"],["gamma_trend","гамма(тренд)/год"],["scalp_flat","скальп(флет)/год"],
+    ["total","ИТОГО/год"],["ret_pct","%/год"],["pct_from_trend","тренд%"],["regime","режим"]];
   const sgn = (v) => (v >= 0 ? "#3fb950" : "#f85149");
   let h = "<table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
   for (const r of rows) {
     h += "<tr>"
-      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.VR63}</td><td>${r.g_data}</td>`
-      + `<td style="color:${sgn(r.k_data)}">${r.k_data}</td><td>${r.vr}</td>`
+      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.sigma_R}</td><td>${f(r.cover_pct)}%</td>`
       + `<td style="color:#f85149">${f(r.theta)}</td><td style="color:#3fb950">${f(r.gamma_trend)}</td>`
       + `<td style="color:${sgn(r.scalp_flat)}">${f(r.scalp_flat)}</td>`
       + `<td style="color:${sgn(r.total)};font-weight:600">${f(r.total)}</td>`
+      + `<td style="color:${sgn(r.ret_pct)}">${r.ret_pct}%</td>`
       + `<td>${r.pct_from_trend}%</td><td>${r.regime.replace(/ \(.*/, "")}</td></tr>`;
   }
   $("#hi-extrap").innerHTML = h + "</tbody></table>";

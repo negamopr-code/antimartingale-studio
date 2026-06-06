@@ -655,3 +655,19 @@ Not implemented; documented as a rejected tactic.
 - **Honesty:** gamma/g leg well-grounded (daily backtest measures gamma faithfully); scalp/K MAGNITUDE
   rough (true intraday edge only on crypto 1m). Broad bleed = conservative edge + VRP, not "method fails."
 - 94 tests (+3). Skill: lesson data-driven-g-from-variance-ratio. assets v68.
+
+## D65 — Direct positive-only CAPTURE scalp from real daily ranges (2026-06-06)
+- **Ask (user):** stop over-engineering — estimate the scalp simply: we have the real daily moves, we
+  catch ~50% of each with ~200–250 trades/mo, and we close ONLY profits (losers carried, capped by the
+  premium). Compute scalp & its share of profit directly.
+- **Model:** `scalp_model='capture'`: scalp/day = scalp_capture × (daily High−Low) × part_lots, summed
+  over real history, POSITIVE-ONLY (no loss term; carried legs hedged by the long calls & capped by the
+  premium=theta). Linear in capture. capture_fraction output == input.
+- **Built:** engine branch + `scalp_capture` (req+scan); _run_hi threads it; /api/hedged-intraday/
+  extrapolate REWRITTEN to run the capture model across the whole catalog from real daily ranges
+  (theta+gamma exact from the path) → per-instrument theta/gamma/scalp/coverage + ranked table; Tab-8
+  «capture» model option + Capture input + capture verdict & coin-flip panel; extrapolation table shows
+  coverage = scalp÷|theta|. assets v69.
+- **vs grid:** capture > grid because the grid pessimistically realizes carried losers into the scalp;
+  those belong to the straddle leg (which hedges them). No double-count (synthetic straddle self-hedges).
+- 96 tests (+2). Skill: lesson scalp-is-positive-only-capture-of-the-real-daily-range.

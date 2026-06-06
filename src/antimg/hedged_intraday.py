@@ -149,7 +149,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                         qdiv: float = 0.0, n_parts: int = 5, grid_atr_frac: float = 0.5,
                         grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0,
                         scalp_model: str = "grid", scalp_k: float = SCALP_K_DEFAULT,
-                        scalp_recenter_days: int = 0,
+                        scalp_capture: float = 0.5, scalp_recenter_days: int = 0,
                         heal_with_profit: bool = True, confident_flat_n: int = 3,
                         confident_flat_scale: bool = True,
                         use_bbands: bool = True, bb_window: int = 20, bb_k: float = 2.0,
@@ -493,6 +493,22 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                 # else: carry the injured parts — the straddle pays (no forced realization)
             if clean_streak >= confident_flat_n:
                 res.confident_flat_days += 1
+        elif scalp_model == "capture":
+            # ---- DIRECT capture model (the simple, honest estimate) ----
+            # The doctrine's response orders CLOSE ONLY IN PROFIT; losing legs are CARRIED (залипшие
+            # части), their worst case capped by the straddle premium (= the theta we already pay). So
+            # the scalp stream is PURELY POSITIVE: it is just the winning portion of the moves the market
+            # actually made. We have the real history, so estimate it directly from the realized DAILY
+            # RANGE: catch `scalp_capture` of each day's (High−Low) on one working part's lots. No edge
+            # constant, no Brownian math, no loss term — exactly "we caught X% of the daily move." The
+            # ~200–250 trades/mo is the doctrine cadence that ACHIEVES this capture (a consistency note).
+            rng_d = max(hi - lo, 0.0)
+            L_scalp = max(2.0 * st["n_str"] * intraday_frac, 0.0)   # scalp limit (three-thirds band)
+            part_lots = L_scalp / max(1, n_parts)                   # one working part's size
+            gross = scalp_capture * rng_d * part_lots               # positive only (we close just wins)
+            scalp_acc += gross
+            scalp_avail_pts += rng_d
+            scalp_harvest_pts += scalp_capture * rng_d              # captured price points (= capture×range)
         elif scalp_model == "analytic":
             # ---- VOL-DRIVEN ANALYTIC scalp (approximate ANY instrument from its realized vol) ----
             # We have no intraday data for most instruments, but the scalp income is determined by

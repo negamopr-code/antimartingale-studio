@@ -637,6 +637,7 @@ def _run_hi(daily, datr, vm, realized, req, trace=None, intraday=None):
         n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
         intraday_frac=req.intraday_frac, scalp_model=req.scalp_model,
         scalp_k=getattr(req, "scalp_k", hi.SCALP_K_DEFAULT),
+        scalp_capture=getattr(req, "scalp_capture", 0.5),
         scalp_recenter_days=req.scalp_recenter_days, use_bbands=req.use_bbands,
         bb_window=req.bb_window, bb_k=req.bb_k,
         scalp_efficiency=req.scalp_efficiency, max_rt_per_day=req.max_rt_per_day,
@@ -840,7 +841,12 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
     (intraday edge only truly measurable on crypto). Returns a ranked table + aggregate."""
     rows = []
     T = req.dte_days / 365.0
-    base_k = getattr(req, "scalp_k", hi.SCALP_K_DEFAULT)
+    capture = getattr(req, "scalp_capture", 0.5)
+    # force the simple, positive-only capture scalp so EVERY instrument is estimated from its REAL
+    # daily ranges (theta + straddle gamma stay exact from the real path; scalp = capture×range×lots,
+    # only wins — losers carried & hedged by the straddle). This is the direct "we caught X% of the
+    # daily move over history" estimate, not a σ/edge proxy.
+    req.scalp_model = "capture"
     for ticker, label, group in instruments.flat_with_group():
         try:
             daily = datamod.fetch(ticker, start=req.start)
@@ -849,45 +855,44 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
                 rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
                              "error": "insufficient data"})
                 continue
+            datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
             vm, realized = _build_vol(req, daily, ticker=ticker)
-            rv = realized.dropna() if realized is not None else None
-            sig_R = float(rv.mean()) if rv is not None and not rv.empty else req.iv_const
-            # σ_I = mean ATM IV the vol surface would charge for this tenor (sampled across the window)
-            idx = daily.index
-            samp = idx[:: max(len(idx) // 12, 1)]
-            atms = [vm.atm(d, T) for d in samp]
-            atms = [a for a in atms if a and a > 0]
-            sig_I = (sum(atms) / len(atms)) if atms else sig_R
-            vr_ratio = pim.variance_ratio(daily["Close"].to_numpy(float), 63)
-            g = pim.gamma_capture_from_vr(vr_ratio)
-            k = pim.scalp_k_from_vr(vr_ratio, base_k=base_k if base_k > 0 else 0.04)
-            cf = pim.closed_form(req.starting_bank, req.risk_pct, T, sig_I, sig_R,
-                                 scalp_k=k, intraday_frac=req.intraday_frac, gamma_capture=g, years=1.0)
+            res = _run_hi(daily, datr, vm, realized, req)
+            if not res.table:
+                rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
+                             "error": "no straddle periods"})
+                continue
+            yrs = max(res.years, 1e-6)
+            # attribution on the REAL streams (theta + straddle gamma faithful; scalp = positive capture)
+            att = pim.attribute_measured(res.total_theta, res.gamma_dir_pnl, res.scalp_pnl, dte_years=T)
+            net = res.final_bank - res.starting_bank
             rows.append({
                 "ticker": ticker, "label": label, "group": group, "ok": True,
-                "sigma_I": round(sig_I, 3), "sigma_R": round(sig_R, 3),
-                "vr": round(sig_R / max(sig_I, 1e-9), 3), "VR63": round(vr_ratio, 3),
-                "g_data": round(g, 3), "k_data": round(k, 4),
-                "theta": round(cf.theta, 0), "gamma_trend": round(cf.gamma_trend, 0),
-                "scalp_flat": round(cf.scalp_flat, 0), "total": round(cf.total, 0),
-                "ret_pct": round(100.0 * cf.total / max(req.starting_bank, 1e-9), 1),
-                "pct_from_trend": round(cf.pct_from_trend, 0), "pct_from_flat": round(cf.pct_from_flat, 0),
-                "regime": cf.regime, "profitable": bool(cf.profitable)})
+                "sigma_R": round(float(realized.dropna().mean()) if realized is not None and
+                                 not realized.dropna().empty else 0.0, 3),
+                "theta": round(res.total_theta / yrs, 0),               # annualised
+                "gamma_trend": round(res.gamma_dir_pnl / yrs, 0),
+                "scalp_flat": round(res.scalp_pnl / yrs, 0),
+                "total": round(net / yrs, 0),
+                "ret_pct": round(100.0 * net / max(req.starting_bank, 1e-9) / yrs, 1),  # %/yr
+                "cover_pct": round(res.scalp_covers_theta_pct, 0),       # scalp ÷ |theta|
+                "pct_from_trend": round(att.pct_from_trend, 0),
+                "pct_from_flat": round(att.pct_from_flat, 0),
+                "regime": att.regime, "profitable": bool(net > 0), "years": round(yrs, 1)})
         except Exception as ex:
             rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
                          "error": str(ex)[:80]})
     ok = [r for r in rows if r.get("ok")]
     ok.sort(key=lambda r: r["total"], reverse=True)
     n = len(ok)
+    med = lambda key: round(sorted(r[key] for r in ok)[n // 2], 1) if n else 0.0
     agg = {
-        "n": n, "n_failed": len(rows) - n,
+        "n": n, "n_failed": len(rows) - n, "capture": capture, "dte_years": round(T, 3),
         "n_profitable": sum(1 for r in ok if r["profitable"]),
         "n_trend_built": sum(1 for r in ok if r["regime"] == "trend-built (gamma)"),
         "n_flat_built": sum(1 for r in ok if r["regime"] == "flat-built (scalp)"),
         "n_bleeding": sum(1 for r in ok if r["regime"] == "bleeding (theta wins)"),
-        "median_ret_pct": round(sorted(r["ret_pct"] for r in ok)[n // 2], 1) if n else 0.0,
-        "median_g": round(sorted(r["g_data"] for r in ok)[n // 2], 3) if n else 0.0,
-        "base_k": base_k, "dte_years": round(T, 3),
+        "median_ret_pct": med("ret_pct"), "median_cover_pct": med("cover_pct"),
     }
     return {"rows": ok, "aggregate": agg}
 

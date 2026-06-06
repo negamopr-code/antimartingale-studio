@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=68"/>
+  <link rel="stylesheet" href="/style.css?v=69"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -235,8 +235,9 @@
       <label>Instrument <select name="ticker" class="instr"></select></label>
       <label>Start <input name="start" value="2018-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
-      <label title="grid = событийная сетка (мерит скальп на реальном фиде); analytic = ВОЛ-ПРИВОД: доход скальпа = K·лоты·дневная-реализ-σ$ → ЛЮБОЙ инструмент оценивается из своей волатильности БЕЗ интрадей-фида (K калибрована на 1m-крипте); range = грубая эвристика">Scalp model <select name="scalp_model"><option value="grid">grid (daily-cadence, faithful)</option><option value="analytic">analytic (vol-driven, любой инструмент)</option><option value="range">range (crude heuristic)</option></select></label>
-      <label title="ТОЛЬКО analytic: константа edge K (скальп ∝ K·лоты·σ$). ⚠ НЕ универсальна — калибровка на 1m крипте: ETH +0.06 / SOL ~0 / BTC −0.006; результат линеен по K. Подними для боковика, опусти/в минус для тренда.">Scalp K (analytic) <input name="scalp_k" type="number" step="any" value="0.02"></label>
+      <label title="grid = событийная сетка (мерит скальп на реальном фиде); analytic = ВОЛ-ПРИВОД: доход скальпа = K·лоты·дневная-реализ-σ$ → ЛЮБОЙ инструмент оценивается из своей волатильности БЕЗ интрадей-фида (K калибрована на 1m-крипте); range = грубая эвристика">Scalp model <select name="scalp_model"><option value="capture">capture (простая: % дневного хода)</option><option value="grid">grid (daily-cadence, faithful)</option><option value="analytic">analytic (vol-driven)</option><option value="range">range (crude heuristic)</option></select></label>
+      <label title="ТОЛЬКО capture: какую долю РЕАЛЬНОГО дневного хода (High−Low) ловит скальп на лотах одной части. Доктрина ~0.5 («забрать >50% движения», ~200–250 сделок/мес). Закрываем ТОЛЬКО прибыль (убыточные ноги переносятся, риск ≤ премии). Результат линеен по этому числу.">Capture (доля хода) <input name="scalp_capture" type="number" step="any" value="0.5"></label>
+      <label title="ТОЛЬКО analytic: константа edge K (скальп ∝ K·лоты·σ$). ⚠ НЕ универсальна — калибровка на 1m крипте: ETH +0.06 / SOL ~0 / BTC −0.006; результат линеен по K.">Scalp K (analytic) <input name="scalp_k" type="number" step="any" value="0.02"></label>
       <label title="daily = 1 бар/день (интрадей-чоп не виден); hourly = реальные 60m бары (~2 года); 1m = БЕСПЛАТНЫЕ 1-мин бары Binance (только крипта ETH/BTC/SOL — идеальный инструмент доктрины) → скальп реально измеряется">Scalp data <select name="scalp_data"><option value="daily">daily (1 бар/день)</option><option value="hourly">hourly 60m (~2 года, измеряет скальп)</option><option value="1m">1m crypto (Binance free, ETH/BTC)</option></select></label>
       <label title="на каком ТАЙМФРЕЙМЕ брать ATR для шага сетки. daily×2 (дефолт) = шаг ~2 дневных ATR (мысль юзера); weekly/monthly = шаг ещё шире.">Grid ATR TF <select name="grid_timeframe"><option value="daily">daily (шаг=×ATR)</option><option value="weekly">weekly (шире)</option><option value="monthly">monthly (ещё шире)</option></select></label>
       <label title="РЕ-ЦЕНТРИРОВАНИЕ сетки к ТЕКУЩЕЙ цене каждые N дней (закрывая залипшие части): сетка СЛЕДУЕТ за ценой и скальпит текущий диапазон, а не висит на годовалом страйке. 0 = заморозить (старое). ~21 ≈ раз в месяц.">Re-center дней <input name="scalp_recenter_days" type="number" value="0"></label>
@@ -316,6 +317,6 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=68"></script>
+  <script src="/app.js?v=69"></script>
 </body>
 </html>
