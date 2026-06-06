@@ -842,6 +842,12 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
     rows = []
     T = req.dte_days / 365.0
     capture = getattr(req, "scalp_capture", 0.5)
+    def _fin(x, nd=0):
+        try:
+            x = float(x)
+            return round(x, nd) if (x == x and abs(x) != float("inf")) else 0.0   # NaN/Inf → 0
+        except Exception:
+            return 0.0
     # force the simple, positive-only capture scalp so EVERY instrument is estimated from its REAL
     # daily ranges (theta + straddle gamma stay exact from the real path; scalp = capture×range×lots,
     # only wins — losers carried & hedged by the straddle). This is the direct "we caught X% of the
@@ -866,24 +872,28 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
             # attribution on the REAL streams (theta + straddle gamma faithful; scalp = positive capture)
             att = pim.attribute_measured(res.total_theta, res.gamma_dir_pnl, res.scalp_pnl, dte_years=T)
             net = res.final_bank - res.starting_bank
+            sR = float(realized.dropna().mean()) if realized is not None and not realized.dropna().empty else 0.0
+            # Report everything as a % OF THE THETA (the rent) — compounding-INVARIANT, so the absurd
+            # crypto bank-compounding cancels and the numbers stay interpretable: "the scalp pays X% of
+            # the rent, the gamma Y%, net = X+Y−100%". Plus geometric CAGR for the $ feel.
+            th = abs(res.total_theta) if abs(res.total_theta) > 1e-9 else 1e-9
+            scalp_cover = 100.0 * res.scalp_pnl / th
+            gamma_cover = 100.0 * res.gamma_dir_pnl / th
             rows.append({
                 "ticker": ticker, "label": label, "group": group, "ok": True,
-                "sigma_R": round(float(realized.dropna().mean()) if realized is not None and
-                                 not realized.dropna().empty else 0.0, 3),
-                "theta": round(res.total_theta / yrs, 0),               # annualised
-                "gamma_trend": round(res.gamma_dir_pnl / yrs, 0),
-                "scalp_flat": round(res.scalp_pnl / yrs, 0),
-                "total": round(net / yrs, 0),
-                "ret_pct": round(100.0 * net / max(req.starting_bank, 1e-9) / yrs, 1),  # %/yr
-                "cover_pct": round(res.scalp_covers_theta_pct, 0),       # scalp ÷ |theta|
-                "pct_from_trend": round(att.pct_from_trend, 0),
-                "pct_from_flat": round(att.pct_from_flat, 0),
-                "regime": att.regime, "profitable": bool(net > 0), "years": round(yrs, 1)})
+                "sigma_R": _fin(sR, 3),
+                "scalp_cover_pct": _fin(scalp_cover),       # scalp ÷ |theta| — the flat leg pays this % of rent
+                "gamma_cover_pct": _fin(gamma_cover),       # gamma ÷ |theta| — the trend leg pays this %
+                "net_cover_pct": _fin(scalp_cover + gamma_cover - 100.0),   # net profit as % of the rent
+                "cagr_pct": _fin(res.ann_return_pct, 1),
+                "pct_from_trend": _fin(att.pct_from_trend),
+                "pct_from_flat": _fin(att.pct_from_flat),
+                "regime": att.regime, "profitable": bool(net > 0)})
         except Exception as ex:
             rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
                          "error": str(ex)[:80]})
     ok = [r for r in rows if r.get("ok")]
-    ok.sort(key=lambda r: r["total"], reverse=True)
+    ok.sort(key=lambda r: r["net_cover_pct"], reverse=True)
     n = len(ok)
     med = lambda key: round(sorted(r[key] for r in ok)[n // 2], 1) if n else 0.0
     agg = {
@@ -892,7 +902,8 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
         "n_trend_built": sum(1 for r in ok if r["regime"] == "trend-built (gamma)"),
         "n_flat_built": sum(1 for r in ok if r["regime"] == "flat-built (scalp)"),
         "n_bleeding": sum(1 for r in ok if r["regime"] == "bleeding (theta wins)"),
-        "median_ret_pct": med("ret_pct"), "median_cover_pct": med("cover_pct"),
+        "median_scalp_cover_pct": med("scalp_cover_pct"),
+        "median_net_cover_pct": med("net_cover_pct"),
     }
     return {"rows": ok, "aggregate": agg}
 

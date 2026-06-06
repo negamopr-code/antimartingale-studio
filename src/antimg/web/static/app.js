@@ -1121,27 +1121,29 @@ function renderHiExtrap(d) {
   const a = d.aggregate, rows = d.rows;
   $("#hi-extrap-stats").textContent =
     `🌐 ЭКСТРАПОЛЯЦИЯ НА ВСЕ ИНСТРУМЕНТЫ — из РЕАЛЬНЫХ дневных ходов истории (без интрадей-фида)\n`
-    + `${a.n} инструментов (${a.n_failed} не загрузилось) · ловим ${(a.capture*100).toFixed(0)}% дневного хода (High−Low), ~200–250 сделок/мес · DTE ${a.dte_years}г · годовые $ на банк $10k\n`
+    + `${a.n} инструментов (${a.n_failed} не загрузилось) · ловим ${(a.capture*100).toFixed(0)}% дневного хода (High−Low), только плюсы · DTE ${a.dte_years}г · с ${a.start||"2019"}\n`
     + `\nМОДЕЛЬ (просто): СКАЛЬП = ${(a.capture*100).toFixed(0)}% × (дневной H−L) × лоты части, СУММА по истории — ТОЛЬКО ПЛЮСЫ\n`
-    + `   (закрываем лишь прибыль; убыточные ноги переносятся, риск ≤ премии = той самой теты). Тета и ГАММА\n`
-    + `   стреддла — точные из реального пути. ИТОГО = гамма(тренд) + скальп(флет, +) − тета.\n`
-    + `\nРЕЖИМЫ: тренд-построено (гамма) ${a.n_trend_built} · флет-построено (скальп) ${a.n_flat_built} · кровит (тета) ${a.n_bleeding}\n`
-    + `прибыльных: ${a.n_profitable}/${a.n}   ·   медианный годовой ${a.median_ret_pct}%   ·   медианное покрытие теты скальпом ${a.median_cover_pct}%\n`
-    + `\n💡 ВЫВОД: «покрытие» = скальп ÷ |тета| = на сколько % выигрышные скальп-сделки отбивают аренду стреддла.\n`
-    + `   ≥100% ⇒ скальп САМ кормит тету (плюсовой флет); <100% ⇒ нужен тренд (гамма ловит «большую рыбу»).\n`
-    + `   Сортировка по ИТОГО/год. Подними/опусти Capture — результат линеен по нему.`;
-  const cols = [["ticker","инстр"],["group","класс"],["sigma_R","σR"],["cover_pct","скальп/тета %"],
-    ["theta","тета/год"],["gamma_trend","гамма(тренд)/год"],["scalp_flat","скальп(флет)/год"],
-    ["total","ИТОГО/год"],["ret_pct","%/год"],["pct_from_trend","тренд%"],["regime","режим"]];
+    + `   (закрываем лишь прибыль; убыточные ноги переносятся и ПРИКРЫТЫ длинными коллами, риск ≤ премии).\n`
+    + `   Всё в % ОТ ТЕТЫ (аренды) — это compounding-инвариантно (абсурдный крипто-компаундинг сокращается).\n`
+    + `\nРЕЖИМЫ: флет-построено (скальп) ${a.n_flat_built} · тренд-построено (гамма) ${a.n_trend_built} · кровит (тета) ${a.n_bleeding}\n`
+    + `прибыльных: ${a.n_profitable}/${a.n}   ·   медиана: скальп платит ${a.median_scalp_cover_pct}% теты, ЧИСТЫЙ профит = ${a.median_net_cover_pct}% теты\n`
+    + `\n💡 ВЫВОД: «скальп %тета» = на сколько % выигрышные скальп-сделки отбивают аренду стреддла.\n`
+    + `   ≥100% ⇒ скальп САМ кормит тету (плюсовой флет — что и обещает доктрина); + гамма сверху = чистый профит.\n`
+    + `   Чистый = скальп% + гамма% − 100%. Сортировка по чистому. Линейно по Capture — двинь его и пересчитай.\n`
+    + `   ⚠ Capture=0.5 оптимистичен (те же коллы и дают гамму, и прикрывают залипший скальп — лёгкий двойной зачёт);\n`
+    + `   реальный 1m-грид на ETH давал ~76% покрытия при ~64% capture. Истина между гридом и этой оценкой.`;
+  const cols = [["ticker","инстр"],["group","класс"],["sigma_R","σR"],["scalp_cover_pct","скальп %тета"],
+    ["gamma_cover_pct","гамма %тета"],["net_cover_pct","ЧИСТ %тета"],["cagr_pct","CAGR%"],
+    ["pct_from_trend","тренд%"],["regime","режим"]];
   const sgn = (v) => (v >= 0 ? "#3fb950" : "#f85149");
   let h = "<table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
   for (const r of rows) {
     h += "<tr>"
-      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.sigma_R}</td><td>${f(r.cover_pct)}%</td>`
-      + `<td style="color:#f85149">${f(r.theta)}</td><td style="color:#3fb950">${f(r.gamma_trend)}</td>`
-      + `<td style="color:${sgn(r.scalp_flat)}">${f(r.scalp_flat)}</td>`
-      + `<td style="color:${sgn(r.total)};font-weight:600">${f(r.total)}</td>`
-      + `<td style="color:${sgn(r.ret_pct)}">${r.ret_pct}%</td>`
+      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.sigma_R}</td>`
+      + `<td style="color:${sgn(r.scalp_cover_pct)};font-weight:600">${f(r.scalp_cover_pct)}%</td>`
+      + `<td style="color:${sgn(r.gamma_cover_pct)}">${f(r.gamma_cover_pct)}%</td>`
+      + `<td style="color:${sgn(r.net_cover_pct)};font-weight:600">${f(r.net_cover_pct)}%</td>`
+      + `<td style="color:${sgn(r.cagr_pct)}">${f(r.cagr_pct)}%</td>`
       + `<td>${r.pct_from_trend}%</td><td>${r.regime.replace(/ \(.*/, "")}</td></tr>`;
   }
   $("#hi-extrap").innerHTML = h + "</tbody></table>";
