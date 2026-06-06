@@ -436,3 +436,48 @@ def test_api_attribution_endpoint():
     m = d["measured"]
     assert m["total"] == pytest.approx(m["theta"] + m["gamma_trend"] + m["scalp_flat"], rel=1e-2)
     assert "conclusion" in m and m["regime"]
+
+
+# ---- data-driven g/K extrapolation (variance ratio) -------------------------------------------
+
+def test_variance_ratio_detects_trend_and_meanreversion():
+    from antimg import pi_model as pm
+    n = 1500
+    rng = np.random.default_rng(0)
+    # pure random walk → VR ≈ 1
+    rw = 100 + np.cumsum(rng.normal(0, 1, n))
+    assert pm.variance_ratio(rw, 63) == pytest.approx(1.0, abs=0.4)
+    # strong trend (drift) → VR > 1
+    trend = 100 + np.cumsum(rng.normal(0.5, 1, n))
+    assert pm.variance_ratio(trend, 63) > 1.3
+    # mean-reverting (AR with negative autocorr around a level) → VR < 1
+    x, mr = 100.0, []
+    for _ in range(n):
+        x += 0.3 * (100 - x) + rng.normal(0, 1)
+        mr.append(x)
+    assert pm.variance_ratio(np.array(mr), 63) < 0.7
+
+
+def test_gamma_capture_and_scalp_k_from_vr_monotone():
+    from antimg import pi_model as pm
+    # g = VR/(VR+1) ∈ (0,1), monotone up; random walk → 0.5
+    assert pm.gamma_capture_from_vr(1.0) == pytest.approx(0.5)
+    assert pm.gamma_capture_from_vr(3.0) > pm.gamma_capture_from_vr(1.0) > pm.gamma_capture_from_vr(0.3)
+    assert 0.0 < pm.gamma_capture_from_vr(0.1) < 1.0
+    # K: mean-reversion (VR<1) → positive edge; trend (VR>1) → negative; clipped
+    assert pm.scalp_k_from_vr(0.5) > 0 > pm.scalp_k_from_vr(1.5)
+    assert pm.scalp_k_from_vr(0.0) <= 0.08 and pm.scalp_k_from_vr(5.0) >= -0.02
+
+
+def test_extrapolate_attribution_from_data_only():
+    """The fully-predictive path: closed-form attribution from σ_I, σ_R, VR — no backtest."""
+    from antimg import pi_model as pm
+    vr_trend = 1.6
+    cf = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.30,
+                        scalp_k=pm.scalp_k_from_vr(vr_trend),
+                        gamma_capture=pm.gamma_capture_from_vr(vr_trend), years=1.0)
+    assert cf.scalp_flat < cf.gamma_trend          # a trend → gamma leads, scalp drags
+    cf2 = pm.closed_form(10000, 0.2, 0.5, 0.20, 0.30,
+                         scalp_k=pm.scalp_k_from_vr(0.5),
+                         gamma_capture=pm.gamma_capture_from_vr(0.5), years=1.0)
+    assert cf2.scalp_flat > 0                       # mean-reversion → scalp positive

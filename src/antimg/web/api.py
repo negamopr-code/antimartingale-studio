@@ -828,6 +828,70 @@ def hedged_intraday_attribution(req: HedgedIntradayReq):
     }
 
 
+@app.post("/api/hedged-intraday/extrapolate")
+def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
+    """EXTRAPOLATE the P&L attribution across the WHOLE catalog — fully predictive, NO per-instrument
+    backtest. For each instrument we read only DATA: σ_I (mean ATM IV from the vol surface), σ_R (mean
+    realized vol), and the variance ratio VR(63) (trend vs mean-reversion). Then the closed-form model
+    (pi_model) gives the annual decomposition:
+        Θ=−a (a=ρB/2T) · Γ=a·vr²·g  with g = VR/(VR+1) (TREND fraction) · Σ=C_s·ρB·vr with K from VR.
+    The crypto 1m feed anchored the scalp constant K; g is validated against the daily-faithful straddle
+    gamma (corr ≈ 0.4). ⚠ Gamma/g leg is well-grounded; the scalp/K leg's MAGNITUDE is the rough one
+    (intraday edge only truly measurable on crypto). Returns a ranked table + aggregate."""
+    rows = []
+    T = req.dte_days / 365.0
+    base_k = getattr(req, "scalp_k", hi.SCALP_K_DEFAULT)
+    for ticker, label, group in instruments.flat_with_group():
+        try:
+            daily = datamod.fetch(ticker, start=req.start)
+            daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+            if daily.empty or len(daily) < max(200, req.atr_period * 3):
+                rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
+                             "error": "insufficient data"})
+                continue
+            vm, realized = _build_vol(req, daily, ticker=ticker)
+            rv = realized.dropna() if realized is not None else None
+            sig_R = float(rv.mean()) if rv is not None and not rv.empty else req.iv_const
+            # σ_I = mean ATM IV the vol surface would charge for this tenor (sampled across the window)
+            idx = daily.index
+            samp = idx[:: max(len(idx) // 12, 1)]
+            atms = [vm.atm(d, T) for d in samp]
+            atms = [a for a in atms if a and a > 0]
+            sig_I = (sum(atms) / len(atms)) if atms else sig_R
+            vr_ratio = pim.variance_ratio(daily["Close"].to_numpy(float), 63)
+            g = pim.gamma_capture_from_vr(vr_ratio)
+            k = pim.scalp_k_from_vr(vr_ratio, base_k=base_k if base_k > 0 else 0.04)
+            cf = pim.closed_form(req.starting_bank, req.risk_pct, T, sig_I, sig_R,
+                                 scalp_k=k, intraday_frac=req.intraday_frac, gamma_capture=g, years=1.0)
+            rows.append({
+                "ticker": ticker, "label": label, "group": group, "ok": True,
+                "sigma_I": round(sig_I, 3), "sigma_R": round(sig_R, 3),
+                "vr": round(sig_R / max(sig_I, 1e-9), 3), "VR63": round(vr_ratio, 3),
+                "g_data": round(g, 3), "k_data": round(k, 4),
+                "theta": round(cf.theta, 0), "gamma_trend": round(cf.gamma_trend, 0),
+                "scalp_flat": round(cf.scalp_flat, 0), "total": round(cf.total, 0),
+                "ret_pct": round(100.0 * cf.total / max(req.starting_bank, 1e-9), 1),
+                "pct_from_trend": round(cf.pct_from_trend, 0), "pct_from_flat": round(cf.pct_from_flat, 0),
+                "regime": cf.regime, "profitable": bool(cf.profitable)})
+        except Exception as ex:
+            rows.append({"ticker": ticker, "label": label, "group": group, "ok": False,
+                         "error": str(ex)[:80]})
+    ok = [r for r in rows if r.get("ok")]
+    ok.sort(key=lambda r: r["total"], reverse=True)
+    n = len(ok)
+    agg = {
+        "n": n, "n_failed": len(rows) - n,
+        "n_profitable": sum(1 for r in ok if r["profitable"]),
+        "n_trend_built": sum(1 for r in ok if r["regime"] == "trend-built (gamma)"),
+        "n_flat_built": sum(1 for r in ok if r["regime"] == "flat-built (scalp)"),
+        "n_bleeding": sum(1 for r in ok if r["regime"] == "bleeding (theta wins)"),
+        "median_ret_pct": round(sorted(r["ret_pct"] for r in ok)[n // 2], 1) if n else 0.0,
+        "median_g": round(sorted(r["g_data"] for r in ok)[n // 2], 3) if n else 0.0,
+        "base_k": base_k, "dte_years": round(T, 3),
+    }
+    return {"rows": ok, "aggregate": agg}
+
+
 @app.post("/api/hedged-intraday/inspect")
 def hedged_intraday_inspect(req: HedgedIntradayReq):
     """Watch the ПИ strategy EXECUTE over a chosen window: price + Bollinger flat-band, the ATM

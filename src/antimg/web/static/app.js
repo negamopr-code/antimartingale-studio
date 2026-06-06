@@ -1095,6 +1095,42 @@ $("#hedged-attr-btn").onclick = (e) => withBusy(e.target, async () => {
   renderHiAttr(await post("/api/hedged-intraday/attribution", formData($("#form-hedged"))));
 });
 
+// ---- 🌐 extrapolate the attribution across ALL instruments (data-driven g/K, no backtest) ----
+function renderHiExtrap(d) {
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 0 }));
+  const a = d.aggregate, rows = d.rows;
+  $("#hi-extrap-stats").textContent =
+    `🌐 ЭКСТРАПОЛЯЦИЯ НА ВСЕ ИНСТРУМЕНТЫ — без бэктеста, из данных (σ_I, σ_R, VR63→g,K) через закрытую форму\n`
+    + `${a.n} инструментов (${a.n_failed} не загрузилось) · база K=${a.base_k} · DTE ${a.dte_years}г · годовые $ на банк $10k\n`
+    + `\nРЕЖИМЫ: тренд-построено (гамма) ${a.n_trend_built} · флет-построено (скальп) ${a.n_flat_built} · кровит (тета) ${a.n_bleeding}\n`
+    + `прибыльных: ${a.n_profitable}/${a.n}   ·   медианный годовой ${a.median_ret_pct}%   ·   медианная g(доля тренда)=${a.median_g}\n`
+    + `\n💡 ВЫВОД: для каждого инструмента ГАММА (тренд, ∝vr²·g) и СКАЛЬП (флет, ∝vr·K) бьют тету (−a, пост.).\n`
+    + `   g=VR/(VR+1) из variance ratio — данные-driven доля тренда (валидирована к бэктест-гамме, corr≈0.4);\n`
+    + `   ⚠ ГАММА/g обоснована (дневной бэктест меряет её честно); СКАЛЬП/K — грубая нога (истинный\n`
+    + `   интрадей-edge только у крипты на 1m; знак K из VR верен, величина — якорь по крипте).\n`
+    + `   Сортировка по ИТОГО (годовой P&L модели). Тета у всех ≈ −a; кто в плюсе — тот, у кого гамма+скальп > a.`;
+  // table
+  const cols = [["ticker", "инстр"], ["group", "класс"], ["VR63", "VR63"], ["g_data", "g(тренд)"],
+    ["k_data", "K"], ["vr", "σR/σI"], ["theta", "тета"], ["gamma_trend", "гамма(тренд)"],
+    ["scalp_flat", "скальп(флет)"], ["total", "ИТОГО/год"], ["pct_from_trend", "тренд%"], ["regime", "режим"]];
+  const sgn = (v) => (v >= 0 ? "#3fb950" : "#f85149");
+  let h = "<table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
+  for (const r of rows) {
+    h += "<tr>"
+      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.VR63}</td><td>${r.g_data}</td>`
+      + `<td style="color:${sgn(r.k_data)}">${r.k_data}</td><td>${r.vr}</td>`
+      + `<td style="color:#f85149">${f(r.theta)}</td><td style="color:#3fb950">${f(r.gamma_trend)}</td>`
+      + `<td style="color:${sgn(r.scalp_flat)}">${f(r.scalp_flat)}</td>`
+      + `<td style="color:${sgn(r.total)};font-weight:600">${f(r.total)}</td>`
+      + `<td>${r.pct_from_trend}%</td><td>${r.regime.replace(/ \(.*/, "")}</td></tr>`;
+  }
+  $("#hi-extrap").innerHTML = h + "</tbody></table>";
+}
+$("#hedged-extrap-btn").onclick = (e) => withBusy(e.target, async () => {
+  toast("Экстраполяция по всему каталогу: тяну дневные данные (первый прогон ~1–2 мин)…", true);
+  renderHiExtrap(await post("/api/hedged-intraday/extrapolate", formData($("#form-hedged"))));
+});
+
 // ---- tab 9: ПИ Execution — watch the strategy run on a window
 async function renderHiExec(d) {
   const s = d.stats;

@@ -138,6 +138,50 @@ def _attribute(res: PiAttribution, T: float) -> PiAttribution:
     return res
 
 
+def variance_ratio(close, k: int = 63) -> float:
+    """Lo–MacKinlay variance ratio VR(k) = Var(k-day returns) / (k · Var(1-day returns)).
+
+    The data signal for the TREND vs MEAN-REVERSION character (no backtest needed):
+      • VR > 1  → trending / persistent (k-day moves bigger than √k scaling) → variance is DIRECTIONAL.
+      • VR ≈ 1  → random walk (no autocorrelation).
+      • VR < 1  → mean-reverting (k-day moves smaller) → variance is RANGE (the scalp's food).
+    Returns 1.0 (random-walk neutral) when there isn't enough data.
+    """
+    import numpy as _np
+    try:
+        c = _np.asarray(close, dtype=float)
+        c = c[_np.isfinite(c) & (c > 0)]
+        lr = _np.diff(_np.log(c))
+        lr = lr[_np.isfinite(lr)]
+        if len(lr) < k * 3 or lr.var() == 0:
+            return 1.0
+        rk = _np.convolve(lr, _np.ones(k), "valid")     # overlapping k-day returns
+        return float(rk.var() / (k * lr.var()))
+    except Exception:
+        return 1.0
+
+
+def gamma_capture_from_vr(vr: float) -> float:
+    """Data-driven gamma-capture g ∈ (0,1) = the TREND fraction of realized variance, from VR(k).
+
+    Theory: gamma = Λ·σ_R²·g where g = σ_trend²/σ_R² (the directional slice the base-hedged straddle
+    monetises; the rest is the scalp's range slice). The bounded monotone map g = VR/(VR+1) sends a
+    random walk (VR=1) → 0.5, a trender (VR→∞) → 1, a mean-reverter (VR→0) → 0. Validated against the
+    backtest gamma across the catalog (corr ≈ 0.4 on non-degenerate names; a directional proxy, not
+    precise — daily VR can't see intraday structure, and big-trend names compound noisily)."""
+    vr = max(vr, 0.0)
+    return vr / (vr + 1.0)
+
+
+def scalp_k_from_vr(vr: float, base_k: float = 0.04, lo: float = -0.02, hi: float = 0.08) -> float:
+    """Data-driven scalp edge K from VR: mean-reversion (VR<1) → positive edge, trend (VR>1) → negative
+    (counter-trend bleeds). K ≈ base_k·(1 − VR), clipped. ⚠ The SIGN is well-grounded (it's INVARIANT
+    #3: volatility ≠ mean-reversion), but the MAGNITUDE is anchored only on the 3 crypto 1m points
+    (ETH +0.06 ranged / SOL ~0 / BTC −0.006 trended) and daily VR is an imperfect proxy for the
+    intraday edge — so the scalp leg of the extrapolation is the rough, assumption-laden one."""
+    return max(lo, min(base_k * (1.0 - vr), hi))
+
+
 def calibrate_gamma_capture(gamma_dir_pnl: float, bank: float, risk_pct: float, dte_years: float,
                             sigma_implied: float, sigma_realized: float, years: float) -> float:
     """Back out g so the closed-form gamma term matches the engine's measured gamma_dir_pnl:

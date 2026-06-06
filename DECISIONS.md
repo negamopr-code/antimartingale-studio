@@ -640,3 +640,18 @@ Not implemented; documented as a rejected tactic.
   «🧮 Атрибуция прибыли» button + stacked-bar (theta/gamma-trend/scalp-flat) + verdict. assets v67.
 - **Conclusion it outputs:** net = TREND(gamma ∝vr²) + FLAT(scalp ∝vr) − theta(const); attributes %
   of gross profit to each, names the regime (trend-built / flat-built / bleeding). 91 tests (+5).
+
+## D64 — Data-driven g/K + attribution extrapolation across ALL instruments (2026-06-06)
+- **Ask:** estimate g from data (autocorrelation) so the attribution is predictive without a backtest;
+  extrapolate across all instruments using the crypto-anchored model.
+- **Built (`pi_model.py`):** variance_ratio(close,k) (Lo–MacKinlay); gamma_capture_from_vr=VR/(VR+1)
+  (data-driven trend fraction g, validated vs backtest gamma corr≈0.4); scalp_k_from_vr=base_k·(1−VR)
+  clipped (mean-rev→K>0, trend→K<0). Endpoint /api/hedged-intraday/extrapolate: per instrument read
+  σ_I (vol surface ATM), σ_R (realized), VR63 from DAILY data → closed-form attribution; no per-instrument
+  backtest. Tab-8 «🌐 Экстраполяция на все инструменты» button + ranked table + aggregate.
+- **Result (108 instr, base K=0.04, 2018+):** 107/108 bleed, median −8%/yr — because σ_I>σ_R (variance
+  risk premium) + modest daily-VR scalp edge. Decomposition is the value: mean-reverting → scalp carries;
+  trending → gamma carries, scalp bleeds (USO/AVAX/DOGE scalp<0, trend%100). theta=−a for all.
+- **Honesty:** gamma/g leg well-grounded (daily backtest measures gamma faithfully); scalp/K MAGNITUDE
+  rough (true intraday edge only on crypto 1m). Broad bleed = conservative edge + VRP, not "method fails."
+- 94 tests (+3). Skill: lesson data-driven-g-from-variance-ratio. assets v68.
