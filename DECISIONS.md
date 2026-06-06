@@ -586,3 +586,20 @@ Not implemented; documented as a rejected tactic.
   INSTRUMENT-AWARE (uses `d.ticker` + `isCryptoTicker`): crypto → "pick 1m (free deep, any window)";
   non-crypto → honest — "no free deep intraday; hourly = recent ~2y only; deep history needs a paid
   vendor (Polygon ≈$29/mo, IQ Feed); free deep 1m exists ONLY for crypto." assets v64. 78 tests. Live rebuilt.
+
+## D61 — "Эквивалент монетки": vol-invariant coverage + capture φ (2026-06-06)
+- **Ask:** reduce ПИ to a coin-flip read ("is it 0.6 or 0.45?"), surface trades/month (check vs the
+  corpus 200–250), and bridge the free 1m-crypto measurement to other assets via realized vol.
+- **Decision:** the profitability test is `coverage = scalp_income / |theta|`. Sized to a fixed risk
+  budget, both the per-trade scalp income AND the theta scale with σ·S, so **σ cancels → coverage is
+  ~vol-invariant** (governed by trades/mo × capture fraction, not the instrument's vol). So measure
+  the **capture fraction** (= harvested ÷ Σ daily range; doctrine ideal >0.5; NOT ÷ the 1m
+  path-integral, which is feed-dependent) where we CAN (free 1m crypto) and project it onto any asset.
+- **Built:** engine fields trades_per_month / profit_per_trade / capture_fraction / coverage_ratio /
+  breakeven_capture (φ*) / period_win_rate (empirical p); `assumed_capture` knob (0.33) +
+  `_coinflip_projection()` in /api/hedged-intraday, /inspect, /scan; Tab-8 "ЭКВИВАЛЕНТ МОНЕТКИ" panel.
+- **Finding:** default grid step = daily ATR books only ~2 trades/mo on ETH 1m (too wide for minute
+  noise). grid_atr_frac≈0.03 reproduces the doctrine 240/mo at 64% capture, but **coverage 0.76 < 1**
+  on the (trending) ETH window ⇒ flat scalp doesn't fully pay theta; profit rides gamma →
+  "0.45-to-0.5-type", regime-dependent. Over-tightening (gaf<0.02) collapses coverage.
+- **Regression test:** coverage holds within 15% at 10× the $-vol (the invariance). 82 tests. v65.
