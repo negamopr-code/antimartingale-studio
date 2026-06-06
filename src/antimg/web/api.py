@@ -643,6 +643,48 @@ def _run_hi(daily, datr, vm, realized, req, trace=None, intraday=None):
         intraday=intraday, trace=trace)
 
 
+def _coinflip_projection(res, assumed_capture: float) -> dict:
+    """Reduce a ПИ run to the corpus's profitability primitives + the "0.6-vs-0.45" coin-flip read.
+
+    The straddle theta and the per-trade scalp income both scale with realized vol (∝ σ·S) once the
+    book is sized to a fixed risk budget, so the **coverage ratio** (scalp income ÷ theta) is roughly
+    vol-INVARIANT — governed by trades/month × capture fraction, not by the instrument's vol. That is
+    why a capture fraction measured on a 1-min crypto feed projects onto any asset: vol cancels.
+
+    • `coverage` ≥ 1 ⇒ the scalp pays the theta with no trend at all = a "0.6-type" (winning) strategy.
+    • `breakeven_capture` (φ*) = the capture at which coverage = 1; catch more than φ* ⇒ profitable.
+    • `coverage_at_assumed` = coverage rescaled to a chosen capture (scalp income ∝ capture).
+    • `period_win_rate` = the empirical coin-flip p (fraction of straddle periods that finished green).
+    """
+    cap = res.capture_fraction
+    cov = res.coverage_ratio
+    cov_assumed = (cov * (assumed_capture / cap)) if cap > 1e-9 else None
+    # the "type": coverage≥1 means flat markets alone already pay the theta (a positive-EV coin flip);
+    # <1 means flat markets bleed and you NEED a trend (the gamma) to come out ahead.
+    if cov >= 1.0:
+        flip_type = "0.6-type (скальп платит тету сам)"
+    elif cov >= 0.5:
+        flip_type = "≈0.5 (скальп платит часть, нужен тренд)"
+    else:
+        flip_type = "0.45-type (флет кровит, держится на тренде/гамме)"
+    return {
+        "trades_per_month": round(res.trades_per_month, 1),
+        "trades_per_month_target": "200–250",           # doctrine, for a loaded book on 1m
+        "profit_per_trade": round(res.profit_per_trade, 2),
+        "capture_fraction": round(cap, 4),
+        "theta_per_month": round(res.theta_per_month, 2),
+        "scalp_per_month": round(res.scalp_per_month, 2),
+        "coverage_ratio": round(cov, 3),
+        "breakeven_capture": round(res.breakeven_capture, 4),
+        "assumed_capture": round(assumed_capture, 4),
+        "coverage_at_assumed": (round(cov_assumed, 3) if cov_assumed is not None else None),
+        "period_win_rate": round(res.period_win_rate, 3),
+        "flip_type": flip_type,
+        "scalp_avail_pts": round(res.scalp_avail_pts, 2),
+        "scalp_harvest_pts": round(res.scalp_harvest_pts, 2),
+    }
+
+
 def _hi_summary(res, starting_bank: float) -> dict:
     """Per-instrument bottom line for the ПИ scan (one row)."""
     net = res.final_bank - starting_bank
@@ -658,6 +700,10 @@ def _hi_summary(res, starting_bank: float) -> dict:
         "worst_period_pnl": round(res.worst_period_pnl, 2),
         "max_premium_at_risk": round(res.max_premium_at_risk, 2),
         "scalp_round_trips": res.scalp_round_trips,
+        "trades_per_month": round(res.trades_per_month, 1),
+        "capture_fraction": round(res.capture_fraction, 4),
+        "coverage_ratio": round(res.coverage_ratio, 3),
+        "period_win_rate": round(res.period_win_rate, 3),
         # the straddle loss cap holds if the worst single period never lost more than its premium
         "loss_cap_ok": bool(res.worst_period_pnl >= -res.max_premium_at_risk - 1e-6),
     }
@@ -719,6 +765,7 @@ def hedged_intraday(req: HedgedIntradayReq):
             "profit_rolls": sum(1 for x in res.rolls if x.get("reason") == "профит-цель"),
             "grid_timeframe": req.grid_timeframe, "use_bbands": req.use_bbands,
             "vol_model": vm.label, "vol_class": volmod.classify(req.ticker),
+            "coinflip": _coinflip_projection(res, req.assumed_capture),
         },
         "use_bbands": req.use_bbands,
     }
@@ -834,6 +881,7 @@ def hedged_intraday_inspect(req: HedgedIntradayReq):
             "profit_rolls": sum(1 for x in res.rolls if x.get("reason") == "профит-цель"),
             "ann_return_pct": round(res.ann_return_pct, 2), "n_days": res.n_days,
             "vol_model": vm.label,
+            "coinflip": _coinflip_projection(res, req.assumed_capture),
         },
     }
 

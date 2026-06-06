@@ -249,3 +249,77 @@ def test_profit_target_roll_fires_and_re_centers():
     assert tgt.n_rolls > base.n_rolls, "profit-target rolling adds rolls beyond the expiry schedule"
     for row in tgt.table:                                  # loss cap still respected per period
         assert row["straddle_pnl"] >= -row["premium"] - 1e-6, row
+
+
+# ---- "эквивалент монетки" / scalp-efficiency metrics ------------------------------------------
+
+def test_trades_per_month_and_capture_measured():
+    """The oscillating-range run must surface a sane trades/month, a capture fraction in (0,2],
+    and a coverage ratio = scalp/|theta| consistent with the round-trip count."""
+    rng = np.random.default_rng(7)
+    osc = 100.0 + 6.0 * np.sin(np.arange(400) / 3.0) + rng.normal(0, 0.5, 400)
+    df = _frame(osc, rng_pct=0.015)
+    res = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="grid",
+                                 realized_vol=datamod.realized_vol(df["Close"], 20),
+                                 grid_atr_frac=1.0, dte_days=180)
+    assert res.scalp_round_trips > 0
+    # trades/month ≈ round-trips / (years*12)
+    assert res.trades_per_month == pytest.approx(res.scalp_round_trips / (res.years * 12.0), rel=1e-6)
+    assert res.scalp_avail_pts > 0 and res.scalp_harvest_pts > 0
+    assert res.capture_fraction == pytest.approx(res.scalp_harvest_pts / res.scalp_avail_pts, rel=1e-6)
+    assert 0.0 < res.capture_fraction <= 3.0
+    # coverage = scalp_per_month / |theta_per_month|
+    assert res.coverage_ratio == pytest.approx(res.scalp_per_month / abs(res.theta_per_month), rel=1e-6)
+    # breakeven capture is the capture that would make coverage exactly 1
+    if res.coverage_ratio > 0:
+        assert res.breakeven_capture == pytest.approx(res.capture_fraction / res.coverage_ratio, rel=1e-6)
+
+
+def test_coverage_is_vol_invariant_at_fixed_capture():
+    """The CRUX: with the book sized to a fixed risk budget, scaling the price level (hence the
+    realized vol / ATR in $) leaves the COVERAGE RATIO ~unchanged — because both the per-trade
+    scalp income and the theta scale with σ·S, so σ cancels. This is what lets a capture fraction
+    measured on a 1m crypto feed project onto any asset by its vol."""
+    rng = np.random.default_rng(3)
+    base = np.sin(np.arange(500) / 3.0) + rng.normal(0, 0.15, 500)
+    cov = []
+    for scale in (50.0, 500.0):                      # same shape, 10× the price level (10× $ vol)
+        path = scale * (10.0 + base)                 # oscillate around 10×scale
+        df = _frame(path, rng_pct=0.02)
+        res = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="grid",
+                                     realized_vol=datamod.realized_vol(df["Close"], 20),
+                                     grid_atr_frac=0.5, dte_days=180)
+        cov.append(res.coverage_ratio)
+    # coverage at 10× the $-vol stays within a tight band (vol cancels in scalp/theta)
+    assert cov[0] == pytest.approx(cov[1], rel=0.15), cov
+
+
+def test_period_win_rate_matches_table():
+    rng = np.random.default_rng(7)
+    osc = 100.0 + 6.0 * np.sin(np.arange(400) / 3.0) + rng.normal(0, 0.5, 400)
+    df = _frame(osc, rng_pct=0.015)
+    res = hi.run_hedged_intraday(df, datamod.atr(df, 14), scalp_model="grid",
+                                 realized_vol=datamod.realized_vol(df["Close"], 20),
+                                 grid_atr_frac=1.0, dte_days=180)
+    wins = sum(1 for r in res.table if r["period_pnl"] > 0)
+    assert res.period_win_rate == pytest.approx(wins / len(res.table), rel=1e-9)
+    assert 0.0 <= res.period_win_rate <= 1.0
+
+
+def test_api_coinflip_projection_present():
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    r = c.post("/api/hedged-intraday",
+               json={"ticker": "GLD", "start": "2019-01-01", "end": "2021-06-01",
+                     "dte_days": 180, "assumed_capture": 0.33})
+    assert r.status_code == 200, r.text
+    cf = r.json()["stats"]["coinflip"]
+    for k in ("trades_per_month", "capture_fraction", "coverage_ratio", "breakeven_capture",
+              "assumed_capture", "period_win_rate", "flip_type"):
+        assert k in cf, k
+    assert cf["assumed_capture"] == pytest.approx(0.33)
+    # coverage_at_assumed = coverage rescaled linearly to the assumed capture
+    if cf["capture_fraction"] > 0 and cf["coverage_at_assumed"] is not None:
+        assert cf["coverage_at_assumed"] == pytest.approx(
+            cf["coverage_ratio"] * (cf["assumed_capture"] / cf["capture_fraction"]), rel=1e-2)

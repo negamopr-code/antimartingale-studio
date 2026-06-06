@@ -88,6 +88,18 @@ class HedgedIntradayResult:
     confident_flat_days: int = 0       # days in "уверенный флет" (≥N clean round-trips, scaling allowed)
     scalp_scaled_max: float = 1.0      # max working-part lot scale-up reached in уверенный флет (1.0 = never)
     intraday_bars: int = 0             # # intraday bars the scalp walked (>0 ⇒ scalp on a real intraday feed)
+    # ---- "эквивалент монетки" / scalp-efficiency metrics (judge profitability the corpus's way) ----
+    scalp_avail_pts: float = 0.0       # the range the market gave = Σ daily (High−Low) over scalped days
+    scalp_harvest_pts: float = 0.0     # price-points booked by completed round-trips (Σ gap per RT), in points
+    capture_fraction: float = 0.0      # harvested / available = "доля пойманного движения" (doctrine ideal >0.5;
+                                       # can exceed 1 by scalping the same daily range several times — efficient)
+    trades_per_month: float = 0.0      # scalp round-trips normalized to per-month (doctrine target ≈200–250)
+    profit_per_trade: float = 0.0      # mean $ booked per scalp round-trip
+    theta_per_month: float = 0.0       # modeled straddle theta per month (≤0)
+    scalp_per_month: float = 0.0       # scalp P&L per month ($)
+    coverage_ratio: float = 0.0        # scalp_per_month / |theta_per_month| (≥1 ⇒ scalp pays the theta = profitable flat)
+    breakeven_capture: float = 0.0     # the capture fraction at which coverage=1 (φ* — catch more ⇒ "0.6-type")
+    period_win_rate: float = 0.0       # fraction of straddle periods with period_pnl>0 (the empirical coin-flip p)
 
 
 def _sigma_at(rv: "pd.Series | None", date, default: float) -> float:
@@ -229,6 +241,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     # ---- counter-trend grid state (event-driven, scalp_model='grid') ----
     scalp_realized = 0.0          # booked round-trips + stuck legs closed at roll
     scalp_cost_cum = 0.0          # scalp fill costs (separate so cum_scalp nets it once)
+    scalp_avail_pts = 0.0         # Σ daily (High−Low) over scalped days → "the range the market gave"
+    scalp_harvest_pts = 0.0       # Σ per-round-trip gap (price points) → "the range we caught"
     scalp_acc = 0.0               # range-model running net
     heal_budget = 0.0             # accumulated booked round-trip profit available to "heal" stuck parts
     clean_streak = 0              # consecutive clean round-trips with no stuck/heal → уверенный флет
@@ -266,7 +280,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                           "streak": clean_streak})
 
     def scalp_walk(o, h, l, c, ub, lb, date):
-        nonlocal scalp_realized, scalp_cost_cum
+        nonlocal scalp_realized, scalp_cost_cum, scalp_harvest_pts
         _book_roundtrip.date = date.date().isoformat()
         g = GRID
         if not g or g["part_lots"] <= 0:
@@ -304,6 +318,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                     if leg["side"] == "L" and a < leg["target"] <= b:
                         pnl = (leg["target"] - leg["entry"]) * leg["lots"]
                         scalp_realized += pnl
+                        scalp_harvest_pts += abs(leg["target"] - leg["entry"])   # points caught this RT
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
                         res.scalp_round_trips += 1; _book_roundtrip(pnl)
                         g["barm"][leg["k"]] = True; g["legs"].remove(leg)
@@ -321,6 +336,7 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
                     if leg["side"] == "S" and b <= leg["target"] < a:
                         pnl = (leg["entry"] - leg["target"]) * leg["lots"]
                         scalp_realized += pnl
+                        scalp_harvest_pts += abs(leg["entry"] - leg["target"])   # points caught this RT
                         scalp_cost_cum += fee * leg["lots"] * leg["target"]
                         res.scalp_round_trips += 1; _book_roundtrip(pnl)
                         g["sarm"][leg["k"]] = True; g["legs"].remove(leg)
@@ -433,6 +449,8 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
 
         # ---- scalping overlay ----
         if scalp_model == "grid":
+            if np.isfinite(hi) and np.isfinite(lo):
+                scalp_avail_pts += max(hi - lo, 0.0)       # "the range the market gave" today (capture denom)
             bars = intraday_by_day.get(d.normalize())
             if bars:                                       # walk the real intraday path of this day
                 for (row, ub_b, lb_b) in bars:             # row=(O,H,L,C); ub_b/lb_b = INTRADAY band
@@ -522,4 +540,32 @@ def run_hedged_intraday(daily: pd.DataFrame, daily_atr: pd.Series, *,
     res.gamma_dir_pnl = realized_straddle - cum_theta
     res.breakeven_scalp_cover_pct = (100.0 * (-realized_straddle) / abs(cum_theta)
                                      if realized_straddle < 0 and abs(cum_theta) > 1e-9 else 0.0)
+
+    # ---- "эквивалент монетки": reduce the strategy to its profitability primitives ----
+    # The corpus's own profitability test is "does the scalp pay the theta": scalp_income ≥ theta.
+    # Both the per-trade scalp income AND the theta scale with realized vol (∝ σ·S) once the book is
+    # sized to a fixed risk budget, so the COVERAGE RATIO is ~vol-invariant — it is governed by
+    # trades/month × capture fraction, not by the instrument's vol. That is the bridge that lets a
+    # capture fraction measured on a 1-min crypto feed project onto any asset by its vol.
+    res.scalp_avail_pts = scalp_avail_pts
+    res.scalp_harvest_pts = scalp_harvest_pts
+    # capture = "доля пойманного движения" = points booked / the daily range the market gave (doctrine
+    # ideal >0.5; can exceed 1 by scalping the same daily range several times — efficient multi-trip use).
+    res.capture_fraction = (scalp_harvest_pts / scalp_avail_pts) if scalp_avail_pts > 1e-12 else 0.0
+    months = res.years * 12.0 if res.years > 0 else 0.0
+    if months > 0:
+        res.trades_per_month = res.scalp_round_trips / months
+        res.theta_per_month = cum_theta / months          # ≤ 0
+        res.scalp_per_month = cum_scalp / months
+    res.profit_per_trade = (cum_scalp / res.scalp_round_trips) if res.scalp_round_trips > 0 else 0.0
+    theta_abs = abs(res.theta_per_month)
+    if theta_abs > 1e-9:
+        res.coverage_ratio = res.scalp_per_month / theta_abs
+        # φ* = capture at which coverage hits 1 (scalp income ∝ capture at fixed book/path).
+        if res.coverage_ratio > 1e-9:
+            res.breakeven_capture = res.capture_fraction / res.coverage_ratio
+    # empirical coin-flip p = win-rate of straddle periods (the "0.6 vs 0.45" the user asked for)
+    if res.table:
+        wins = sum(1 for row in res.table if row.get("period_pnl", 0.0) > 0)
+        res.period_win_rate = wins / len(res.table)
     return res

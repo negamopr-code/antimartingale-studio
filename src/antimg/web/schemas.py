@@ -170,6 +170,12 @@ class HedgedIntradayReq(BaseModel):
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)        # range model only: frac of reversed range booked
     max_rt_per_day: float = Field(10.0, ge=0, le=100)         # range model only: cap on round-trips/day
     stuck_penalty: float = Field(0.5, ge=0, le=5)             # range model only: drag from stuck parts
+    # "эквивалент монетки" projection: the capture fraction (доля пойманного движения) to ASSUME when
+    # projecting profitability onto an asset where we can't run 1m bars. Doctrine ideal >0.5; 0.33 =
+    # the user's conservative "catch ~⅓ of the move". The measured capture (from the 1m feed) is the
+    # honest anchor; this knob asks "what coverage would I get at this skill level?". Vol cancels, so
+    # it transfers across instruments. Display-only — does not change the backtest itself.
+    assumed_capture: float = Field(0.333, ge=0, le=2.0)
     # IV surface (same engine as the options tab)
     iv_window: int = Field(20, ge=2, le=500)
     iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
@@ -204,6 +210,7 @@ class HedgedIntradayScanReq(BaseModel):
     intraday_frac: float = Field(0.333, gt=0, le=1.0)
     scalp_efficiency: float = Field(0.5, ge=0, le=1.0)
     max_rt_per_day: float = Field(10.0, ge=0, le=100)
+    assumed_capture: float = Field(0.333, ge=0, le=2.0)      # see HedgedIntradayReq.assumed_capture
     stuck_penalty: float = Field(0.5, ge=0, le=5)
     iv_window: int = Field(20, ge=2, le=500)
     iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")

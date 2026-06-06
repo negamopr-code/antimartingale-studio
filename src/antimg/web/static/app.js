@@ -882,6 +882,32 @@ async function renderHedged(d) {
       + `⚠ НЕ механически точная: величина скальпа = что задашь в КПД (${$("#form-hedged [name=scalp_efficiency]").value}) / Max RT\n`
       + `  (${$("#form-hedged [name=max_rt_per_day]").value}), позиция не переносится — может как ЗАВЫСИТЬ, так и занизить скальп.\n`
       + `  Для честной картины переключись на модель «grid» (событийная сетка, дневной такт) с длинным DTE.`;
+  // --- "Эквивалент монетки": reduce the strategy to profitability primitives (0.6 vs 0.45) ---
+  const cf = s.coinflip;
+  if (cf && s.scalp_model === "grid") {        // only the grid model books real round-trips
+    const cap = cf.capture_fraction, cov = cf.coverage_ratio, tpm = cf.trades_per_month;
+    const tpmOk = tpm >= 150;                      // near the doctrine 200–250 loaded-book band
+    const capOk = cap >= 0.5;                      // corpus "ideal = catch >50% of the move"
+    const winning = cov >= 1.0;
+    let cfTxt =
+      `\n\n════════ ЭКВИВАЛЕНТ МОНЕТКИ (0.6 или 0.45?) ════════\n`
+      + `Доктринный тест прибыльности = «отбивает ли скальп тету»: доход скальпа ≥ тета.\n`
+      + `И тета, и доход-на-сделку растут с волатильностью (∝ σ·S) при фиксированном бюджете риска,\n`
+      + `поэтому ПОКРЫТИЕ почти НЕ зависит от инструмента — его задают сделки/мес × доля пойманного.\n\n`
+      + `сделок/мес        : ${f(tpm)}   (цель доктрины ${cf.trades_per_month_target})  ${tpmOk ? "✅" : "⚠ грид слишком широк для этого фида — уменьши grid_atr_frac"}\n`
+      + `прибыль на сделку : ${cf.profit_per_trade >= 0 ? "+" : ""}${f(cf.profit_per_trade)}$\n`
+      + `доля пойманного φ : ${f(100 * cap)}% дневного диапазона  ${capOk ? "✅ >50% (идеал доктрины)" : "(доктринный идеал >50%)"}\n`
+      + `доход скальпа/мес : ${cf.scalp_per_month >= 0 ? "+" : ""}${f(cf.scalp_per_month)}$   vs   тета/мес ${f(cf.theta_per_month)}$\n`
+      + `── ПОКРЫТИЕ = доход скальпа ÷ |тета| = ${f(cov)}  ${winning ? "≥ 1 ✅" : "< 1 ⚠"}\n`
+      + `   ${winning
+            ? "0.6-ТИПА: скальп САМ платит тету — стратегия плюсовая даже в чистом флете, тренд = бонус."
+            : `0.45-ТИПА: флет НЕ окупает тету (покрыто ${f(100 * cov)}%) — плюс держится на гамме/тренде, не на скальпе.`}\n`
+      + `   точка безубытка по φ : надо ловить ${f(100 * cf.breakeven_capture)}% диапазона (сейчас ${f(100 * cap)}%).\n`
+      + `\nПРОЕКЦИЯ НА ДРУГОЙ АКТИВ (φ переносится, σ сокращается): если ловить ${f(100 * cf.assumed_capture)}% →\n`
+      + `   покрытие ≈ ${cf.coverage_at_assumed == null ? "—" : f(cf.coverage_at_assumed)}  ${cf.coverage_at_assumed != null && cf.coverage_at_assumed >= 1 ? "(плюсовой флет)" : "(нужен тренд)"}\n`
+      + `эмпирический p (доля плюсовых периодов стреддла) : ${f(cf.period_win_rate)}  → ${cf.flip_type}`;
+    verdict += cfTxt;
+  }
   $("#hi-stats").textContent = verdict;
   renderHiRules(d, s, "hi-rules");          // same doctrine-compliance panel as Tab 9 (auto-parity)
   renderTable("hi-table", d.table);

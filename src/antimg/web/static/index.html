@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=64"/>
+  <link rel="stylesheet" href="/style.css?v=65"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -249,6 +249,7 @@
       <label title="первый шаг сетки = это × ATR выбранного таймфрейма (дефолт 2× дневного ATR — цель скальпа по мысли юзера)">1st step (×ATR) <input name="grid_atr_frac" type="number" step="any" value="0.5"></label>
       <label title="экспоненциальный множитель между частями (каждая дальше предыдущей)">Grid mult <input name="grid_mult" type="number" step="any" value="2.0"></label>
       <label title="правило трёх третей: интрадейный лимит как доля фьючерсов">Intraday frac <input name="intraday_frac" type="number" step="any" value="0.333"></label>
+      <label title="ЭКВИВАЛЕНТ МОНЕТКИ: какую долю движения (диапазона) предполагаем ловить при проекции на другой актив. Доктринный идеал >0.5; 0.33 = консервативно «ловим ⅓». Только для проекции — бэктест не меняет.">Assumed capture φ <input name="assumed_capture" type="number" step="any" value="0.333"></label>
       <label title="ТОЛЬКО range-модель: КПД скальпа (доля развернувшегося диапазона)">Scalp eff. (range) <input name="scalp_efficiency" type="number" step="any" value="0.5"></label>
       <label title="ТОЛЬКО range-модель: кэп круговых сделок в день">Max RT/day (range) <input name="max_rt_per_day" type="number" step="any" value="10"></label>
       <label title="ТОЛЬКО range-модель: штраф за залипшие части в тренде">Stuck penalty (range) <input name="stuck_penalty" type="number" step="any" value="0.5"></label>
@@ -306,6 +307,6 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=64"></script>
+  <script src="/app.js?v=65"></script>
 </body>
 </html>
