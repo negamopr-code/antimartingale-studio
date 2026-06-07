@@ -51,7 +51,15 @@ class PureStraddleResult:
     years: float = 0.0
     n_periods: int = 0
     n_wins: int = 0
+    n_losses: int = 0
     win_rate: float = 0.0
+    max_win_streak: int = 0          # longest run of consecutive profitable periods
+    max_loss_streak: int = 0         # longest run of consecutive losing periods
+    avg_win: float = 0.0             # mean P&L of profitable periods
+    avg_loss: float = 0.0            # mean P&L of losing periods (negative)
+    # run-length → how many such runs occurred, e.g. {1: 12, 2: 5, 3: 2} ("2 wins in a row happened 5×")
+    win_streaks: dict = field(default_factory=dict)
+    loss_streaks: dict = field(default_factory=dict)
     total_premium: float = 0.0       # Σ premium paid (the "rent")
     total_payoff: float = 0.0        # Σ intrinsic received
     net_pnl: float = 0.0
@@ -63,6 +71,26 @@ class PureStraddleResult:
     avg_move_pct: float = 0.0        # mean realized move % (what the market actually delivered)
     table: list[StraddlePeriod] = field(default_factory=list)
     equity: list[dict] = field(default_factory=list)   # [{date, bank}] for the curve
+
+
+def _streak_counts(outcomes: list[bool]) -> tuple[dict, dict]:
+    """Given the per-period win/loss sequence, return (win_streaks, loss_streaks) where each is
+    {run_length: how_many_such_runs}. E.g. outcomes W W W L L W → win {1:1, 3:1}, loss {2:1}.
+    Answers "how often did we get 3/4/5 wins (or losses) in a row?"."""
+    win: dict[int, int] = {}
+    loss: dict[int, int] = {}
+    run = 0
+    prev = None
+    for o in outcomes:
+        if o == prev:
+            run += 1
+        else:
+            if prev is not None:
+                (win if prev else loss)[run] = (win if prev else loss).get(run, 0) + 1
+            prev, run = o, 1
+    if prev is not None:                                     # flush the final run
+        (win if prev else loss)[run] = (win if prev else loss).get(run, 0) + 1
+    return dict(sorted(win.items())), dict(sorted(loss.items()))
 
 
 def run_pure_straddle(daily: pd.DataFrame, vol_model, *, risk_pct: float = 0.01,
@@ -143,11 +171,20 @@ def run_pure_straddle(daily: pd.DataFrame, vol_model, *, risk_pct: float = 0.01,
     res.n_periods = len(res.table)
     if res.n_periods:
         res.win_rate = res.n_wins / res.n_periods
+        res.n_losses = res.n_periods - res.n_wins
         res.net_pnl = res.final_bank - res.starting_bank
         res.avg_pnl = res.net_pnl / res.n_periods
+        win_pnls = [t.pnl for t in res.table if t.win]
+        loss_pnls = [t.pnl for t in res.table if not t.win]
+        res.avg_win = float(np.mean(win_pnls)) if win_pnls else 0.0
+        res.avg_loss = float(np.mean(loss_pnls)) if loss_pnls else 0.0
         wins = sum(t.pnl for t in res.table if t.pnl > 0)
         losses = sum(-t.pnl for t in res.table if t.pnl < 0)
         res.profit_factor = (wins / losses) if losses > 1e-9 else float("inf")
+        # streak distributions: count runs of consecutive wins / losses by their length
+        res.win_streaks, res.loss_streaks = _streak_counts([t.win for t in res.table])
+        res.max_win_streak = max(res.win_streaks, default=0)
+        res.max_loss_streak = max(res.loss_streaks, default=0)
         res.premium_recovered_pct = (100.0 * res.total_payoff / res.total_premium
                                      if res.total_premium > 1e-9 else 0.0)
         res.avg_breakeven_pct = float(np.mean([t.breakeven_pct for t in res.table]))

@@ -1350,6 +1350,31 @@ async function renderStraddle(d) {
     xaxis: { gridcolor: "#2a3340", title: { text: "P&L за период ($)" }, zeroline: true, zerolinecolor: "#8b949e" },
     yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
   }));
+  // outcome distribution — how many periods in profit vs in loss (the coin-flip-style tally)
+  await plot("str-dist", [
+    { x: ["в плюсе", "в минусе"], y: [s.n_wins, s.n_losses], type: "bar",
+      marker: { color: ["rgba(63,185,80,0.85)", "rgba(248,81,73,0.85)"] },
+      text: [`${s.n_wins} (${(s.win_rate*100).toFixed(1)}%)`,
+             `${s.n_losses} (${((1-s.win_rate)*100).toFixed(1)}%)`], textposition: "auto" },
+  ], layout(`Исходы: в плюсе vs в минусе (${s.n_periods} периодов)`, {
+    yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
+  }));
+  // streak distribution — runs of N consecutive wins / losses ("3/4/5 in a row")
+  const ws = d.win_streaks || {}, ls = d.loss_streaks || {};
+  const maxLen = Math.max(0, ...Object.keys(ws).map(Number), ...Object.keys(ls).map(Number));
+  const lens = []; for (let i = 1; i <= maxLen; i++) lens.push(i);
+  await plot("str-streaks", [
+    { x: lens, y: lens.map((n) => ws[n] || 0), type: "bar", name: "побед подряд",
+      marker: { color: "rgba(63,185,80,0.85)" } },
+    { x: lens, y: lens.map((n) => ls[n] || 0), type: "bar", name: "убытков подряд",
+      marker: { color: "rgba(248,81,73,0.85)" } },
+  ], layout(`Серии подряд (макс: ${s.max_win_streak}W / ${s.max_loss_streak}L)`, {
+    barmode: "group",
+    xaxis: { gridcolor: "#2a3340", title: { text: "длина серии (подряд)" }, dtick: 1 },
+    yaxis: { gridcolor: "#2a3340", title: { text: "сколько раз случилось" } },
+  }));
+  const streakStr = (m) => Object.keys(m).length
+    ? Object.entries(m).map(([k, v]) => `${k}×${v}`).join(", ") : "—";
   // verdict — lead with the honest long-straddle economics
   const profitable = s.net_pnl > 0;
   const vrp = s.avg_breakeven_pct - s.avg_move_pct;   // how much IV cost exceeded the realized move
@@ -1357,7 +1382,12 @@ async function renderStraddle(d) {
     `🎯 ЧИСТЫЙ СТРЕДДЛ ДО ЭКСПИРАЦИИ — ${s.ticker}  ·  IV-модель: ${s.vol_model}\n`
     + `${s.n_periods} периодов × DTE ${d.params.dte_days}д · risk ${(d.params.risk_pct*100).toFixed(2)}%/период · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
     + `\nИТОГ: ${profitable ? "📈 ПЛЮС" : "📉 МИНУС"}  ·  банк ${f(s.starting_bank)} → ${f(s.final_bank)}  (чистый ${f(s.net_pnl)} $)  ·  CAGR ${s.ann_return_pct}%\n`
-    + `прибыльных периодов: ${s.n_wins}/${s.n_periods} (${(s.win_rate*100).toFixed(1)}%)  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}  ·  средн. P&L ${f(s.avg_pnl)} $\n`
+    + `прибыльных периодов: ${s.n_wins}/${s.n_periods} (${(s.win_rate*100).toFixed(1)}%)  ·  убыточных ${s.n_losses}  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}\n`
+    + `средн. выигрыш ${f(s.avg_win)} $  ·  средн. проигрыш ${f(s.avg_loss)} $  ·  средн. P&L ${f(s.avg_pnl)} $\n`
+    + `\n🔁 СЕРИИ ПОДРЯД (длина×сколько раз):  макс ${s.max_win_streak} побед / ${s.max_loss_streak} убытков подряд\n`
+    + `   победы подряд : ${streakStr(ws)}\n`
+    + `   убытки подряд : ${streakStr(ls)}\n`
+    + `   (читается «3×2» = серия из 3 подряд случилась 2 раза. Стреддл чаще проигрывает → длинные серии убытков, редкие но крупные победы.)\n`
     + `   (risk % = ВЕСЬ стреддл колл+пут вместе; для ATM делится ≈ поровну — см. столбцы «колл $» / «пут $» в таблице.)\n`
     + `\n💸 «АРЕНДА» (стоимость стреддла): заплачено премии Σ ${f(s.total_premium)}  ·  получено на экспирации Σ ${f(s.total_payoff)}\n`
     + `   возврат премии: ${s.premium_recovered_pct}%  ⇒ ${s.premium_recovered_pct >= 100 ? "выплаты ПОКРЫЛИ премию (стреддл окупился)" : "выплаты НЕ покрыли премию (стреддл стоил дороже, чем дал)"}\n`

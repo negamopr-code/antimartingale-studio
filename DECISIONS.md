@@ -731,3 +731,19 @@ Not implemented; documented as a rejected tactic.
 - **Verified:** SPY 1% real run → row1 pays exactly 100.00 (1% of 10k) = call 54.03 + put 45.97; bank now
   bleeds slowly (−2.7%/yr over 2010–26, 77% premium recovered) instead of being wiped by 100% bets.
 - 106 tests (+1: call_cost+put_cost==premium & first period == 1% of bank). assets v74.
+
+## D69 — Tab 10: outcome distribution + win/loss streak distribution (coin-flip style) (2026-06-07)
+- **Ask (user):** add a distribution like the coin-flip tab — how many periods in profit vs loss — AND
+  the streaks of consecutive wins/losses ("3/4/5 in a row").
+- **Built:**
+  - Engine: `_streak_counts(outcomes)` → `{run_length: count}` for win-runs and loss-runs; result now
+    carries `n_losses`, `max_win_streak`, `max_loss_streak`, `avg_win`, `avg_loss`, `win_streaks`,
+    `loss_streaks`. Endpoint returns the streak dicts + the new summary fields.
+  - Tab-10 UI: two new charts — **«Исходы: в плюсе vs в минусе»** (green/red count bars with %) and
+    **«Серии подряд»** (grouped bars: # of win-runs vs loss-runs at each length 1..max). Verdict adds a
+    streak tally line ("победы подряд: 1×28, 2×8, 3×2, 4×2 / убытки подряд: …") + avg win/avg loss.
+- **Finding (the value):** SPY 30d straddles 2010–26 → 58W/137L (29.7%), **max 20-loss streak** (the
+  calm 2013–17 low-vol grind), loss-runs cluster (six 6-in-a-rows); wins are mostly isolated (1×28). The
+  long-straddle signature: frequent clustered losses, rare isolated wins — exactly why it bleeds.
+- 108 tests (+2: `_streak_counts` cases; engine streak/count self-consistency Σ run_len×count == totals).
+  assets v75.

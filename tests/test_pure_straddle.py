@@ -116,6 +116,38 @@ def test_breakeven_is_premium_over_spot():
     assert t.breakeven_pct == pytest.approx(100.0 * t.prem_per_unit / t.spot_entry, abs=1e-2)
 
 
+def test_streak_counts_helper():
+    """_streak_counts groups runs of consecutive wins/losses by length."""
+    # W W W L L W  → win runs {3:1, 1:1}, loss runs {2:1}
+    win, loss = ps._streak_counts([True, True, True, False, False, True])
+    assert win == {1: 1, 3: 1}
+    assert loss == {2: 1}
+    # all losses
+    win, loss = ps._streak_counts([False, False, False])
+    assert win == {} and loss == {3: 1}
+    # alternating → all length-1 runs
+    win, loss = ps._streak_counts([True, False, True, False])
+    assert win == {1: 2} and loss == {1: 2}
+    assert ps._streak_counts([]) == ({}, {})
+
+
+def test_engine_reports_streaks_and_counts():
+    """The result carries n_losses, max streaks, avg win/loss, and streak distributions that are
+    self-consistent (Σ over runs of run_len×count == total wins / losses)."""
+    rng = np.random.default_rng(9)
+    df = _frame(100.0 + np.cumsum(rng.normal(0, 1.0, 400)))
+    res = ps.run_pure_straddle(df, _const_vol(0.2), risk_pct=0.01, dte_days=30, starting_bank=10_000.0)
+    assert res.n_wins + res.n_losses == res.n_periods
+    assert res.max_win_streak == max(res.win_streaks, default=0)
+    assert res.max_loss_streak == max(res.loss_streaks, default=0)
+    assert sum(k * v for k, v in res.win_streaks.items()) == res.n_wins
+    assert sum(k * v for k, v in res.loss_streaks.items()) == res.n_losses
+    if res.n_wins:
+        assert res.avg_win > 0
+    if res.n_losses:
+        assert res.avg_loss < 0
+
+
 def test_api_pure_straddle_endpoint():
     from fastapi.testclient import TestClient
     from antimg.web.api import app

@@ -1117,7 +1117,10 @@ def pure_straddle(req: PureStraddleReq):
         "ticker": req.ticker, "vol_model": vm.label,
         "starting_bank": round(res.starting_bank, 2), "final_bank": round(res.final_bank, 2),
         "net_pnl": round(res.net_pnl, 2), "years": round(res.years, 2),
-        "n_periods": res.n_periods, "n_wins": res.n_wins, "win_rate": round(res.win_rate, 4),
+        "n_periods": res.n_periods, "n_wins": res.n_wins, "n_losses": res.n_losses,
+        "win_rate": round(res.win_rate, 4),
+        "max_win_streak": res.max_win_streak, "max_loss_streak": res.max_loss_streak,
+        "avg_win": round(res.avg_win, 2), "avg_loss": round(res.avg_loss, 2),
         "ann_return_pct": round(res.ann_return_pct, 2), "avg_pnl": round(res.avg_pnl, 2),
         "profit_factor": inf(res.profit_factor),
         "total_premium": round(res.total_premium, 2), "total_payoff": round(res.total_payoff, 2),
@@ -1126,7 +1129,8 @@ def pure_straddle(req: PureStraddleReq):
         "avg_move_pct": round(res.avg_move_pct, 3),
     }
     return {"params": req.model_dump(), "summary": summary,
-            "table": [vars(t) for t in res.table], "equity": res.equity}
+            "table": [vars(t) for t in res.table], "equity": res.equity,
+            "win_streaks": res.win_streaks, "loss_streaks": res.loss_streaks}
 
 
 # ----------------------------------------------------------------- TradingView ingest

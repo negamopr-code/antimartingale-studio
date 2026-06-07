@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=74"/>
+  <link rel="stylesheet" href="/style.css?v=75"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -347,12 +347,13 @@
       <label title="% от премии/выплаты на КАЖДУЮ ногу">Slippage % <input name="slippage_pct" type="number" step="any" value="0"></label>
       <button type="submit">Прогнать чистый стреддл</button>
     </form>
-    <div class="results"><div class="plots"><div id="str-equity"></div><div id="str-hist"></div></div>
+    <div class="results"><div class="plots"><div id="str-equity"></div><div id="str-dist"></div>
+      <div id="str-streaks"></div><div id="str-hist"></div></div>
       <pre class="stats" id="str-stats"></pre></div>
     <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧾 По периодам — вход/экспирация, премия, выплата, P&L ↓</h3>
     <div class="tradetable" id="str-table"></div>
   </section>
 
-  <script src="/app.js?v=74"></script>
+  <script src="/app.js?v=75"></script>
 </body>
 </html>
