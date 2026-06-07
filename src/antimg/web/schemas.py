@@ -241,6 +241,24 @@ class HedgedIntradayScanReq(BaseModel):
     slippage_pct: float = Field(0.0, ge=0, le=50)
 
 
+class PiCoinReq(BaseModel):
+    """Tab 13: estimate the net ПИ monthly win-rate `p_net` for an instrument from observable data
+    (RV vs IV per period + scalp coverage c net of costs), and the p_net(c) curve / critical c* — to
+    decide IN ADVANCE whether it's a >0.55 coin (antimartingale-worthy). `scan` ranks the whole catalog."""
+    ticker: str = Field("ETH-USD", min_length=1, max_length=20)
+    start: str = "2018-01-01"
+    end: str | None = None
+    dte_days: int = Field(30, ge=7, le=365)          # period length (monthly≈30, quarterly≈90)
+    c: float = Field(0.35, ge=0, le=1.0)             # GROSS scalp coverage of theta (assumption)
+    cost_drag: float = Field(0.05, ge=0, le=0.5)     # coverage eaten by commissions/slippage
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
+    iv_const: float = Field(0.20, gt=0, le=3)
+    skew_beta: float | None = Field(None, ge=-2, le=2)
+    use_term_structure: bool = True
+    scan: bool = False                               # rank the whole catalog by p_net at this c
+
+
 class AntimgOverlayReq(HedgedIntradayReq):
     """Tab 12: run the ПИ (Hedged Intraday) backtest, then lay the antimartingale pyramid-on-wins
     overlay on its per-period P&L — double the position after a winning period, reset after a loss,

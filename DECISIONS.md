@@ -952,3 +952,22 @@ Not implemented; documented as a rejected tactic.
   carry on top (RUB only); the durable universal edge is the asymmetry.** Skill §0 + lessons updated with
   the validated refinement. PROCESS LESSON: consult the guru to validate a correction BEFORE locking the
   skill — here the dialogue confirmed D80 AND added the instrument lever. No app/test change (127 tests).
+
+## D82 — Tab 13: ПИ Coin estimator (ex-ante p_net) + RV/IV is the master filter (SPY puzzle resolved) (2026-06-07)
+- **Ask (user):** stop theorizing — build a MODEL that says, in advance, whether an instrument is a
+  ≥~0.6 coin (net of commission/slippage) so we know if the antimartingale is justified. Then user
+  challenged: SPY is volatile, strange it scores poorly — challenge the guru.
+- **Built `pi_coin.py` + Tab 13.** Model: a period wins ⟺ `RV > IV·√(1−c_net)` (gamma capture (RV/IV)²
+  + scalp coverage c net of costs). **p_net = fraction of historical periods** beating the breakeven,
+  from the instrument's own RV distribution + IV — no lognormal assumption. Reports: p_net at chosen c,
+  the **p_net(c) curve + critical c\*** (coverage needed for 0.55/0.60), diagnostics (RV/IV, wickiness,
+  VR(63)), a proxy `c_suggest`, walk-forward `p_in/p_out` (1st vs 2nd half), payoff b / EV; `scan` ranks
+  the whole catalog. Endpoint `POST /api/pi-coin` (single + scan). 132 tests (+5). assets v86.
+- **SPY puzzle RESOLVED (guru-validated, 4th consult):** SPY p_net≈0.32 NOT because it lacks vol — because
+  its options are structurally RICH (RV/IV≈0.73; VIX>realized = the equity variance-risk premium / insurance
+  bid) → long-straddle ПИ bleeds. **High ABSOLUTE vol ≠ good; cheap vol (RV≥IV) is the master filter.**
+  Korovin AGREES: "universal" = the MECHANICS, not the edge — select inefficient cheap-vol names
+  (CNY/crypto/silver), avoid rich-vol indices. ETH p_net≈0.69–0.75 (RV/IV≈1.0, c* for 0.6≈0.12–0.23,
+  stable p_in/out) — antimartingale-worthy; SPY needs c*≈0.63 (unrealistic) despite strong intraday MR
+  (VR 0.59). Skill: coin-flip-decomposition.md §10 (ex-ante selection) + lessons.
+- **Verdict logic:** p_net≥0.55 ⇒ antimartingale makes sense; else the edge is the convex payoff, not streaks.

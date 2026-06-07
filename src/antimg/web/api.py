@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import am_overlay as amov
 from .. import atr_strategy as strat
+from .. import pi_coin as picoin
 from .. import data as datamod
 from .. import hedged_intraday as hi
 from .. import pi_model as pim
@@ -30,7 +31,7 @@ from . import serialization as ser
 from .config import settings
 from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
-                      PureStraddleReq, ScanReq)
+                      PiCoinReq, PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1229,6 +1230,60 @@ def hedged_intraday_antimartingale(req: AntimgOverlayReq):
     return {"params": req.model_dump(), "summary": summary, "table": table,
             "dates": [r["close"] for r in table], "flat_equity": ov.flat_equity,
             "am_equity": ov.am_equity, "shuffle_samples": ov.shuffle_samples}
+
+
+def _picoin_one(ticker, req):
+    daily = datamod.fetch(ticker, start=req.start, end=req.end)
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < 60:
+        raise ValueError("insufficient data")
+    realized = datamod.realized_vol(daily["Close"], req.iv_window)
+    vm = volmod.build(ticker, req.start, iv_source=req.iv_source, skew_beta=req.skew_beta,
+                      realized=realized, iv_const=req.iv_const)
+    if not req.use_term_structure and len(vm._T) > 1:
+        target = req.dte_days / 365.0
+        keep = min(vm._T, key=lambda t: abs(t - target))
+        vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
+    est = picoin.estimate_coin(daily, vm, dte_days=req.dte_days, c=req.c, cost_drag=req.cost_drag)
+    est.ticker, est.vol_model = ticker, vm.label
+    return est
+
+
+@app.post("/api/pi-coin")
+def pi_coin(req: PiCoinReq):
+    """Tab 13: estimate the net ПИ win-rate p_net (and the p_net(c) curve + critical c* + diagnostics) for
+    one instrument — or, with scan=True, rank the whole catalog by p_net at the chosen coverage `c`. The
+    verdict says whether it's a >0.55 coin (antimartingale-worthy) or a fair coin (edge is the convexity)."""
+    if req.scan:
+        rows = []
+        for ticker, label, group in instruments.flat_with_group():
+            try:
+                e = _picoin_one(ticker, req)
+                if e.n_periods < 4:
+                    continue
+                rows.append({"ticker": ticker, "label": label, "group": group, "n_periods": e.n_periods,
+                             "p_net": e.p_net, "ev_per_theta": e.ev_per_theta, "payoff_ratio": (None if e.payoff_ratio == float("inf") else e.payoff_ratio),
+                             "rv_over_iv": e.rv_over_iv, "wickiness": e.wickiness, "variance_ratio": e.variance_ratio,
+                             "c_suggest": e.c_suggest, "c_star_060": e.c_star_060, "p_out": e.p_out})
+            except Exception:
+                continue
+        rows.sort(key=lambda r: r["p_net"], reverse=True)
+        n = len(rows)
+        agg = {"n": n, "c": req.c, "cost_drag": req.cost_drag, "dte_days": req.dte_days,
+               "n_above_055": sum(1 for r in rows if r["p_net"] >= 0.55),
+               "n_above_060": sum(1 for r in rows if r["p_net"] >= 0.60),
+               "median_p_net": round(sorted(r["p_net"] for r in rows)[n // 2], 4) if n else 0.0}
+        return {"params": req.model_dump(), "scan": True, "rows": rows, "aggregate": agg}
+    try:
+        est = _picoin_one(req.ticker, req)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data/vol error: {ex}")
+    if est.n_periods < 4:
+        raise HTTPException(status_code=422, detail="not enough periods (longer window or shorter DTE)")
+    inf = lambda x: (None if x == float("inf") else x)
+    return {"params": req.model_dump(), "scan": False, "estimate": {**vars(est), "payoff_ratio": inf(est.payoff_ratio)}}
 
 
 @app.post("/api/pure-straddle")

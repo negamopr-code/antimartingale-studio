@@ -117,7 +117,7 @@ function gateIvInputs(formSel) {
   set("iv_window", v === "realized");
   set("iv_const", v === "constant");
 }
-["#form-straddle", "#form-legs", "#form-amov", "#form-hedged", "#form-hiexec"].forEach((f) => {
+["#form-straddle", "#form-legs", "#form-amov", "#form-picoin", "#form-hedged", "#form-hiexec"].forEach((f) => {
   const src = $(f + " [name=iv_source]");
   if (src) src.addEventListener("change", () => gateIvInputs(f));
   gateIvInputs(f);                                            // apply on load
@@ -1675,6 +1675,82 @@ $("#form-amov").onsubmit = (e) => {
   withBusy(e.submitter, async () => {
     toast("Прогон ПИ-бэктеста + антимартингейл + shuffle-тест…", true);
     renderAntimg(await post("/api/hedged-intraday/antimartingale", formData(e.target)));
+  });
+};
+
+// ---- tab 13 · ПИ coin estimator ----------------------------------------------------------------
+async function renderPiCoin(d) {
+  const f2 = (v) => (v == null ? "—" : (+v).toFixed(2));
+  if (d.scan) {
+    await plot("pc-curve", [], layout("Скан каталога — см. таблицу и распределение →"));
+    const rows = d.rows, a = d.aggregate;
+    await plot("pc-scan", [
+      { x: rows.map((r) => r.ticker), y: rows.map((r) => r.p_net), type: "bar",
+        marker: { color: rows.map((r) => (r.p_net >= 0.6 ? "#3fb950" : (r.p_net >= 0.55 ? "#d29922" : "#f85149"))) } },
+    ], layout(`p_net по каталогу (c=${a.c}, cost ${a.cost_drag}, DTE ${a.dte_days}д)`, {
+      xaxis: { gridcolor: "#2a3340", tickangle: -60, automargin: true },
+      yaxis: { gridcolor: "#2a3340", title: { text: "p_net" }, range: [0, 1] },
+      shapes: [0.5, 0.55, 0.6].map((y) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
+        line: { color: "#8b949e", dash: "dot", width: 1 } })),
+    }));
+    $("#pc-stats").textContent =
+      `🪙 ПИ COIN — СКАН КАТАЛОГА (c=${a.c} gross, cost ${a.cost_drag}, DTE ${a.dte_days}д) · ${a.n} инструментов\n`
+      + `≥0.60 (антимарт. явно ок): ${a.n_above_060}   ·   ≥0.55: ${a.n_above_055}   ·   медиана p_net: ${a.median_p_net}\n`
+      + `\nЗелёный = p_net≥0.6 · жёлтый = 0.55–0.6 · красный = <0.55. Сортировка по p_net.\n`
+      + `Ключ: высокий p_net чаще там, где RV/IV>1 (дёшевые опционы) И VR<1 (возврат к среднему). p_out = вторая половина (стабильность).`;
+    const cols = [["ticker","инстр"],["group","класс"],["p_net","p_net"],["p_out","p_out (2-я пол.)"],
+      ["rv_over_iv","RV/IV"],["wickiness","wick"],["variance_ratio","VR(63)"],["c_suggest","c~ (оценка)"],
+      ["c_star_060","c* для 0.6"],["ev_per_theta","EV/θ"],["payoff_ratio","payoff b"]];
+    let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
+    for (const r of rows) {
+      h += `<tr class="${r.p_net >= 0.55 ? "w" : ""}">` + cols.map((c) => {
+        let v = r[c[0]];
+        if (c[0] === "p_net") return `<td style="color:${v >= 0.6 ? "#3fb950" : (v >= 0.55 ? "#d29922" : "#f85149")};font-weight:700">${f2(v)}</td>`;
+        return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 3 }) : (v == null ? "—" : v)}</td>`;
+      }).join("") + "</tr>";
+    }
+    $("#pc-table").innerHTML = h + `</tbody></table></div><div class="tt-note">${rows.length} инструментов</div>`;
+    return;
+  }
+  const e = d.estimate;
+  await plot("pc-scan", [], layout(""));
+  const cs = e.curve.map((p) => p.c), ps = e.curve.map((p) => p.p);
+  await plot("pc-curve", [
+    { x: cs, y: ps, mode: "lines+markers", name: "p_net(c)", line: { color: "#a371f7", width: 2 } },
+    { x: [d.params.c, d.params.c], y: [0, 1], mode: "lines", name: `текущее c=${d.params.c}`,
+      line: { color: "#e3b341", dash: "dash", width: 1 } },
+    { x: [e.c_suggest, e.c_suggest], y: [0, 1], mode: "lines", name: `c~ оценка ${e.c_suggest}`,
+      line: { color: "#58a6ff", dash: "dot", width: 1 } },
+  ], layout(`p_net vs покрытие c — ${e.ticker} (${e.vol_model})`, {
+    xaxis: { gridcolor: "#2a3340", title: { text: "scalp coverage c (gross)" } },
+    yaxis: { gridcolor: "#2a3340", title: { text: "p_net" }, range: [0, 1] },
+    shapes: [0.5, 0.55, 0.6].map((y) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
+      line: { color: "#8b949e", dash: "dot", width: 1 } })),
+  }));
+  const worthy = e.p_net >= 0.55;
+  const stable = Math.abs(e.p_in - e.p_out) <= 0.15;
+  $("#pc-stats").textContent =
+    `🪙 ПИ COIN ESTIMATE — ${e.ticker} (${e.vol_model}) · ${e.n_periods} периодов × DTE ${e.dte_days}д\n`
+    + `\n⇒ p_net = ${f2(e.p_net)}  (при c=${d.params.c} gross − cost ${d.params.cost_drag} = c_net ${e.c_net})  ${worthy ? "✅ ≥0.55 — монетка с перевесом" : "❌ <0.55 — ~честная монетка"}\n`
+    + `АНТИМАРТИНГЕЙЛ: ${e.p_net >= 0.55 ? "ИМЕЕТ смысл (p>0.5 ⇒ (2p)^N−1>0, пирамида растёт с серией)" : "НЕ имеет смысла (p≈0.5 ⇒ (2p)^N−1≈0; edge тут — асимметрия выплат, не серии)"}\n`
+    + `\n📊 EV/θ = ${f2(e.ev_per_theta)} за период · средн.выигрыш ${f2(e.avg_win)}θ / проигрыш ${f2(e.avg_loss)}θ · payoff b=${e.payoff_ratio == null ? "∞" : e.payoff_ratio} ⇒ безубыток p*=${f2(e.breakeven_p)}\n`
+    + `   (даже если p_net<0.5, при b>1 и p>p* стратегия +EV за счёт ВЫПУКЛОСТИ — но антимартингейлу нужен именно p>0.5.)\n`
+    + `\n🔭 ЗАРАНЕЕ-метрики этого инструмента:\n`
+    + `   RV/IV (медиана) = ${e.rv_over_iv}  ${e.rv_over_iv >= 1 ? "✅ опционы дёшевы (RV≥IV)" : "⚠ опционы дороги (IV>RV, премия за риск воли)"}\n`
+    + `   wickiness = ${e.wickiness} (выше ⇒ больше интрадей-возврата/«соплей» ⇒ выше достижимое c)  ·  VR(63) = ${e.variance_ratio} ${e.variance_ratio < 1 ? "(возврат к среднему — скальп работает)" : "(тренд — скальпу хуже)"}\n`
+    + `   оценка достижимого c ≈ ${e.c_suggest} (прокси, не факт)\n`
+    + `\n🎯 КРИТИЧЕСКОЕ ПОКРЫТИЕ: чтобы p_net=0.55 нужно c=${e.c_star_055 < 0 ? "недостижимо <1" : e.c_star_055}; для 0.60 — c=${e.c_star_060 < 0 ? "недостижимо <1" : e.c_star_060}.\n`
+    + `   ⇒ ${e.c_star_060 >= 0 && e.c_star_060 <= e.c_suggest + 0.1 ? "достижимо при оценке c~ — кандидат на 0.6" : "нужно покрытие выше оценки c~ — маловероятно 0.6"}\n`
+    + `\n🧪 СТАБИЛЬНОСТЬ (walk-forward): p_net 1-я половина ${f2(e.p_in)} / 2-я половина ${f2(e.p_out)}  ${stable ? "✅ устойчиво" : "⚠ НЕустойчиво — режим менялся, не экстраполируй"}\n`
+    + `\n💡 Это ОЦЕНКА из наблюдаемых данных, не гарантия. Надёжная часть — кривая p_net(c) и c*; достижимость c — вопрос интрадей-возврата (см. wickiness/VR). RV/IV — главный рычаг.`;
+  $("#pc-table").innerHTML = "";
+}
+$("#form-picoin").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () => {
+    const o = formData(e.target);
+    if (o.scan === "true") toast("Скан каталога: тяну данные по всем инструментам (1–2 мин)…", true);
+    renderPiCoin(await post("/api/pi-coin", o));
   });
 };
 

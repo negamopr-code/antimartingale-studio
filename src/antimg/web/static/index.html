@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=85"/>
+  <link rel="stylesheet" href="/style.css?v=86"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -25,6 +25,7 @@
       <button class="tab" data-tab="straddle">10 · Pure straddle</button>
       <button class="tab" data-tab="legs">11 · Call vs Put</button>
       <button class="tab" data-tab="amov">12 · ПИ × Antimartingale</button>
+      <button class="tab" data-tab="picoin">13 · ПИ Coin estimator</button>
     </nav>
   </header>
 
@@ -439,6 +440,34 @@
     <div class="tradetable" id="am-table"></div>
   </section>
 
-  <script src="/app.js?v=85"></script>
+  <!-- TAB 13 -->
+  <section id="picoin" class="panel">
+    <p class="hint"><b>ПИ Coin estimator — знать ЗАРАНЕЕ, монетка ли это ≥0.55 (стоит ли антимартингейл).</b>
+      Модель: период выигрывает ⟺ <code>RV &gt; IV·√(1−c_net)</code> (гамма-захват (RV/IV)² + покрытие теты
+      скальпом c, нетто костов). <b>p_net = доля исторических периодов</b>, где реализ.вола побила безубыток —
+      из реальных данных инструмента (RV-распределение + IV). Главный рычаг — <code>c_net</code>; показываем
+      кривую p_net(c) и критическое c* (сколько покрытия нужно для 0.6).
+      <br>⚠ c (интрадей-покрытие) НЕ измеримо из дневных баров — кривая и c* надёжны, а оценка достижимого c
+      (из «wickiness» и variance ratio) — это прокси, не факт. RV/IV&gt;1 = дешёвые опционы (хорошо); VR&lt;1 =
+      возврат к среднему (скальп работает). p_in/p_out = первая/вторая половина истории (стабильность).</p>
+    <form class="controls" id="form-picoin">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2019-01-01"></label>
+      <label>End <input name="end" placeholder="latest"></label>
+      <label title="длина периода: месяц≈30, квартал≈90">DTE days (период) <input name="dte_days" type="number" value="30"></label>
+      <label title="ГРОССОВОЕ покрытие теты скальпом (допущение). На дневных данных не измеримо — см. c_suggest/c*">Scalp coverage c <input name="c" type="number" step="any" value="0.35"></label>
+      <label title="сколько покрытия съедают комиссии/слипедж">Cost drag <input name="cost_drag" type="number" step="any" value="0.05"></label>
+      <label title="источник IV (для RV/IV). auto = вол-индекс по классу">IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label>IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
+      <label title="ранжировать ВЕСЬ каталог по p_net при этом c (медленно, первый прогон 1-2 мин)">Scan all <select name="scan"><option value="false">off (один инструмент)</option><option value="true">on (ранжировать каталог)</option></select></label>
+      <button type="submit">Оценить монетку</button>
+    </form>
+    <div class="results"><div class="plots"><div id="pc-curve"></div><div id="pc-scan"></div></div>
+      <pre class="stats" id="pc-stats"></pre></div>
+    <div class="tradetable" id="pc-table"></div>
+  </section>
+
+  <script src="/app.js?v=86"></script>
 </body>
 </html>
