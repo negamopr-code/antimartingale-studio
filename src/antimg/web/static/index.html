@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=84"/>
+  <link rel="stylesheet" href="/style.css?v=85"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -416,8 +416,13 @@
       <label>Instrument <select name="ticker" class="instr"></select></label>
       <label>Start <input name="start" value="2010-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
-      <label title="период = срок стреддла ПИ: месяц≈30д, квартал≈90д, as-is = DTE ниже">Period <select name="am_period"><option value="monthly">monthly (≈30д)</option><option value="quarterly">quarterly (≈90д)</option><option value="asis">as-is (DTE)</option></select></label>
-      <label title="as-is: использовать этот DTE">DTE days (as-is) <input name="dte_days" type="number" value="30"></label>
+      <label title="ИСТОЧНИК периодов: doctrine = синтетика по плановой статистике Коровина (9 плюс / 3 минус, win-rate 0.75 — скальп ДЕЙСТВИТЕЛЬНО кроет тету); backtest = реальный ПИ-бэктест (пессимистичен: бесплатные дневные данные НЕ видят интрадей-скальп → заниженный win-rate).">Источник <select name="source"><option value="doctrine">doctrine 9/3 (синтетика, p=0.75)</option><option value="backtest">ПИ backtest (как есть)</option></select></label>
+      <label title="doctrine: доля плюсовых месяцев (9/12=0.75 по Коровину)">Win-rate (doctrine) <input name="d_win_rate" type="number" step="any" value="0.75"></label>
+      <label title="doctrine: плюсовой месяц = +этот % депозита (цель 5–7%)">Win % (doctrine) <input name="d_win_pct" type="number" step="any" value="6"></label>
+      <label title="doctrine: «тухлый» минусовой месяц = −этот % депозита (тета не покрыта)">Loss % (doctrine) <input name="d_loss_pct" type="number" step="any" value="5"></label>
+      <label title="doctrine: сколько месяцев симулировать (120 = 10 лет)">Months (doctrine) <input name="d_n_periods" type="number" value="120" min="4" max="2000"></label>
+      <label title="период = срок стреддла ПИ (только backtest): месяц≈30д, квартал≈90д, as-is = DTE ниже">Period <select name="am_period"><option value="monthly">monthly (≈30д)</option><option value="quarterly">quarterly (≈90д)</option><option value="asis">as-is (DTE)</option></select></label>
+      <label title="as-is: использовать этот DTE (только backtest)">DTE days (as-is) <input name="dte_days" type="number" value="30"></label>
       <label title="удвоений риска подряд до фиксации серии (1/2/3/4…)">Target streak <input name="target_streak" type="number" value="4" min="1" max="20"></label>
       <label title="перемешиваний для shuffle-теста (0 = выкл)">Shuffles <input name="n_shuffles" type="number" value="50" min="0" max="500"></label>
       <label title="бюджет премии ПИ = risk% × банк">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
@@ -434,6 +439,6 @@
     <div class="tradetable" id="am-table"></div>
   </section>
 
-  <script src="/app.js?v=84"></script>
+  <script src="/app.js?v=85"></script>
 </body>
 </html>

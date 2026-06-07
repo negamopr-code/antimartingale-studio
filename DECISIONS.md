@@ -881,3 +881,20 @@ Not implemented; documented as a rejected tactic.
   overlay adds NO alpha — it's leverage on whatever drift/clustering exists, and ПИ has neither here.
 - 125 tests (+6: pyramid mechanics, give-back, shuffle detects clustering / neutral on IID, order-indep
   flat, endpoint). assets v84. SKILL sanity-check #3 honored (shuffle, not detrend).
+
+## D78 — Tab 12: DOCTRINE 9/3 source (test antimartingale at ПИ's real win-rate) + EV-identity line (2026-06-07)
+- **User challenge (correct):** the backtest gave p=0.28 (losing) only because free daily data can't see
+  the intraday scalp; per ПИ doctrine it's ~9 positive / 3 negative months (p≈0.75) — which is PERFECT for
+  antimartingale ((2p)^N−1 > 0 at p>0.5). **Consulted the ПИ guru** (`hedgedintraday/consult.sh`) — CONFIRMED:
+  Korovin plans ~75% win-rate, 5–7%/mo target → 25–40%/yr; negatives are "tухлые" months where scalp doesn't
+  cover theta. The daily backtest under-measures the scalp → understates win-rate.
+- **Built:** `AntimgOverlayReq.source` = 'backtest' | **'doctrine'** (default doctrine) + d_win_rate(0.75)/
+  d_win_pct(6)/d_loss_pct(5)/d_n_periods(120)/d_seed. Doctrine = synthetic i.i.d. 9/3 sequence at the
+  planned win-rate (no network). Endpoint branches; UI source toggle + doctrine inputs; verdict now shows
+  the **EV identity** `b·[(2p)^N−1]` and separates two questions: (1) AM-beats-flat = the p>0.5 effect, (2)
+  shuffle = does clustering add extra.
+- **Result (doctrine p=0.75):** AM alpha GROWS with target streak exactly per the identity — N=2 +25k, N=3
+  +74k, N=4 +108k, N=5 +264k (flat 71.4k); shuffle neutral (i.i.d. → gain is from p>0.5, not clustering).
+  At p=0.5 fair coin: AM≈flat≈0 (no manufactured edge — sanity-check #3 holds). The user was right: at the
+  doctrine win-rate the antimartingale is the whole point and adds large alpha.
+- 127 tests (+2: doctrine high-winrate beats flat, fair-coin no edge). assets v85. numpy imported at api top.

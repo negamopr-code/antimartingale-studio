@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1178,26 +1179,46 @@ def hedged_intraday_antimartingale(req: AntimgOverlayReq):
     Reports flat vs overlay equity + the SHUFFLE test (does real time-ordering / win-clustering add
     alpha, or is the overlay just leverage on a positive-mean distribution?). Skill doctrine: the
     pyramid manufactures no edge on a fair coin — only genuine clustering beats the shuffle."""
-    if req.am_period == "monthly":
-        req.dte_days = 30
-    elif req.am_period == "quarterly":
-        req.dte_days = 90
-    daily = _ps_load_daily(req)
-    datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
-    vm, realized = _build_vol(req, daily)
-    res = _run_hi(daily, datr, vm, realized, req)
-    if not res.table or len(res.table) < 3:
-        raise HTTPException(status_code=422, detail="not enough ПИ periods for the overlay (longer window or shorter period)")
-    pnls = [row.get("period_pnl", 0.0) for row in res.table]
+    if req.source == "doctrine":
+        # synthetic 9/3 sequence at Korovin's planned win-rate — the scalp DOES cover theta in most months,
+        # which the free daily backtest can't reproduce. Win month = +d_win_pct% of deposit, losing month
+        # = −d_loss_pct% (i.i.d. — months are roughly independent market phases, so no built-in clustering).
+        rng = np.random.default_rng(req.d_seed)
+        bank = req.starting_bank
+        win_amt = req.d_win_pct / 100.0 * bank
+        loss_amt = -req.d_loss_pct / 100.0 * bank
+        wins_mask = rng.random(req.d_n_periods) < req.d_win_rate
+        pnls = [float(win_amt if w else loss_amt) for w in wins_mask]
+        step = 90 if req.am_period == "quarterly" else 30
+        d0 = pd.Timestamp(req.start)
+        opens = [(d0 + pd.Timedelta(days=step * i)).date().isoformat() for i in range(req.d_n_periods)]
+        closes = [(d0 + pd.Timedelta(days=step * (i + 1))).date().isoformat() for i in range(req.d_n_periods)]
+        src_rows = [{"i": i + 1, "open": opens[i], "close": closes[i]} for i in range(req.d_n_periods)]
+        vm_label = f"doctrine p={req.d_win_rate} (+{req.d_win_pct}%/−{req.d_loss_pct}%)"
+    else:
+        if req.am_period == "monthly":
+            req.dte_days = 30
+        elif req.am_period == "quarterly":
+            req.dte_days = 90
+        daily = _ps_load_daily(req)
+        datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
+        vm, realized = _build_vol(req, daily)
+        res = _run_hi(daily, datr, vm, realized, req)
+        if not res.table or len(res.table) < 3:
+            raise HTTPException(status_code=422, detail="not enough ПИ periods for the overlay (longer window or shorter period)")
+        pnls = [row.get("period_pnl", 0.0) for row in res.table]
+        src_rows = res.table
+        vm_label = vm.label
     ov = amov.apply_overlay(pnls, target_streak=req.target_streak, n_shuffles=req.n_shuffles)
     table = []
-    for row, t in zip(res.table, ov.table):
+    for row, t in zip(src_rows, ov.table):
         table.append({"i": row.get("i"), "open": row.get("open"), "close": row.get("close"),
                       "pnl": t["pnl"], "win": bool(t["pnl"] > 0), "mult": t["mult"],
                       "contribution": t["contribution"], "am_cum": t["am_cum"],
                       "flat_cum": t["flat_cum"], "streak_before": t["streak_before"]})
     summary = {
-        "ticker": req.ticker, "vol_model": vm.label, "period": req.am_period, "dte_days": req.dte_days,
+        "ticker": (req.ticker if req.source == "backtest" else "DOCTRINE 9/3"),
+        "vol_model": vm_label, "source": req.source, "period": req.am_period, "dte_days": req.dte_days,
         "n_periods": ov.n_periods, "target_streak": ov.target_streak, "win_rate": ov.win_rate,
         "flat_total": ov.flat_total, "am_total": ov.am_total, "alpha": ov.alpha,
         "flat_max_dd": ov.flat_max_dd, "am_max_dd": ov.am_max_dd,

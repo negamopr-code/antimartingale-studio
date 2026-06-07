@@ -249,6 +249,16 @@ class AntimgOverlayReq(HedgedIntradayReq):
     target_streak: int = Field(4, ge=1, le=20)
     am_period: str = Field("monthly", pattern="^(monthly|quarterly|asis)$")
     n_shuffles: int = Field(50, ge=0, le=500)
+    # source of the period win/loss sequence:
+    #   'backtest' = the ПИ daily backtest (pessimistic — free daily data can't see the intraday scalp,
+    #                so it under-measures ⇒ low win-rate);
+    #   'doctrine' = synthetic 9/3 sequence at Korovin's planned win-rate (the scalp DOES cover theta).
+    source: str = Field("doctrine", pattern="^(backtest|doctrine)$")
+    d_win_rate: float = Field(0.75, ge=0, le=1.0)    # doctrine: fraction of profitable months (9/12)
+    d_win_pct: float = Field(6.0, ge=0, le=100)      # doctrine: a winning month = +this % of deposit (5–7%)
+    d_loss_pct: float = Field(5.0, ge=0, le=100)     # doctrine: a losing ("tухлый") month = −this % of deposit
+    d_n_periods: int = Field(120, ge=4, le=2000)     # doctrine: how many months to simulate (120 = 10y)
+    d_seed: int = Field(7, ge=0, le=10_000_000)
 
 
 class PureStraddleReq(BaseModel):

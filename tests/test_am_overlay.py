@@ -69,3 +69,35 @@ def test_api_antimartingale_endpoint():
     assert {"flat_total", "am_total", "alpha", "real_pctile", "max_mult"} <= d["summary"].keys()
     assert len(d["table"]) == d["summary"]["n_periods"]
     assert len(d["shuffle_samples"]) == 30
+
+
+def test_api_doctrine_source_high_winrate_beats_flat():
+    """At the doctrine win-rate (0.75) the antimartingale is +EV ((2p)^N−1>0) → AM total > flat total,
+    and no network/price data is needed (synthetic 9/3 sequence)."""
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    r = c.post("/api/hedged-intraday/antimartingale", json={
+        "source": "doctrine", "d_win_rate": 0.75, "d_win_pct": 6, "d_loss_pct": 5,
+        "d_n_periods": 240, "target_streak": 4, "n_shuffles": 50, "d_seed": 7})
+    assert r.status_code == 200, r.text
+    s = r.json()["summary"]
+    assert s["source"] == "doctrine"
+    assert s["n_periods"] == 240
+    assert 0.70 < s["win_rate"] < 0.80
+    assert s["am_total"] > s["flat_total"]                # p>0.5 ⇒ pyramiding adds (the (2p)^N−1 effect)
+
+
+def test_api_doctrine_fair_coin_no_edge():
+    """At p=0.5 with symmetric win/loss the antimartingale adds ~no edge ((2·0.5)^N−1=0): AM should not
+    systematically beat flat — confirms the structure manufactures no alpha (skill sanity-check #3)."""
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    r = c.post("/api/hedged-intraday/antimartingale", json={
+        "source": "doctrine", "d_win_rate": 0.5, "d_win_pct": 5, "d_loss_pct": 5,
+        "d_n_periods": 400, "target_streak": 4, "n_shuffles": 0, "d_seed": 3})
+    assert r.status_code == 200, r.text
+    s = r.json()["summary"]
+    # flat ≈ 0 (fair coin), AM also near 0 — no manufactured edge (allow noise on a finite sample)
+    assert abs(s["am_total"]) < 0.5 * s["n_periods"] * (0.05 * 10000)   # ≪ if it had a real edge
