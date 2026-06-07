@@ -99,7 +99,12 @@ def wickiness(daily: pd.DataFrame) -> float:
     hi, lo, op, cl = (daily[c].astype(float) for c in ("High", "Low", "Open", "Close"))
     rng = (hi - lo).mean()
     net = (cl - op).abs().mean()
-    return float(rng / net) if net > 1e-12 else 0.0
+    if net <= 1e-12:
+        return 0.0
+    # cap: for 24h instruments (FX) daily Open≈Close → tiny denominator blows the ratio up; it's then a
+    # data artifact, not real intraday-reversion. Clamp so the diagnostic stays interpretable (p_net is
+    # unaffected — it rides on RV/IV, not this).
+    return float(min(rng / net, 12.0))
 
 
 def suggest_c(w: float, vr: float) -> float:

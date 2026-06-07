@@ -971,3 +971,11 @@ Not implemented; documented as a rejected tactic.
   stable p_in/out) — antimartingale-worthy; SPY needs c*≈0.63 (unrealistic) despite strong intraday MR
   (VR 0.59). Skill: coin-flip-decomposition.md §10 (ex-ante selection) + lessons.
 - **Verdict logic:** p_net≥0.55 ⇒ antimartingale makes sense; else the edge is the convex payoff, not streaks.
+
+## D83 — Tab 13: one-click "Rate ALL instruments" button + wickiness cap (2026-06-07)
+- One-click `🏆 Оценить ВСЕ инструменты` button forces scan=true → ranks the whole catalog by p_net
+  (was only via the dropdown). Live rating (2019–26, c=0.35): **109 rated, 86≥0.60, median 0.67**; TOP =
+  metals/energy/agri/crypto/FX (RV/IV≈1.0, VR<1); BOTTOM = equity INDICES SPY/DIA/^DJI (RV/IV 0.73, the
+  rich-vol VRP) — confirms the SPY finding generalizes. ETH flagged unstable (p_out 0.50) vs stable metals.
+- Capped `wickiness` at 12 (FX daily Open≈Close → tiny denominator blew the ratio to 40–96; data artifact,
+  does not affect p_net). assets v88. 132 tests.
