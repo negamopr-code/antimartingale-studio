@@ -898,3 +898,23 @@ Not implemented; documented as a rejected tactic.
   At p=0.5 fair coin: AM≈flat≈0 (no manufactured edge — sanity-check #3 holds). The user was right: at the
   doctrine win-rate the antimartingale is the whole point and adds large alpha.
 - 127 tests (+2: doctrine high-winrate beats flat, fair-coin no edge). assets v85. numpy imported at api top.
+
+## D79 — THEORY: coin-flip decomposition of ПИ's win-rate (skill model, no app code yet) (2026-06-07)
+- **Ask (user):** go back-and-forth with the ПИ guru, build the coin-flip analogy rigorously (e.g.
+  "0.45 from straddle + 0.15 from intraday = 0.60, minus costs ≈ 0.55") and update the skills; then build on it.
+- **Did 3 guru consults** (corpus 5fada65b) + used our Tab-10 straddle data. Built the model:
+  - A month wins ⟺ `Γ + Σ > 1` (gamma capture + scalp, in units of monthly theta). **Threshold-shift
+    decomposition (EXACT):** `p_net = p_straddle + Δp_scalp + Δp_margin − Δp_cost`.
+  - Grounded: p_straddle ≈ 0.28–0.45 (Tab-10; VRP makes it <0.5); scalp coverage c ≈ 0.30–0.45 of monthly
+    theta ⇒ Δp_scalp ≈ +0.15; **free-margin income** f (80–90% of deposit at risk-free rate subsidizes the
+    rent) ⇒ Δp_margin ≈ +0.10–0.15 (the guru's critical addition); Δp_cost ≈ −0.05.
+  - **Central p_net ≈ 0.60** (skeleton straddle+scalp 0.55 → +free-margin → 0.60; Korovin optimistic 0.75).
+  - EV form (same statement): profitable ⟺ `c + f > (1 − rv/iv) + costs/θ` — coverage+margin must beat the
+    variance-risk-premium gap (strongest where rv>iv, e.g. CNY). Payoff asymmetric (win 2–3R, loss ≤ −1R).
+  - **Bridge:** p_net>0.5 ⇒ antimartingale `E[cycle]=b·[(2p)^N−1]>0`, grows with N → ПИ makes a >0.5 coin,
+    the pyramid compounds it. Swing factor = execution (mechanical "ноль минус комиссии" → c→0 → edge dies).
+- **Skills updated** (canonical home, not repo): `hedgedintraday/references/coin-flip-decomposition.md`
+  (full model, 9 sections) + SKILL.md INVARIANT #8 + lessons.md; `antimartingal-strategy` SKILL.md gets the
+  ПИ bridge under the EV identity. NEXT (build on it): a Tab-12 calculator panel that takes
+  p_straddle/c/f/cost → p_net → feeds the antimartingale EV (one screen).
+- No app/test change this turn (theory + skill only). Tests still 127.
