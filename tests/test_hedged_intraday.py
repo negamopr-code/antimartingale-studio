@@ -502,6 +502,23 @@ def test_capture_model_positive_and_linear():
     assert zero.scalp_pnl == pytest.approx(0.0, abs=1e-9)   # no capture → no scalp (never negative)
 
 
+def test_capture_preset_per_class_and_anchor():
+    """Per-class capture presets (a SCENARIO): rangy commodities/crypto are above the trend-prone
+    equity/vol classes, every preset sits in a sane band, and the realistic default anchor is 0.20."""
+    from antimg import instruments as ins
+    assert ins.CAPTURE_DEFAULT == pytest.approx(0.20)
+    # unknown class falls back to the anchor
+    assert ins.capture_preset("not a real class") == pytest.approx(ins.CAPTURE_DEFAULT)
+    # doctrine-favoured (mean-reverting intraday) > off-doctrine (trend-prone intraday)
+    assert ins.capture_preset("Metals") > ins.capture_preset("US equity index / ETF")
+    assert ins.capture_preset("Energy") > ins.capture_preset("Volatility")
+    assert ins.capture_preset("Crypto (Binance free 1m)") > ins.capture_preset("Mega-cap stocks")
+    # every catalog class has a preset within a realistic band, none as high as the old optimistic 0.5
+    for _tk, _lbl, group in ins.flat_with_group():
+        c = ins.capture_preset(group)
+        assert 0.10 <= c <= 0.30, f"{group} preset {c} out of band"
+
+
 def test_capture_model_uses_real_range():
     """Doubling the daily range (more realized movement) doubles the captured scalp."""
     rng = np.random.default_rng(5)

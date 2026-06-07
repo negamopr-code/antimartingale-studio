@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=71"/>
+  <link rel="stylesheet" href="/style.css?v=72"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -236,7 +236,8 @@
       <label>Start <input name="start" value="2018-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
       <label title="grid = событийная сетка (мерит скальп на реальном фиде); analytic = ВОЛ-ПРИВОД: доход скальпа = K·лоты·дневная-реализ-σ$ → ЛЮБОЙ инструмент оценивается из своей волатильности БЕЗ интрадей-фида (K калибрована на 1m-крипте); range = грубая эвристика">Scalp model <select name="scalp_model"><option value="capture">capture (простая: % дневного хода)</option><option value="grid">grid (daily-cadence, faithful)</option><option value="analytic">analytic (vol-driven)</option><option value="range">range (crude heuristic)</option></select></label>
-      <label title="ТОЛЬКО capture: какую долю РЕАЛЬНОГО дневного хода (High−Low) ловит скальп на лотах одной части. Доктрина ~0.5 («забрать >50% движения», ~200–250 сделок/мес). Закрываем ТОЛЬКО прибыль (убыточные ноги переносятся, риск ≤ премии). Результат линеен по этому числу.">Capture (доля хода) <input name="scalp_capture" type="number" step="any" value="0.5"></label>
+      <label title="ТОЛЬКО capture: какую долю РЕАЛЬНОГО дневного хода (High−Low) ловит скальп на лотах одной части. Дефолт 0.20 = РЕАЛИСТИЧНЫЙ грид-калиброванный уровень (после костов/режима); 0.5 = доктринный оптимум «забрать >50% движения» (~200–250 сделок/мес), не типичен. Закрываем ТОЛЬКО прибыль (убыточные ноги переносятся, риск ≤ премии). Результат линеен по этому числу.">Capture (доля хода) <input name="scalp_capture" type="number" step="any" value="0.20"></label>
+      <label title="ТОЛЬКО экстраполяция: preset = пер-КЛАССНЫЙ capture (рынки с возвратом — металлы/энергия/крипта — выше ≈0.22–0.26; трендовые — индексы/волатильность — ниже ≈0.12–0.15), якорь 0.20. flat = одно число Capture для всех. Это СЦЕНАРИЙ (skill INVARIANT #7: интрадей-edge режимо-зависим и varies ВНУТРИ класса — ETH ranged, BTC trended).">Capture mode (экстрап.) <select name="capture_mode"><option value="preset">preset (пер-класс, рангово)</option><option value="flat">flat (одно число)</option></select></label>
       <label title="ТОЛЬКО analytic: константа edge K (скальп ∝ K·лоты·σ$). ⚠ НЕ универсальна — калибровка на 1m крипте: ETH +0.06 / SOL ~0 / BTC −0.006; результат линеен по K.">Scalp K (analytic) <input name="scalp_k" type="number" step="any" value="0.02"></label>
       <label title="daily = 1 бар/день (интрадей-чоп не виден); hourly = реальные 60m бары (~2 года); 1m = БЕСПЛАТНЫЕ 1-мин бары Binance (только крипта ETH/BTC/SOL — идеальный инструмент доктрины) → скальп реально измеряется">Scalp data <select name="scalp_data"><option value="daily">daily (1 бар/день)</option><option value="hourly">hourly 60m (~2 года, измеряет скальп)</option><option value="1m">1m crypto (Binance free, ETH/BTC)</option></select></label>
       <label title="на каком ТАЙМФРЕЙМЕ брать ATR для шага сетки. daily×2 (дефолт) = шаг ~2 дневных ATR (мысль юзера); weekly/monthly = шаг ещё шире.">Grid ATR TF <select name="grid_timeframe"><option value="daily">daily (шаг=×ATR)</option><option value="weekly">weekly (шире)</option><option value="monthly">monthly (ещё шире)</option></select></label>
@@ -317,6 +318,6 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=71"></script>
+  <script src="/app.js?v=72"></script>
 </body>
 </html>

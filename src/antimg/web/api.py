@@ -841,7 +841,9 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
     (intraday edge only truly measurable on crypto). Returns a ranked table + aggregate."""
     rows = []
     T = req.dte_days / 365.0
-    capture = getattr(req, "scalp_capture", 0.5)
+    capture = getattr(req, "scalp_capture", instruments.CAPTURE_DEFAULT)
+    capture_mode = getattr(req, "capture_mode", "flat")
+    use_preset = capture_mode == "preset"
     def _fin(x, nd=0):
         try:
             x = float(x)
@@ -854,6 +856,10 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
     # daily move over history" estimate, not a σ/edge proxy.
     req.scalp_model = "capture"
     for ticker, label, group in instruments.flat_with_group():
+        # per-CLASS capture preset (rangy commodities/crypto ↑, trend-prone equity/vol ↓) — a SCENARIO,
+        # see instruments.CAPTURE_PRESET. 'flat' mode uses the single scalp_capture for every instrument.
+        cap_i = instruments.capture_preset(group) if use_preset else capture
+        req.scalp_capture = cap_i
         try:
             daily = datamod.fetch(ticker, start=req.start)
             daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
@@ -881,6 +887,7 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
             gamma_cover = 100.0 * res.gamma_dir_pnl / th
             rows.append({
                 "ticker": ticker, "label": label, "group": group, "ok": True,
+                "capture": round(cap_i, 3),                 # the per-class (or flat) capture used here
                 "sigma_R": _fin(sR, 3),
                 "scalp_cover_pct": _fin(scalp_cover),       # scalp ÷ |theta| — the flat leg pays this % of rent
                 "gamma_cover_pct": _fin(gamma_cover),       # gamma ÷ |theta| — the trend leg pays this %
@@ -900,6 +907,9 @@ def hedged_intraday_extrapolate(req: HedgedIntradayScanReq):
     med = lambda key: round(sorted(r[key] for r in ok)[n // 2], 1) if n else 0.0
     agg = {
         "n": n, "n_failed": len(rows) - n, "capture": capture, "dte_years": round(T, 3),
+        "capture_mode": capture_mode,
+        "capture_range": [round(min((r["capture"] for r in ok), default=0.0), 3),
+                          round(max((r["capture"] for r in ok), default=0.0), 3)] if use_preset else None,
         "n_profitable": sum(1 for r in ok if r["profitable"]),
         "n_trend_built": sum(1 for r in ok if r["regime"] == "trend-built (gamma)"),
         "n_flat_built": sum(1 for r in ok if r["regime"] == "flat-built (scalp)"),

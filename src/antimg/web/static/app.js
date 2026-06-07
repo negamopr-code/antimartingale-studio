@@ -1119,10 +1119,13 @@ $("#hedged-attr-btn").onclick = (e) => withBusy(e.target, async () => {
 function renderHiExtrap(d) {
   const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 0 }));
   const a = d.aggregate, rows = d.rows;
+  const capDesc = (a.capture_mode === "preset" && a.capture_range)
+    ? `пер-класс ${(a.capture_range[0]*100).toFixed(0)}–${(a.capture_range[1]*100).toFixed(0)}% (рангово: металлы/крипта↑, индексы/вол↓, якорь 20%)`
+    : `${(a.capture*100).toFixed(0)}% (одно число для всех)`;
   $("#hi-extrap-stats").textContent =
     `🌐 ЭКСТРАПОЛЯЦИЯ НА ВСЕ ИНСТРУМЕНТЫ — из РЕАЛЬНЫХ дневных ходов истории (без интрадей-фида)\n`
-    + `${a.n} инструментов (${a.n_failed} не загрузилось) · ловим ${(a.capture*100).toFixed(0)}% дневного хода (High−Low), только плюсы · DTE ${a.dte_years}г · с ${a.start||"2019"}\n`
-    + `\nМОДЕЛЬ (просто): СКАЛЬП = ${(a.capture*100).toFixed(0)}% × (дневной H−L) × лоты части, СУММА по истории — ТОЛЬКО ПЛЮСЫ\n`
+    + `${a.n} инструментов (${a.n_failed} не загрузилось) · ловим ${capDesc} дневного хода (High−Low), только плюсы · DTE ${a.dte_years}г · с ${a.start||"2019"}\n`
+    + `\nМОДЕЛЬ (просто): СКАЛЬП = capture × (дневной H−L) × лоты части, СУММА по истории — ТОЛЬКО ПЛЮСЫ\n`
     + `   (закрываем лишь прибыль; убыточные ноги переносятся и ПРИКРЫТЫ длинными коллами, риск ≤ премии).\n`
     + `   Всё в % ОТ ТЕТЫ (аренды) — это compounding-инвариантно (абсурдный крипто-компаундинг сокращается).\n`
     + `\nРЕЖИМЫ: флет-построено (скальп) ${a.n_flat_built} · тренд-построено (гамма) ${a.n_trend_built} · кровит (тета) ${a.n_bleeding}\n`
@@ -1131,16 +1134,17 @@ function renderHiExtrap(d) {
     + `\n💡 ВЫВОД: «скальп %тета» = на сколько % выигрышные скальп-сделки отбивают аренду стреддла.\n`
     + `   ≥100% ⇒ скальп САМ кормит тету (плюсовой флет — что и обещает доктрина); + гамма сверху = чистый профит.\n`
     + `   Чистый = скальп% + гамма% − 100%. Сортировка по чистому. Линейно по Capture — двинь его и пересчитай.\n`
-    + `   ⚠ Capture=0.5 оптимистичен (те же коллы и дают гамму, и прикрывают залипший скальп — лёгкий двойной зачёт);\n`
-    + `   реальный 1m-грид на ETH давал ~76% покрытия при ~64% capture. Истина между гридом и этой оценкой.`;
-  const cols = [["ticker","инстр"],["group","класс"],["sigma_R","σR"],["win_rate","p(монетка)"],
+    + `   ⚠ Дефолт capture 0.20 = грид-калиброванный РЕАЛИСТИЧНЫЙ уровень (0.5 был оптимистичен: те же коллы и\n`
+    + `   дают гамму, и прикрывают залипший скальп — двойной зачёт). 1m-грид на ETH: ~76% покрытия при ~64% capture.\n`
+    + `   ${a.capture_mode === "preset" ? "Режим PRESET: capture задан ПО КЛАССУ (рангово). " : ""}Это СЦЕНАРИЙ при выбранном edge, НЕ прогноз: edge режимо-зависим и varies ВНУТРИ класса (ETH ranged, BTC trended).`;
+  const cols = [["ticker","инстр"],["group","класс"],["capture","capt"],["sigma_R","σR"],["win_rate","p(монетка)"],
     ["scalp_cover_pct","скальп %тета"],["gamma_cover_pct","гамма %тета"],["net_cover_pct","ЧИСТ %тета"],
     ["cagr_pct","CAGR%"],["pct_from_trend","тренд%"],["regime","режим"]];
   const sgn = (v) => (v >= 0 ? "#3fb950" : "#f85149");
   let h = "<table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
   for (const r of rows) {
     h += "<tr>"
-      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.sigma_R}</td>`
+      + `<td>${r.ticker}</td><td>${r.group}</td><td>${r.capture != null ? r.capture : "—"}</td><td>${r.sigma_R}</td>`
       + `<td style="color:${r.win_rate > 0.5 ? "#3fb950" : "#f85149"};font-weight:600">${r.win_rate}</td>`
       + `<td style="color:${sgn(r.scalp_cover_pct)};font-weight:600">${f(r.scalp_cover_pct)}%</td>`
       + `<td style="color:${sgn(r.gamma_cover_pct)}">${f(r.gamma_cover_pct)}%</td>`

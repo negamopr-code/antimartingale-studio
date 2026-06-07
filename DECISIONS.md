@@ -671,3 +671,24 @@ Not implemented; documented as a rejected tactic.
 - **vs grid:** capture > grid because the grid pessimistically realizes carried losers into the scalp;
   those belong to the straddle leg (which hedges them). No double-count (synthetic straddle self-hedges).
 - 96 tests (+2). Skill: lesson scalp-is-positive-only-capture-of-the-real-daily-range.
+
+## D66 — Realistic capture anchor (0.20) + per-CLASS capture presets for the extrapolation (2026-06-07)
+- **Ask (continue, open idea (a)):** the catalog extrapolation rode an OPTIMISTIC flat `capture=0.5`;
+  default it to the grid-calibrated REALISTIC level and let capture vary by asset class.
+- **Why 0.5 was wrong:** the only place capture was measured against a real 1m feed is crypto (ETH grid
+  ~64% raw but coverage 0.76<1 on a trending window; BTC trended → scalp LOST). After costs + regime,
+  the realistic level is ≈0.20. Flat 0.5 also double-counts (same calls give gamma AND cover stuck scalp).
+- **Built:**
+  - `instruments.CAPTURE_DEFAULT=0.20` + `CAPTURE_PRESET` (per-class) + `capture_preset(group)`. Rangy,
+    mean-reverting intraday classes ↑ (Metals 0.26, Energy 0.24, Agriculture/Crypto-1m 0.22, FX 0.18);
+    trend-prone ↓ (equity indices/sectors 0.15, Mega-cap 0.14, Volatility 0.12). All in [0.12,0.26].
+  - Schemas: `scalp_capture` default 0.5→**0.20** (both Req & ScanReq, incl. single-instrument Tab-8);
+    ScanReq += `capture_mode` ("preset"|"flat", default preset).
+  - `/api/hedged-intraday/extrapolate`: when preset, each instrument uses `capture_preset(its group)`
+    (else the flat number); rows carry the used `capture`; aggregate carries `capture_mode`+`capture_range`.
+  - Tab-8 UI: Capture default 0.20, new **Capture mode** selector, extrapolation verdict describes the
+    per-class band + the realistic-anchor caveat, table shows a `capt` column.
+- **Honesty (skill INVARIANT #7):** presets are a SCENARIO at a chosen edge, NOT a forecast — the intraday
+  mean-reversion edge is regime-specific and varies WITHIN a class (ETH ranged, BTC trended). Result stays
+  linear in capture, so the flat knob still works for sensitivity.
+- 97 tests (+1: per-class preset ordering + anchor + band). assets v72.

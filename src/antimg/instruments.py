@@ -106,3 +106,39 @@ def flat_with_group() -> list[tuple[str, str, str]]:
 
 def tickers() -> list[str]:
     return [tk for items in CATALOG.values() for tk, _ in items]
+
+
+# ── per-CLASS capture presets (a SCENARIO, not a prediction) ────────────────────────────────────
+# `capture` = "доля пойманного движения" = fraction of each day's High−Low the counter-trend grid
+# books. The ONLY place it was measured against a real 1-min feed is crypto (ETH grid: ~64% raw at
+# doctrine cadence, but coverage 0.76<1 on a trending window, and BTC trended → scalp LOST). After
+# costs/slippage and regime-averaging, the realistic grid-calibrated level is ≈ 0.20, FAR below the
+# old optimistic 0.5 default. These per-class values scale that 0.20 anchor by how mean-reverting /
+# scalpable each class is INTRADAY (rangy commodities & crypto high; trend-prone equity/vol low).
+#
+# ⚠ This is a SCENARIO at a chosen edge, NOT a forecast (skill INVARIANT #7: the intraday
+# mean-reversion EDGE is regime-specific and varies WITHIN a class — ETH ranged but BTC trended). Use
+# it to get a realistic ballpark across the catalog, not a per-instrument guarantee.
+CAPTURE_DEFAULT = 0.20                       # grid-calibrated realistic anchor (was 0.5 = optimistic)
+CAPTURE_PRESET = {
+    # doctrine-favoured: rangy, mean-reverting intraday → scalp earns more of the day's range
+    "Metals": 0.26,
+    "Energy": 0.24,
+    "Agriculture": 0.22,
+    "Crypto (Binance free 1m)": 0.22,       # the 1m-measured anchor lives here (ETH↑ but BTC trended)
+    "Crypto (equity wrappers)": 0.20,
+    "FX": 0.18,
+    # off-doctrine: trend-prone intraday → counter-trend grid captures less, often fades a breakout
+    "US equity index / ETF": 0.15,
+    "Equity index futures": 0.15,
+    "US sectors": 0.15,
+    "European indices": 0.15,
+    "Asia indices": 0.15,
+    "Mega-cap stocks": 0.14,
+    "Volatility": 0.12,                      # spiky, gappy → hardest to scalp consistently
+}
+
+
+def capture_preset(group: str) -> float:
+    """Realistic per-class scalp capture (see CAPTURE_PRESET). Falls back to CAPTURE_DEFAULT."""
+    return CAPTURE_PRESET.get(group, CAPTURE_DEFAULT)
