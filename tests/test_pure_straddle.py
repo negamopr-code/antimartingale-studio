@@ -148,6 +148,56 @@ def test_engine_reports_streaks_and_counts():
         assert res.avg_loss < 0
 
 
+def test_single_leg_call_wins_on_uptrend_put_on_downtrend():
+    """A call leg profits on a sustained up-move; a put leg profits on a sustained down-move."""
+    up = _frame(100.0 * (1.02 ** np.arange(200)))
+    down = _frame(100.0 * (0.98 ** np.arange(200)))
+    call_up = ps.run_single_leg(up, _const_vol(0.15), leg="call", risk_pct=0.05, dte_days=30)
+    put_up = ps.run_single_leg(up, _const_vol(0.15), leg="put", risk_pct=0.05, dte_days=30)
+    assert call_up.n_wins > 0 and call_up.net_pnl > 0          # calls cash in on the rally
+    assert put_up.total_payoff == pytest.approx(0.0, abs=1e-6)  # puts expire worthless in an uptrend
+    call_dn = ps.run_single_leg(down, _const_vol(0.15), leg="call", risk_pct=0.05, dte_days=30)
+    put_dn = ps.run_single_leg(down, _const_vol(0.15), leg="put", risk_pct=0.05, dte_days=30)
+    assert put_dn.n_wins > 0 and put_dn.net_pnl > 0           # puts cash in on the decline
+    assert call_dn.total_payoff == pytest.approx(0.0, abs=1e-6)
+
+
+def test_single_leg_streaks_and_first_period_is_one_pct():
+    rng = np.random.default_rng(13)
+    df = _frame(100.0 + np.cumsum(rng.normal(0, 1.0, 400)))
+    for leg in ("call", "put"):
+        res = ps.run_single_leg(df, _const_vol(0.2), leg=leg, risk_pct=0.01, dte_days=30,
+                                starting_bank=10_000.0)
+        assert res.n_wins + res.n_losses == res.n_periods
+        assert sum(k * v for k, v in res.win_streaks.items()) == res.n_wins
+        assert sum(k * v for k, v in res.loss_streaks.items()) == res.n_losses
+        assert res.table[0].premium_paid == pytest.approx(0.01 * 10_000.0, rel=1e-6)
+        # the leg cost lands in the right column
+        t0 = res.table[0]
+        if leg == "call":
+            assert t0.call_cost == t0.premium_paid and t0.put_cost == 0.0
+        else:
+            assert t0.put_cost == t0.premium_paid and t0.call_cost == 0.0
+
+
+def test_api_leg_analysis_endpoint():
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    r = c.post("/api/leg-analysis", json={"ticker": "SPY", "start": "2015-01-01", "end": "2020-01-01",
+                                          "risk_pct": 0.01, "dte_days": 30, "iv_source": "constant",
+                                          "iv_const": 0.18})
+    if r.status_code == 502:
+        pytest.skip("price data unavailable in this environment")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert set(d.keys()) >= {"call", "put", "ticker", "vol_model"}
+    for leg in ("call", "put"):
+        assert d[leg]["summary"]["n_periods"] > 0
+        assert "win_streaks" in d[leg] and "loss_streaks" in d[leg]
+        assert len(d[leg]["table"]) == d[leg]["summary"]["n_periods"]
+
+
 def test_api_pure_straddle_endpoint():
     from fastapi.testclient import TestClient
     from antimg.web.api import app

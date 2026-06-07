@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=76"/>
+  <link rel="stylesheet" href="/style.css?v=77"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -23,6 +23,7 @@
       <button class="tab" data-tab="hedged">8 · Hedged Intraday (ПИ)</button>
       <button class="tab" data-tab="hiexec">9 · ПИ Execution</button>
       <button class="tab" data-tab="straddle">10 · Pure straddle</button>
+      <button class="tab" data-tab="legs">11 · Call vs Put</button>
     </nav>
   </header>
 
@@ -354,6 +355,40 @@
     <div class="tradetable" id="str-table"></div>
   </section>
 
-  <script src="/app.js?v=76"></script>
+  <!-- TAB 11 -->
+  <section id="legs" class="panel">
+    <p class="hint"><b>Колл vs Пут по отдельности.</b> Тот же сетап, что и чистый стреддл, но КАЖДАЯ нога —
+      ОТДЕЛЬНАЯ стратегия: каждый период покупаем либо только ATM-колл, либо только ATM-пут (на % депозита),
+      держим до экспирации, роллим. Видно по каждой ноге: сколько раз в плюсе/в минусе и серии прибылей/убытков
+      подряд. Колл выигрывает на росте выше своей премии, пут — на падении ⇒ их серии почти зеркальны.
+      <br>⚠ Премия — модель Блэка-Шоулза по IV (как в Tab 10), не котировка реального фида. Каждая нога считается
+      на своём отдельном банке (как если бы вы торговали ТОЛЬКО коллы / ТОЛЬКО путы).</p>
+    <form class="controls" id="form-legs">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2010-01-01"></label>
+      <label>End <input name="end" placeholder="latest"></label>
+      <label title="ПРОЦЕНТ депозита на ОДНУ ногу каждый период. Введи 1 = 1%.">Risk % депозита (1 = 1%) <input name="risk_pct" type="number" step="any" value="1"></label>
+      <label title="срок опциона = период удержания до экспирации (календарные дни)">DTE days (срок) <input name="dte_days" type="number" value="30"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label title="on = % от текущего банка (компаундинг); off = от стартового банка">Compounding <select name="compounding"><option value="true">on (% от текущего банка)</option><option value="false">off (% от стартового)</option></select></label>
+      <label title="источник IV для цены опциона">IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="index">force vol-index</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label title="константа IV при iv_source=constant">IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
+      <label title="скос: пусто = дефолт по классу">Skew β <input name="skew_beta" type="number" step="any" placeholder="class default"></label>
+      <label>Term structure <select name="use_term_structure"><option value="true">on (interp to DTE)</option><option value="false">off (flat)</option></select></label>
+      <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
+      <label title="% от премии/выплаты на КАЖДУЮ ногу (вход и выход)">Commission % <input name="commission_pct" type="number" step="any" value="0"></label>
+      <label title="% от премии/выплаты на КАЖДУЮ ногу">Slippage % <input name="slippage_pct" type="number" step="any" value="0"></label>
+      <button type="submit">Сравнить колл vs пут</button>
+    </form>
+    <pre class="stats" id="lg-stats"></pre>
+    <div class="results"><div class="plots">
+      <div id="lg-counts"></div>
+      <div id="lg-call-walk"></div><div id="lg-call-streaks"></div>
+      <div id="lg-put-walk"></div><div id="lg-put-streaks"></div>
+    </div></div>
+  </section>
+
+  <script src="/app.js?v=77"></script>
 </body>
 </html>

@@ -168,33 +168,119 @@ def run_pure_straddle(daily: pd.DataFrame, vol_model, *, risk_pct: float = 0.01,
         p = q                                               # roll: next straddle enters at expiry
 
     res.final_bank = bank
+    _finalize(res, compounding)
+    return res
+
+
+def _finalize(res: PureStraddleResult, compounding: bool) -> None:
+    """Compute the summary stats / streak distributions / CAGR from a populated table+bank.
+    Shared by the straddle and single-leg engines (identical bookkeeping)."""
     res.n_periods = len(res.table)
-    if res.n_periods:
-        res.win_rate = res.n_wins / res.n_periods
-        res.n_losses = res.n_periods - res.n_wins
-        res.net_pnl = res.final_bank - res.starting_bank
-        res.avg_pnl = res.net_pnl / res.n_periods
-        win_pnls = [t.pnl for t in res.table if t.win]
-        loss_pnls = [t.pnl for t in res.table if not t.win]
-        res.avg_win = float(np.mean(win_pnls)) if win_pnls else 0.0
-        res.avg_loss = float(np.mean(loss_pnls)) if loss_pnls else 0.0
-        wins = sum(t.pnl for t in res.table if t.pnl > 0)
-        losses = sum(-t.pnl for t in res.table if t.pnl < 0)
-        res.profit_factor = (wins / losses) if losses > 1e-9 else float("inf")
-        # streak distributions: count runs of consecutive wins / losses by their length
-        res.win_streaks, res.loss_streaks = _streak_counts([t.win for t in res.table])
-        res.max_win_streak = max(res.win_streaks, default=0)
-        res.max_loss_streak = max(res.loss_streaks, default=0)
-        res.premium_recovered_pct = (100.0 * res.total_payoff / res.total_premium
-                                     if res.total_premium > 1e-9 else 0.0)
-        res.avg_breakeven_pct = float(np.mean([t.breakeven_pct for t in res.table]))
-        res.avg_move_pct = float(np.mean([t.move_pct for t in res.table]))
-        # geometric CAGR of the bank over the elapsed calendar span
-        d0 = pd.Timestamp(res.table[0].entry_date)
-        d1 = pd.Timestamp(res.table[-1].expiry_date)
-        res.years = max((d1 - d0).days / 365.0, 1e-6)
-        if compounding and res.starting_bank > 0 and res.final_bank > 0:
-            res.ann_return_pct = 100.0 * ((res.final_bank / res.starting_bank) ** (1.0 / res.years) - 1.0)
-        else:                                               # additive: simple annualized return on start bank
-            res.ann_return_pct = 100.0 * (res.net_pnl / res.starting_bank) / res.years
+    if not res.n_periods:
+        return
+    res.win_rate = res.n_wins / res.n_periods
+    res.n_losses = res.n_periods - res.n_wins
+    res.net_pnl = res.final_bank - res.starting_bank
+    res.avg_pnl = res.net_pnl / res.n_periods
+    win_pnls = [t.pnl for t in res.table if t.win]
+    loss_pnls = [t.pnl for t in res.table if not t.win]
+    res.avg_win = float(np.mean(win_pnls)) if win_pnls else 0.0
+    res.avg_loss = float(np.mean(loss_pnls)) if loss_pnls else 0.0
+    wins = sum(t.pnl for t in res.table if t.pnl > 0)
+    losses = sum(-t.pnl for t in res.table if t.pnl < 0)
+    res.profit_factor = (wins / losses) if losses > 1e-9 else float("inf")
+    # streak distributions: count runs of consecutive wins / losses by their length
+    res.win_streaks, res.loss_streaks = _streak_counts([t.win for t in res.table])
+    res.max_win_streak = max(res.win_streaks, default=0)
+    res.max_loss_streak = max(res.loss_streaks, default=0)
+    res.premium_recovered_pct = (100.0 * res.total_payoff / res.total_premium
+                                 if res.total_premium > 1e-9 else 0.0)
+    res.avg_breakeven_pct = float(np.mean([t.breakeven_pct for t in res.table]))
+    res.avg_move_pct = float(np.mean([t.move_pct for t in res.table]))
+    # geometric CAGR of the bank over the elapsed calendar span
+    d0 = pd.Timestamp(res.table[0].entry_date)
+    d1 = pd.Timestamp(res.table[-1].expiry_date)
+    res.years = max((d1 - d0).days / 365.0, 1e-6)
+    if compounding and res.starting_bank > 0 and res.final_bank > 0:
+        res.ann_return_pct = 100.0 * ((res.final_bank / res.starting_bank) ** (1.0 / res.years) - 1.0)
+    else:                                               # additive: simple annualized return on start bank
+        res.ann_return_pct = 100.0 * (res.net_pnl / res.starting_bank) / res.years
+
+
+def run_single_leg(daily: pd.DataFrame, vol_model, *, leg: str = "call", risk_pct: float = 0.01,
+                   dte_days: int = 30, starting_bank: float = 10_000.0, r: float = 0.045,
+                   commission_pct: float = 0.0, slippage_pct: float = 0.0,
+                   compounding: bool = True) -> PureStraddleResult:
+    """Roll a SINGLE ATM option leg ('call' or 'put') to expiry, sized to risk_pct of the bank.
+
+    Same mechanics as run_pure_straddle but only ONE leg, so it isolates that leg's win/loss
+    behaviour: a CALL wins only on up-moves past its premium, a PUT only on down-moves. Their
+    win/loss sequences (and streaks) are near-mirror images of each other."""
+    is_call = leg == "call"
+    res = PureStraddleResult(starting_bank=starting_bank, final_bank=starting_bank)
+    if daily is None or daily.empty:
+        return res
+    close = daily["Close"].astype(float)
+    dates = daily.index
+    n = len(dates)
+    T_years = max(dte_days / 365.0, 1e-6)
+    fee_rate = max(commission_pct + slippage_pct, 0.0) / 100.0
+    bank = starting_bank
+    res.equity.append({"date": str(dates[0].date()), "bank": round(bank, 2)})
+
+    p = 0
+    while p < n - 1:
+        entry_date = dates[p]
+        S0 = float(close.iloc[p])
+        if not np.isfinite(S0) or S0 <= 0:
+            p += 1
+            continue
+        K = S0                                              # ATM
+        sigma = float(vol_model.sigma(entry_date, T_years, K, S0))
+        prem_per_unit = float(options.call_price(S0, K, T_years, r, sigma) if is_call
+                              else options.put_price(S0, K, T_years, r, sigma))
+        if prem_per_unit <= 0:
+            p += 1
+            continue
+        expiry_ts = entry_date + pd.Timedelta(days=dte_days)
+        q = int(dates.searchsorted(expiry_ts, side="left"))
+        if q >= n:
+            break
+        if q <= p:
+            q = p + 1
+        spot_expiry = float(close.iloc[q])
+
+        sized_bank = bank if compounding else starting_bank
+        budget = max(risk_pct * sized_bank, 0.0)
+        units = budget / prem_per_unit
+        entry_fee = budget * fee_rate
+        premium_paid = budget + entry_fee
+
+        intrinsic = max(spot_expiry - K, 0.0) if is_call else max(K - spot_expiry, 0.0)
+        payoff_gross = units * intrinsic
+        exit_fee = payoff_gross * fee_rate
+        payoff = payoff_gross - exit_fee
+        pnl = payoff - premium_paid
+        bank += pnl
+
+        win = pnl > 0
+        res.table.append(StraddlePeriod(
+            entry_date=str(entry_date.date()), expiry_date=str(dates[q].date()),
+            spot_entry=round(S0, 4), spot_expiry=round(spot_expiry, 4), iv=round(sigma, 4),
+            prem_per_unit=round(prem_per_unit, 4), units=round(units, 4),
+            call_cost=round(premium_paid, 2) if is_call else 0.0,
+            put_cost=0.0 if is_call else round(premium_paid, 2),
+            premium_paid=round(premium_paid, 2), payoff=round(payoff, 2), pnl=round(pnl, 2),
+            bank_after=round(bank, 2),
+            move_pct=round(100.0 * (spot_expiry - K) / S0, 3),   # SIGNED move (call wants +, put −)
+            breakeven_pct=round(100.0 * prem_per_unit / S0, 3), win=win))
+        res.equity.append({"date": str(dates[q].date()), "bank": round(bank, 2)})
+        res.total_premium += premium_paid
+        res.total_payoff += payoff
+        if win:
+            res.n_wins += 1
+        p = q
+
+    res.final_bank = bank
+    _finalize(res, compounding)
     return res

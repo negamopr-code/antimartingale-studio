@@ -1436,6 +1436,76 @@ $("#form-straddle").onsubmit = (e) => {
     renderStraddle(await post("/api/pure-straddle", o)));
 };
 
+// ---- tab 11 · call vs put, each leg analysed separately ----------------------------------------
+const _streakStr = (m) => (m && Object.keys(m).length
+  ? Object.entries(m).map(([k, v]) => `${k}×${v}`).join(", ") : "—");
+function legWalk(id, leg, name) {
+  let acc = 0;
+  const walk = leg.table.map((r) => (acc += (r.win ? 1 : -1)));
+  const wx = leg.table.map((r) => r.expiry_date);
+  const end = walk.length ? walk[walk.length - 1] : 0;
+  return plot(id, [
+    { x: wx, y: walk, mode: "lines", name: "побед − убытков",
+      line: { color: end >= 0 ? "#3fb950" : "#f85149", width: 2 },
+      fill: "tozeroy", fillcolor: end >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
+    { x: [wx[0], wx[wx.length - 1]], y: [0, 0], mode: "lines", name: "0",
+      line: { color: "#8b949e", dash: "dot", width: 1 } },
+  ], layout(`${name}: +1 победа / −1 убыток, накопит. (итог ${end >= 0 ? "+" : ""}${end})`, {
+    xaxis: { gridcolor: "#2a3340" },
+    yaxis: { gridcolor: "#2a3340", title: { text: "победы − убытки" }, zeroline: true, zerolinecolor: "#8b949e" },
+  }));
+}
+function legStreaks(id, leg, name) {
+  const ws = leg.win_streaks || {}, ls = leg.loss_streaks || {}, s = leg.summary;
+  const maxLen = Math.max(0, ...Object.keys(ws).map(Number), ...Object.keys(ls).map(Number));
+  const lens = []; for (let i = 1; i <= maxLen; i++) lens.push(i);
+  return plot(id, [
+    { x: lens, y: lens.map((n) => ws[n] || 0), type: "bar", name: "побед подряд",
+      marker: { color: "rgba(63,185,80,0.85)" } },
+    { x: lens, y: lens.map((n) => ls[n] || 0), type: "bar", name: "убытков подряд",
+      marker: { color: "rgba(248,81,73,0.85)" } },
+  ], layout(`${name} серии подряд (макс ${s.max_win_streak}W / ${s.max_loss_streak}L)`, {
+    barmode: "group",
+    xaxis: { gridcolor: "#2a3340", title: { text: "длина серии" }, dtick: 1 },
+    yaxis: { gridcolor: "#2a3340", title: { text: "сколько раз" } },
+  }));
+}
+async function renderLegs(d) {
+  const c = d.call.summary, p = d.put.summary;
+  // outcome counts per leg (grouped: wins vs losses for call and put)
+  await plot("lg-counts", [
+    { x: ["колл", "пут"], y: [c.n_wins, p.n_wins], type: "bar", name: "в плюсе",
+      marker: { color: "rgba(63,185,80,0.85)" }, text: [`${c.n_wins}`, `${p.n_wins}`], textposition: "auto" },
+    { x: ["колл", "пут"], y: [c.n_losses, p.n_losses], type: "bar", name: "в минусе",
+      marker: { color: "rgba(248,81,73,0.85)" }, text: [`${c.n_losses}`, `${p.n_losses}`], textposition: "auto" },
+  ], layout(`Исходы по ногам (${c.n_periods} периодов)`, {
+    barmode: "group", yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
+  }));
+  await legWalk("lg-call-walk", d.call, "КОЛЛ");
+  await legStreaks("lg-call-streaks", d.call, "КОЛЛ");
+  await legWalk("lg-put-walk", d.put, "ПУТ");
+  await legStreaks("lg-put-streaks", d.put, "ПУТ");
+  const block = (name, lg) => {
+    const s = lg.summary;
+    return `${name}: в плюсе ${s.n_wins}/${s.n_periods} (${(s.win_rate * 100).toFixed(1)}%)  ·  макс серия ${s.max_win_streak}W / ${s.max_loss_streak}L  ·  CAGR ${s.ann_return_pct}%  ·  возврат премии ${s.premium_recovered_pct}%\n`
+      + `   победы подряд : ${_streakStr(lg.win_streaks)}\n`
+      + `   убытки подряд : ${_streakStr(lg.loss_streaks)}\n`;
+  };
+  $("#lg-stats").textContent =
+    `📊 КОЛЛ vs ПУТ — каждая нога отдельно — ${d.ticker} (${d.vol_model})\n\n`
+    + block("📈 КОЛЛ (выигрывает на росте)", d.call) + "\n"
+    + block("📉 ПУТ (выигрывает на падении)", d.put)
+    + `\n💡 Серии колла и пута почти ЗЕРКАЛЬНЫ: когда рынок растёт — колл копит победы, пут копит убытки, и наоборот.\n`
+    + `   Каждая нога по отдельности обычно −EV (платишь IV-премию за риск волатильности). Колл+пут вместе = стреддл (Tab 10).`;
+}
+$("#form-legs").onsubmit = (e) => {
+  e.preventDefault();
+  const o = formData(e.target);
+  if (o.risk_pct != null) o.risk_pct = o.risk_pct / 100;   // PERCENT (1 = 1%) → fraction
+  withBusy(e.submitter, async () =>
+    renderLegs(await post("/api/leg-analysis", o)));
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

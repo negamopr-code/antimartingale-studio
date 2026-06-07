@@ -755,3 +755,21 @@ Not implemented; documented as a rejected tactic.
   zero line, line/fill green if it ends ≥0 else red, title shows the ending level (= #wins − #losses).
   Down-slopes = losing streaks, up-slopes = winning streaks (the streak-shape view over time).
 - No backend/test change (pure visualization of tested data). assets v76.
+
+## D71 — Tab 11: Call vs Put — each leg analysed separately (2026-06-07)
+- **Ask (user):** a tab that analyses call and put SEPARATELY — how many calls landed in profit, their
+  streaks, and the same for puts.
+- **Built:**
+  - Engine `run_single_leg(daily, vol, leg='call'|'put', …)` — same roll-to-expiry mechanics as the
+    straddle but ONE leg: premium = BS call/put price, payoff = max(S_T−K,0) call / max(K−S_T,0) put,
+    sized to risk_pct of its OWN bank. Refactored the shared summary/streak/CAGR bookkeeping into
+    `_finalize(res, compounding)` (reused by both engines). `move_pct` is now SIGNED for a leg.
+  - Endpoint `POST /api/leg-analysis` (reuses PureStraddleReq) runs BOTH legs, returns `{call, put,
+    ticker, vol_model}`. Refactored straddle endpoint to share `_ps_summary`/`_ps_payload`/`_ps_load_daily`.
+  - Tab-11 UI: per-leg **win/loss random-walk** + **streak distribution** charts (call & put), a grouped
+    **outcome-count** chart, and a verdict block per leg (win rate, max streaks, CAGR, premium recovered,
+    streak tallies). Notes the legs are near-mirror (call wins up-moves, put down-moves).
+- **Finding:** SPY 2010–26 (bull) → CALL 43% win, max 10-loss streak, −1.2%/yr, 90% premium recovered;
+  PUT only 20.5% win, **max 17-loss streak**, −4.5%/yr, 62% recovered. Directional asymmetry is stark —
+  puts almost never paid in a rising market. Both legs −EV (IV premium); call+put together = Tab 10.
+- 111 tests (+3: call-wins-up / put-wins-down, leg streak+1%-sizing+cost-column, leg endpoint). assets v77.

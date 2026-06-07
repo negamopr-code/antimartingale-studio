@@ -1090,31 +1090,11 @@ def hedged_intraday_scan(req: HedgedIntradayScanReq):
     return {"params": req.model_dump(), "results": rows, "summary": summary}
 
 
-@app.post("/api/pure-straddle")
-def pure_straddle(req: PureStraddleReq):
-    """Pure long-straddle backtest (Tab 10): spend risk_pct of the deposit on an ATM straddle each
-    period, HOLD TO EXPIRATION, settle at intrinsic |S_T−K|, roll. No scalp overlay, no early roll —
-    the raw economics of being long volatility and paying theta to expiry. Premium is a BS model
-    price from the vol surface (no option-chain feed); the expiry payoff uses the REAL price path."""
-    try:
-        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
-    except Exception as ex:
-        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
-    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
-    if req.end:
-        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
-    if daily.empty or len(daily) < 5:
-        raise HTTPException(status_code=422, detail="not enough price data for this window")
-    vm, _realized = _build_vol(req, daily)
-    res = ps.run_pure_straddle(
-        daily, vm, risk_pct=req.risk_pct, dte_days=req.dte_days, starting_bank=req.starting_bank,
-        r=req.r, commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
-        compounding=req.compounding)
-    if not res.table:
-        raise HTTPException(status_code=422, detail="no straddle period could be resolved (try a longer window or shorter DTE)")
+def _ps_summary(res, **extra) -> dict:
+    """Build the JSON summary for a PureStraddleResult (shared by the straddle & leg-analysis tabs)."""
     inf = lambda x: (None if x == float("inf") else round(x, 3))
-    summary = {
-        "ticker": req.ticker, "vol_model": vm.label,
+    return {
+        **extra,
         "starting_bank": round(res.starting_bank, 2), "final_bank": round(res.final_bank, 2),
         "net_pnl": round(res.net_pnl, 2), "years": round(res.years, 2),
         "n_periods": res.n_periods, "n_wins": res.n_wins, "n_losses": res.n_losses,
@@ -1128,9 +1108,63 @@ def pure_straddle(req: PureStraddleReq):
         "avg_breakeven_pct": round(res.avg_breakeven_pct, 3),
         "avg_move_pct": round(res.avg_move_pct, 3),
     }
-    return {"params": req.model_dump(), "summary": summary,
+
+
+def _ps_payload(res, **summary_extra) -> dict:
+    return {"summary": _ps_summary(res, **summary_extra),
             "table": [vars(t) for t in res.table], "equity": res.equity,
             "win_streaks": res.win_streaks, "loss_streaks": res.loss_streaks}
+
+
+def _ps_load_daily(req):
+    """Fetch + window the daily bars for the straddle/leg tabs (shared)."""
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < 5:
+        raise HTTPException(status_code=422, detail="not enough price data for this window")
+    return daily
+
+
+@app.post("/api/pure-straddle")
+def pure_straddle(req: PureStraddleReq):
+    """Pure long-straddle backtest (Tab 10): spend risk_pct of the deposit on an ATM straddle each
+    period, HOLD TO EXPIRATION, settle at intrinsic |S_T−K|, roll. No scalp overlay, no early roll —
+    the raw economics of being long volatility and paying theta to expiry. Premium is a BS model
+    price from the vol surface (no option-chain feed); the expiry payoff uses the REAL price path."""
+    daily = _ps_load_daily(req)
+    vm, _realized = _build_vol(req, daily)
+    res = ps.run_pure_straddle(
+        daily, vm, risk_pct=req.risk_pct, dte_days=req.dte_days, starting_bank=req.starting_bank,
+        r=req.r, commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+        compounding=req.compounding)
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no straddle period could be resolved (try a longer window or shorter DTE)")
+    return {"params": req.model_dump(), **_ps_payload(res, ticker=req.ticker, vol_model=vm.label)}
+
+
+@app.post("/api/leg-analysis")
+def leg_analysis(req: PureStraddleReq):
+    """Tab 11: analyse the CALL and PUT legs SEPARATELY. Each leg is an independent strategy — every
+    period buy only an ATM call (or only an ATM put) sized to risk_pct, hold to expiry, settle at
+    intrinsic, roll — so you can compare each leg's win/loss counts and profit/loss STREAKS. A call
+    wins on up-moves past its premium, a put on down-moves; their streaks are near-mirror images."""
+    daily = _ps_load_daily(req)
+    vm, _realized = _build_vol(req, daily)
+    out = {}
+    for leg in ("call", "put"):
+        res = ps.run_single_leg(
+            daily, vm, leg=leg, risk_pct=req.risk_pct, dte_days=req.dte_days,
+            starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
+            slippage_pct=req.slippage_pct, compounding=req.compounding)
+        if not res.table:
+            raise HTTPException(status_code=422, detail="no option period could be resolved (try a longer window or shorter DTE)")
+        out[leg] = _ps_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)
+    return {"params": req.model_dump(), "ticker": req.ticker, "vol_model": vm.label, **out}
 
 
 # ----------------------------------------------------------------- TradingView ingest
