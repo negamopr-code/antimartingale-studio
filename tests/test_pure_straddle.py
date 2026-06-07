@@ -79,6 +79,22 @@ def test_pnl_identity_and_premium_recovered():
         100.0 * res.total_payoff / res.total_premium, rel=1e-6)
 
 
+def test_premium_splits_into_call_and_put_legs():
+    """The risk_pct budget buys the WHOLE straddle: call_cost + put_cost == premium_paid (no fees),
+    and for ATM the two legs are close to equal."""
+    rng = np.random.default_rng(11)
+    df = _frame(100.0 + np.cumsum(rng.normal(0, 0.7, 200)))
+    res = ps.run_pure_straddle(df, _const_vol(0.2), risk_pct=0.01, dte_days=30,
+                               starting_bank=10_000.0, commission_pct=0, slippage_pct=0)
+    assert res.n_periods > 0
+    for t in res.table:
+        assert t.call_cost + t.put_cost == pytest.approx(t.premium_paid, abs=0.02)
+        # ATM call & put are within ~25% of each other (call a touch richer via carry)
+        assert t.call_cost == pytest.approx(t.put_cost, rel=0.25)
+    # and the first period spends ~1% of the bank, NOT 100% (the units bug guard)
+    assert res.table[0].premium_paid == pytest.approx(0.01 * 10_000.0, rel=1e-6)
+
+
 def test_risk_pct_scales_premium():
     """Doubling risk_pct doubles the premium spent on the first straddle (linear in the budget)."""
     df = _frame(100.0 + np.cumsum(np.random.default_rng(7).normal(0, 0.8, 200)))

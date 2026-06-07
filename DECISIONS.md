@@ -716,3 +716,18 @@ Not implemented; documented as a rejected tactic.
   (−1.8%/yr, 85% recovered). Confirms long straddles bleed held to expiry — the rent the ПИ scalp must pay.
 - 105 tests (+8: put-call parity, straddle=call+put, flat-loses-premium, big-move-wins, P&L identity,
   risk_pct linearity, breakeven, endpoint).
+
+## D68 — Tab 10 fix: Risk % field is a true PERCENT (1 = 1%) + show call/put leg split (2026-06-07)
+- **Bug (user caught):** Tab-10 "Risk % депозита" defaulted to a FRACTION (0.01) but was labeled "%", so
+  entering `1` (meaning 1%) was read as `risk_pct=1.0` = **100% of the deposit per straddle** → the bank
+  was wiped to ~0 by the third year and every later row showed zeros. The table proved it: "заплачено $"
+  = the full bank each period, not 1%.
+- **Fix:**
+  - Frontend field is now a true PERCENT: label "Risk % депозита (1 = 1%)", default value `1`; the submit
+    handler divides by 100 before POST (API still takes a 0–1 fraction, unchanged & consistent with Tab 8).
+  - Engine prices the two legs separately (`options.call_price` + `put_price`) and records `call_cost` /
+    `put_cost` per period; Tab-10 table shows «колл $» / «пут $» columns and the verdict notes the risk %
+    covers BOTH legs together (≈ equal for ATM, call a touch richer via carry).
+- **Verified:** SPY 1% real run → row1 pays exactly 100.00 (1% of 10k) = call 54.03 + put 45.97; bank now
+  bleeds slowly (−2.7%/yr over 2010–26, 77% premium recovered) instead of being wiped by 100% bets.
+- 106 tests (+1: call_cost+put_cost==premium & first period == 1% of bank). assets v74.

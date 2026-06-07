@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=73"/>
+  <link rel="stylesheet" href="/style.css?v=74"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -333,7 +333,7 @@
       <label>Instrument <select name="ticker" class="instr"></select></label>
       <label>Start <input name="start" value="2010-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
-      <label title="какой % депозита тратим на стреддл каждый период (= премия). Модифицируемо.">Risk % депозита <input name="risk_pct" type="number" step="any" value="0.01"></label>
+      <label title="ПРОЦЕНТ депозита на ВЕСЬ стреддл (колл+пут вместе) каждый период. Введи 1 = 1% (так 1% покрывает обе ноги, ≈ поровну для ATM). Модифицируемо.">Risk % депозита (1 = 1%) <input name="risk_pct" type="number" step="any" value="1"></label>
       <label title="срок стреддла = период удержания до экспирации (календарные дни)">DTE days (срок) <input name="dte_days" type="number" value="30"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label title="on = премия = risk% от ТЕКУЩЕГО банка (компаундинг); off = от стартового банка (аддитивно, чистая по-периодная экономика)">Compounding <select name="compounding"><option value="true">on (% от текущего банка)</option><option value="false">off (% от стартового)</option></select></label>
@@ -353,6 +353,6 @@
     <div class="tradetable" id="str-table"></div>
   </section>
 
-  <script src="/app.js?v=73"></script>
+  <script src="/app.js?v=74"></script>
 </body>
 </html>

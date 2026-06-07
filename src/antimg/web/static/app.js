@@ -1358,6 +1358,7 @@ async function renderStraddle(d) {
     + `${s.n_periods} периодов × DTE ${d.params.dte_days}д · risk ${(d.params.risk_pct*100).toFixed(2)}%/период · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
     + `\nИТОГ: ${profitable ? "📈 ПЛЮС" : "📉 МИНУС"}  ·  банк ${f(s.starting_bank)} → ${f(s.final_bank)}  (чистый ${f(s.net_pnl)} $)  ·  CAGR ${s.ann_return_pct}%\n`
     + `прибыльных периодов: ${s.n_wins}/${s.n_periods} (${(s.win_rate*100).toFixed(1)}%)  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}  ·  средн. P&L ${f(s.avg_pnl)} $\n`
+    + `   (risk % = ВЕСЬ стреддл колл+пут вместе; для ATM делится ≈ поровну — см. столбцы «колл $» / «пут $» в таблице.)\n`
     + `\n💸 «АРЕНДА» (стоимость стреддла): заплачено премии Σ ${f(s.total_premium)}  ·  получено на экспирации Σ ${f(s.total_payoff)}\n`
     + `   возврат премии: ${s.premium_recovered_pct}%  ⇒ ${s.premium_recovered_pct >= 100 ? "выплаты ПОКРЫЛИ премию (стреддл окупился)" : "выплаты НЕ покрыли премию (стреддл стоил дороже, чем дал)"}\n`
     + `\n📏 ПОЧЕМУ: чтобы выйти в ноль, нужен ход ≥ премии. Средний нужный ход (breakeven) = ${s.avg_breakeven_pct}%;\n`
@@ -1367,7 +1368,8 @@ async function renderStraddle(d) {
   // per-period table
   const cols = [["entry_date","вход"],["expiry_date","экспирация"],["spot_entry","S вход (=K)"],
     ["spot_expiry","S экспир."],["iv","IV"],["prem_per_unit","премия/ед"],["units","единиц"],
-    ["premium_paid","заплачено $"],["payoff","выплата $"],["pnl","P&L $"],["bank_after","банк после"],
+    ["call_cost","колл $"],["put_cost","пут $"],["premium_paid","заплачено $ (=колл+пут)"],
+    ["payoff","выплата $"],["pnl","P&L $"],["bank_after","банк после"],
     ["breakeven_pct","нужен ход %"],["move_pct","реальн. ход %"]];
   let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
   for (const r of rows) {
@@ -1381,8 +1383,10 @@ async function renderStraddle(d) {
 }
 $("#form-straddle").onsubmit = (e) => {
   e.preventDefault();
+  const o = formData(e.target);
+  if (o.risk_pct != null) o.risk_pct = o.risk_pct / 100;   // field is a PERCENT (1 = 1%) → fraction for the API
   withBusy(e.submitter, async () =>
-    renderStraddle(await post("/api/pure-straddle", formData(e.target))));
+    renderStraddle(await post("/api/pure-straddle", o)));
 };
 
 loadInstruments();

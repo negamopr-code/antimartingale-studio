@@ -31,8 +31,10 @@ class StraddlePeriod:
     spot_entry: float        # S0 = the ATM strike K
     spot_expiry: float       # S_T at expiration
     iv: float                # the implied vol used to price the straddle
-    prem_per_unit: float     # BS straddle premium per 1 unit of underlying
+    prem_per_unit: float     # BS straddle premium per 1 unit of underlying (= call + put)
     units: float             # units bought = premium budget / prem_per_unit
+    call_cost: float         # $ of the budget that went to the CALL leg (units × call price)
+    put_cost: float          # $ of the budget that went to the PUT  leg (units × put price)
     premium_paid: float      # $ spent on the straddle this period (= risk_pct × bank, + entry fee)
     payoff: float            # $ received at expiry = units × |S_T − K|
     pnl: float               # payoff − premium_paid − fees
@@ -93,7 +95,9 @@ def run_pure_straddle(daily: pd.DataFrame, vol_model, *, risk_pct: float = 0.01,
             continue
         K = S0                                              # ATM
         sigma = float(vol_model.sigma(entry_date, T_years, K, S0))
-        prem_per_unit = float(options.straddle_price(S0, K, T_years, r, sigma))
+        call_per_unit = float(options.call_price(S0, K, T_years, r, sigma))
+        put_per_unit = float(options.put_price(S0, K, T_years, r, sigma))
+        prem_per_unit = call_per_unit + put_per_unit        # full straddle = call + put
         if prem_per_unit <= 0:
             p += 1
             continue
@@ -124,6 +128,7 @@ def run_pure_straddle(daily: pd.DataFrame, vol_model, *, risk_pct: float = 0.01,
             entry_date=str(entry_date.date()), expiry_date=str(dates[q].date()),
             spot_entry=round(S0, 4), spot_expiry=round(spot_expiry, 4), iv=round(sigma, 4),
             prem_per_unit=round(prem_per_unit, 4), units=round(units, 4),
+            call_cost=round(units * call_per_unit, 2), put_cost=round(units * put_per_unit, 2),
             premium_paid=round(premium_paid, 2), payoff=round(payoff, 2), pnl=round(pnl, 2),
             bank_after=round(bank, 2), move_pct=round(100.0 * abs(spot_expiry - K) / S0, 3),
             breakeven_pct=round(100.0 * prem_per_unit / S0, 3), win=win))
