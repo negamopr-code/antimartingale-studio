@@ -41,6 +41,8 @@ class CoinEstimate:
     avg_loss: float = 0.0
     payoff_ratio: float = 0.0     # b = avg_win/|avg_loss|
     breakeven_p: float = 0.0      # p* = 1/(1+b)
+    iv_is_real: bool = False      # True = real vol-index (VIX/VXN/GVZ…); False = IV proxied by realized
+    vrp_applied: float = 0.0      # VRP haircut applied to proxied IV (0 for real-IV instruments)
     # diagnostics (forward-observable)
     rv_mean: float = 0.0
     iv_mean: float = 0.0
@@ -76,8 +78,9 @@ def _period_g(daily: pd.DataFrame, vol_model, dte_days: int):
             iv = vol_model.atm(dates[p], T)
         if iv is None or not np.isfinite(iv) or iv <= 0:
             iv = rv                                              # fall back: assume fair (RV/IV=1)
-        gs.append((rv / iv) ** 2)
-        rvs.append(rv)
+        g = (rv / iv) ** 2
+        gs.append(min(g, 16.0))                                  # cap: g>16 = move >4× breakeven (a win
+        rvs.append(rv)                                           # anyway); stops short-history blowups
         ivs.append(iv)
     return np.array(gs), np.array(rvs), np.array(ivs)
 
@@ -117,13 +120,22 @@ def suggest_c(w: float, vr: float) -> float:
 
 
 def estimate_coin(daily: pd.DataFrame, vol_model, *, dte_days: int = 30, c: float = 0.35,
-                  cost_drag: float = 0.05) -> CoinEstimate:
-    """Estimate p_net (and the p_net(c) curve + diagnostics) for one instrument."""
+                  cost_drag: float = 0.05, vrp_proxy: float = 0.15) -> CoinEstimate:
+    """Estimate p_net (and the p_net(c) curve + diagnostics) for one instrument.
+
+    `vrp_proxy`: when we have NO real implied-vol index (label not 'index:*'), IV is proxied by realized
+    vol ⇒ RV/IV≈1 by construction, which falsely flatters the instrument. We then HAIRCUT the proxied IV
+    up by (1+vrp_proxy) (the guru: IV is usually ABOVE realized) so the comparison to real-IV names (SPY)
+    is fair. Real-IV instruments are untouched."""
     res = CoinEstimate(dte_days=dte_days)
     gs, rvs, ivs = _period_g(daily, vol_model, dte_days)
     res.n_periods = len(gs)
     if res.n_periods < 4:
         return res
+    res.iv_is_real = str(getattr(vol_model, "label", "")).startswith("index:")
+    if not res.iv_is_real and vrp_proxy > 0:                     # apply assumed VRP to proxied IV
+        gs = gs / ((1.0 + vrp_proxy) ** 2)                       # g=(RV/IV)² → IV·(1+vrp) shrinks g
+        res.vrp_applied = round(vrp_proxy, 3)
     c_net = max(0.0, c - cost_drag)
     res.c_net = round(c_net, 3)
     p, ev, aw, al = _coin_at(gs, c_net)

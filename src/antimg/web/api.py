@@ -1246,7 +1246,8 @@ def _picoin_one(ticker, req):
         target = req.dte_days / 365.0
         keep = min(vm._T, key=lambda t: abs(t - target))
         vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
-    est = picoin.estimate_coin(daily, vm, dte_days=req.dte_days, c=req.c, cost_drag=req.cost_drag)
+    est = picoin.estimate_coin(daily, vm, dte_days=req.dte_days, c=req.c, cost_drag=req.cost_drag,
+                               vrp_proxy=req.vrp_proxy)
     est.ticker, est.vol_model = ticker, vm.label
     return est
 
@@ -1264,14 +1265,16 @@ def pi_coin(req: PiCoinReq):
                 if e.n_periods < 4:
                     continue
                 rows.append({"ticker": ticker, "label": label, "group": group, "n_periods": e.n_periods,
-                             "p_net": e.p_net, "ev_per_theta": e.ev_per_theta, "payoff_ratio": (None if e.payoff_ratio == float("inf") else e.payoff_ratio),
+                             "p_net": e.p_net, "ev_per_theta": min(e.ev_per_theta, 99.0), "payoff_ratio": (None if e.payoff_ratio == float("inf") else min(e.payoff_ratio, 99.0)),
                              "rv_over_iv": e.rv_over_iv, "wickiness": e.wickiness, "variance_ratio": e.variance_ratio,
-                             "c_suggest": e.c_suggest, "c_star_060": e.c_star_060, "p_out": e.p_out})
+                             "iv_is_real": e.iv_is_real, "c_star_060": e.c_star_060, "p_out": e.p_out})
             except Exception:
                 continue
         rows.sort(key=lambda r: r["p_net"], reverse=True)
         n = len(rows)
         agg = {"n": n, "c": req.c, "cost_drag": req.cost_drag, "dte_days": req.dte_days,
+               "vrp_proxy": req.vrp_proxy,
+               "n_real_iv": sum(1 for r in rows if r["iv_is_real"]),
                "n_above_055": sum(1 for r in rows if r["p_net"] >= 0.55),
                "n_above_060": sum(1 for r in rows if r["p_net"] >= 0.60),
                "median_p_net": round(sorted(r["p_net"] for r in rows)[n // 2], 4) if n else 0.0}

@@ -251,6 +251,10 @@ class PiCoinReq(BaseModel):
     dte_days: int = Field(30, ge=7, le=365)          # period length (monthly≈30, quarterly≈90)
     c: float = Field(0.35, ge=0, le=1.0)             # GROSS scalp coverage of theta (assumption)
     cost_drag: float = Field(0.05, ge=0, le=0.5)     # coverage eaten by commissions/slippage
+    # VRP haircut for instruments WITHOUT a real vol index (IV proxied by realized → RV/IV≈1 by
+    # construction). We inflate the proxied IV by (1+vrp_proxy) so they aren't falsely flattered vs
+    # real-IV names (SPY). Set 0 to see the raw (misleading) RV/IV=1 version.
+    vrp_proxy: float = Field(0.15, ge=0, le=1.0)
     iv_window: int = Field(20, ge=2, le=500)
     iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
     iv_const: float = Field(0.20, gt=0, le=3)

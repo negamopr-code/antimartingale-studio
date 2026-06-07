@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=88"/>
+  <link rel="stylesheet" href="/style.css?v=89"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -457,6 +457,7 @@
       <label title="длина периода: месяц≈30, квартал≈90">DTE days (период) <input name="dte_days" type="number" value="30"></label>
       <label title="ГРОССОВОЕ покрытие теты скальпом (допущение). На дневных данных не измеримо — см. c_suggest/c*">Scalp coverage c <input name="c" type="number" step="any" value="0.35"></label>
       <label title="сколько покрытия съедают комиссии/слипедж">Cost drag <input name="cost_drag" type="number" step="any" value="0.05"></label>
+      <label title="ГЛАВНОЕ ЧЕСТНОЕ ДОПУЩЕНИЕ: для инструментов БЕЗ реального вол-индекса (крипта, металлы, агро, акции…) IV неизвестна и подставляется = реализованная → RV/IV≈1 искусственно. Этот VRP-хейркат поднимает proxied IV на (1+это), чтобы они НЕ выглядели ложно лучше SPY. 0.15 ≈ типичная премия за риск воли. 0 = сырой (вводящий в заблуждение) вариант.">VRP haircut (proxy IV) <input name="vrp_proxy" type="number" step="any" value="0.15"></label>
       <label title="источник IV (для RV/IV). auto = вол-индекс по классу">IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
       <label>IV window <input name="iv_window" type="number" value="20"></label>
       <label>IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
@@ -469,6 +470,6 @@
     <div class="tradetable" id="pc-table"></div>
   </section>
 
-  <script src="/app.js?v=88"></script>
+  <script src="/app.js?v=89"></script>
 </body>
 </html>

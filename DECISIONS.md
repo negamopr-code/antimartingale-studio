@@ -979,3 +979,19 @@ Not implemented; documented as a rejected tactic.
   rich-vol VRP) — confirms the SPY finding generalizes. ETH flagged unstable (p_out 0.50) vs stable metals.
 - Capped `wickiness` at 12 (FX daily Open≈Close → tiny denominator blew the ratio to 40–96; data artifact,
   does not affect p_net). assets v88. 132 tests.
+
+## D84 — Tab 13 HONESTY FIX: flag real-IV vs proxied + VRP haircut + cap blowups (2026-06-07)
+- **User caught it:** the rating can't "safely say X is better than SPY" — only 7 classes have a REAL
+  vol index (sp500→VIX, nasdaq→VXN, dow→VXD, russell→RVX, gold→GVZ, oil→OVX, eurusd→EVZ); everything else
+  proxies IV=realized → RV/IV≈1 BY CONSTRUCTION → falsely flatters them. **Guru-confirmed (5th consult):**
+  IV usually > RV (VRP); crypto IV is 60-90% (NOT cheap — ETH wins on the SCALP, not cheap vol); silver
+  IV ~90%; only manually-managed FX (CNY/Si) are genuinely cheap-IV. Assuming IV=RV is "критически опасно".
+- **Fix:** (a) `CoinEstimate.iv_is_real` (label starts 'index:') surfaced per row + single verdict;
+  (b) `vrp_proxy` (default 0.15) haircut — for proxied instruments inflate IV by (1+vrp) (g /= (1+vrp)²)
+  so they're compared fairly to real-IV names; (c) cap g at 16 + clamp EV/payoff in scan (kills the
+  ARB-USD 9e10 short-history blowups). Scan shows «IV=реал/≈прокси», p_net* asterisk for proxied, and a
+  big "trust only IV=реал (N of M)" caveat; aggregate adds n_real_iv.
+- **Effect:** ETH 0.75→**0.54** (proxied, 15% haircut, flagged estimate) vs SPY **0.32** (real VIX). ETH
+  still better but honest + flagged; only the 7 real-IV classes are trustworthy without an options feed.
+- Skill: coin-flip-decomposition.md §10 + lessons (cross-instrument IV reliability). 133 tests (+1). v89.
+- TODO to make non-index ratings real: a true IV feed (Deribit DVOL for BTC/ETH; ORATS/option chains).

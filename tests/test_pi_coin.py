@@ -59,6 +59,24 @@ def test_wickiness_and_suggest_monotone():
     assert pi_coin.suggest_c(3.5, 0.7) > pi_coin.suggest_c(1.5, 1.2)   # wicky+MR ⇒ higher suggested c
 
 
+def test_real_iv_flag_and_vrp_haircut():
+    """Real vol-index ⇒ iv_is_real True, no haircut. Proxied (realized) IV ⇒ haircut lowers p_net so it
+    isn't falsely flattered (the SPY-vs-everything-else honesty fix)."""
+    rng = np.random.default_rng(7)
+    df = _frame(100.0 * np.exp(np.cumsum(rng.normal(0, 0.02, 1500))))
+    real = volmod.VolModel({1.0: pd.Series(0.25, index=pd.date_range("2015-01-01", periods=2))},
+                           0.0, label="index:sp500")
+    proxy = volmod.VolModel({1.0: pd.Series(0.25, index=pd.date_range("2015-01-01", periods=2))},
+                            0.0, label="realized")
+    e_real = pi_coin.estimate_coin(df, real, dte_days=30, c=0.35, vrp_proxy=0.15)
+    e_noh = pi_coin.estimate_coin(df, proxy, dte_days=30, c=0.35, vrp_proxy=0.0)
+    e_hc = pi_coin.estimate_coin(df, proxy, dte_days=30, c=0.35, vrp_proxy=0.15)
+    assert e_real.iv_is_real is True and e_real.vrp_applied == 0.0
+    assert e_noh.iv_is_real is False
+    assert e_hc.p_net <= e_noh.p_net + 1e-9            # haircut never raises the (proxied) win-rate
+    assert e_hc.vrp_applied == pytest.approx(0.15)
+
+
 def test_api_pi_coin_single_and_scan_keys():
     from fastapi.testclient import TestClient
     from antimg.web.api import app

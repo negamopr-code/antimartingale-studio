@@ -1694,18 +1694,22 @@ async function renderPiCoin(d) {
         line: { color: "#8b949e", dash: "dot", width: 1 } })),
     }));
     $("#pc-stats").textContent =
-      `🪙 ПИ COIN — СКАН КАТАЛОГА (c=${a.c} gross, cost ${a.cost_drag}, DTE ${a.dte_days}д) · ${a.n} инструментов\n`
-      + `≥0.60 (антимарт. явно ок): ${a.n_above_060}   ·   ≥0.55: ${a.n_above_055}   ·   медиана p_net: ${a.median_p_net}\n`
-      + `\nЗелёный = p_net≥0.6 · жёлтый = 0.55–0.6 · красный = <0.55. Сортировка по p_net.\n`
-      + `Ключ: высокий p_net чаще там, где RV/IV>1 (дёшевые опционы) И VR<1 (возврат к среднему). p_out = вторая половина (стабильность).`;
-    const cols = [["ticker","инстр"],["group","класс"],["p_net","p_net"],["p_out","p_out (2-я пол.)"],
-      ["rv_over_iv","RV/IV"],["wickiness","wick"],["variance_ratio","VR(63)"],["c_suggest","c~ (оценка)"],
+      `🪙 ПИ COIN — СКАН КАТАЛОГА (c=${a.c} gross, cost ${a.cost_drag}, VRP-хейркат ${a.vrp_proxy}, DTE ${a.dte_days}д) · ${a.n} инструментов\n`
+      + `≥0.60: ${a.n_above_060}   ·   ≥0.55: ${a.n_above_055}   ·   медиана p_net: ${a.median_p_net}\n`
+      + `\n⚠⚠ ДОВЕРЯЙ ТОЛЬКО строкам «IV=реал» (${a.n_real_iv} из ${a.n}): только у них РЕАЛЬНАЯ подразумеваемая воля\n`
+      + `   (VIX/VXN/VXD/RVX/GVZ/OVX/EVZ = S&P/Nasdaq/Dow/Russell/золото/нефть/EURUSD). У остальных IV НЕТ —\n`
+      + `   подставлена реализованная (+VRP-хейркат ${a.vrp_proxy}); их p_net = ОЦЕНКА, не факт (реальные опционы\n`
+      + `   крипты/серебра тоже дорогие — гуру: ETH IV 60-90%). Поставь VRP-хейркат выше, если не доверяешь.\n`
+      + `Зелёный p_net≥0.6 · жёлтый 0.55–0.6 · красный <0.55. Среди РЕАЛ-IV: индексы (SPY/Dow) дороги (плохо), золото/нефть мягче.`;
+    const cols = [["ticker","инстр"],["group","класс"],["iv_is_real","IV"],["p_net","p_net"],["p_out","p_out (2-я)"],
+      ["rv_over_iv","RV/IV"],["variance_ratio","VR(63)"],["wickiness","wick"],
       ["c_star_060","c* для 0.6"],["ev_per_theta","EV/θ"],["payoff_ratio","payoff b"]];
     let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
     for (const r of rows) {
       h += `<tr class="${r.p_net >= 0.55 ? "w" : ""}">` + cols.map((c) => {
         let v = r[c[0]];
-        if (c[0] === "p_net") return `<td style="color:${v >= 0.6 ? "#3fb950" : (v >= 0.55 ? "#d29922" : "#f85149")};font-weight:700">${f2(v)}</td>`;
+        if (c[0] === "iv_is_real") return `<td>${v ? "✅реал" : "≈прокси"}</td>`;
+        if (c[0] === "p_net") return `<td style="color:${v >= 0.6 ? "#3fb950" : (v >= 0.55 ? "#d29922" : "#f85149")};font-weight:700">${f2(v)}${r.iv_is_real ? "" : "*"}</td>`;
         return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 3 }) : (v == null ? "—" : v)}</td>`;
       }).join("") + "</tr>";
     }
@@ -1736,6 +1740,7 @@ async function renderPiCoin(d) {
     + `\n📊 EV/θ = ${f2(e.ev_per_theta)} за период · средн.выигрыш ${f2(e.avg_win)}θ / проигрыш ${f2(e.avg_loss)}θ · payoff b=${e.payoff_ratio == null ? "∞" : e.payoff_ratio} ⇒ безубыток p*=${f2(e.breakeven_p)}\n`
     + `   (даже если p_net<0.5, при b>1 и p>p* стратегия +EV за счёт ВЫПУКЛОСТИ — но антимартингейлу нужен именно p>0.5.)\n`
     + `\n🔭 ЗАРАНЕЕ-метрики этого инструмента:\n`
+    + `   IV-источник: ${e.iv_is_real ? "✅ РЕАЛЬНЫЙ вол-индекс (VIX-семья) — RV/IV и p_net ДОСТОВЕРНЫ" : `≈ ПРОКСИ (реальных опционов нет → IV=реализованная +VRP-хейркат ${e.vrp_applied}). p_net = ОЦЕНКА, не факт (реальные опционы могут быть дороже)`}\n`
     + `   RV/IV (медиана) = ${e.rv_over_iv}  ${e.rv_over_iv >= 1 ? "✅ опционы дёшевы (RV≥IV)" : "⚠ опционы дороги (IV>RV, премия за риск воли)"}\n`
     + `   wickiness = ${e.wickiness} (выше ⇒ больше интрадей-возврата/«соплей» ⇒ выше достижимое c)  ·  VR(63) = ${e.variance_ratio} ${e.variance_ratio < 1 ? "(возврат к среднему — скальп работает)" : "(тренд — скальпу хуже)"}\n`
     + `   оценка достижимого c ≈ ${e.c_suggest} (прокси, не факт)\n`
