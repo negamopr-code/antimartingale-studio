@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import am_overlay as amov
 from .. import atr_strategy as strat
 from .. import data as datamod
 from .. import hedged_intraday as hi
@@ -26,7 +27,7 @@ from .. import instruments, scenarios, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
-from .schemas import (BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
+from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
                       PureStraddleReq, ScanReq)
 
@@ -1168,6 +1169,45 @@ def _ps_load_daily(req):
     if daily.empty or len(daily) < 5:
         raise HTTPException(status_code=422, detail="not enough price data for this window")
     return daily
+
+
+@app.post("/api/hedged-intraday/antimartingale")
+def hedged_intraday_antimartingale(req: AntimgOverlayReq):
+    """Tab 12: lay the antimartingale pyramid-on-wins overlay on the ПИ backtest's per-period P&L.
+    Double the position after a winning straddle period, reset after a loss, stop at the target streak.
+    Reports flat vs overlay equity + the SHUFFLE test (does real time-ordering / win-clustering add
+    alpha, or is the overlay just leverage on a positive-mean distribution?). Skill doctrine: the
+    pyramid manufactures no edge on a fair coin — only genuine clustering beats the shuffle."""
+    if req.am_period == "monthly":
+        req.dte_days = 30
+    elif req.am_period == "quarterly":
+        req.dte_days = 90
+    daily = _ps_load_daily(req)
+    datr = datamod.atr_on_timeframe(daily, req.grid_timeframe, req.atr_period)
+    vm, realized = _build_vol(req, daily)
+    res = _run_hi(daily, datr, vm, realized, req)
+    if not res.table or len(res.table) < 3:
+        raise HTTPException(status_code=422, detail="not enough ПИ periods for the overlay (longer window or shorter period)")
+    pnls = [row.get("period_pnl", 0.0) for row in res.table]
+    ov = amov.apply_overlay(pnls, target_streak=req.target_streak, n_shuffles=req.n_shuffles)
+    table = []
+    for row, t in zip(res.table, ov.table):
+        table.append({"i": row.get("i"), "open": row.get("open"), "close": row.get("close"),
+                      "pnl": t["pnl"], "win": bool(t["pnl"] > 0), "mult": t["mult"],
+                      "contribution": t["contribution"], "am_cum": t["am_cum"],
+                      "flat_cum": t["flat_cum"], "streak_before": t["streak_before"]})
+    summary = {
+        "ticker": req.ticker, "vol_model": vm.label, "period": req.am_period, "dte_days": req.dte_days,
+        "n_periods": ov.n_periods, "target_streak": ov.target_streak, "win_rate": ov.win_rate,
+        "flat_total": ov.flat_total, "am_total": ov.am_total, "alpha": ov.alpha,
+        "flat_max_dd": ov.flat_max_dd, "am_max_dd": ov.am_max_dd,
+        "max_win_streak": ov.max_win_streak, "max_mult": ov.max_mult,
+        "n_shuffles": ov.n_shuffles, "shuffle_median_am": ov.shuffle_median_am,
+        "shuffle_p05": ov.shuffle_p05, "shuffle_p95": ov.shuffle_p95, "real_pctile": ov.real_pctile,
+    }
+    return {"params": req.model_dump(), "summary": summary, "table": table,
+            "dates": [r["close"] for r in table], "flat_equity": ov.flat_equity,
+            "am_equity": ov.am_equity, "shuffle_samples": ov.shuffle_samples}
 
 
 @app.post("/api/pure-straddle")

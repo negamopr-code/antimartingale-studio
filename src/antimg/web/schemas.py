@@ -241,6 +241,16 @@ class HedgedIntradayScanReq(BaseModel):
     slippage_pct: float = Field(0.0, ge=0, le=50)
 
 
+class AntimgOverlayReq(HedgedIntradayReq):
+    """Tab 12: run the ПИ (Hedged Intraday) backtest, then lay the antimartingale pyramid-on-wins
+    overlay on its per-period P&L — double the position after a winning period, reset after a loss,
+    stop at the target streak. `am_period` sets the straddle tenor (monthly≈30d / quarterly≈90d).
+    `n_shuffles` runs the shuffle test (does real time-ordering / clustering add alpha vs chance)."""
+    target_streak: int = Field(4, ge=1, le=20)
+    am_period: str = Field("monthly", pattern="^(monthly|quarterly|asis)$")
+    n_shuffles: int = Field(50, ge=0, le=500)
+
+
 class PureStraddleReq(BaseModel):
     """Pure long-straddle backtest (Tab 10): each period spend risk_pct of the deposit on an ATM
     straddle (call+put), HOLD TO EXPIRATION, settle at intrinsic |S_T−K|, roll. No scalp, no early

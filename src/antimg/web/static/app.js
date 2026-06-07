@@ -117,7 +117,7 @@ function gateIvInputs(formSel) {
   set("iv_window", v === "realized");
   set("iv_const", v === "constant");
 }
-["#form-straddle", "#form-legs", "#form-hedged", "#form-hiexec"].forEach((f) => {
+["#form-straddle", "#form-legs", "#form-amov", "#form-hedged", "#form-hiexec"].forEach((f) => {
   const src = $(f + " [name=iv_source]");
   if (src) src.addEventListener("change", () => gateIvInputs(f));
   gateIvInputs(f);                                            // apply on load
@@ -1597,6 +1597,77 @@ $("#form-legs").onsubmit = (e) => {
   if (o.risk_pct != null) o.risk_pct = o.risk_pct / 100;   // PERCENT (1 = 1%) → fraction
   withBusy(e.submitter, async () =>
     renderLegs(await post("/api/leg-analysis", o)));
+};
+
+// ---- tab 12 · ПИ × antimartingale overlay ------------------------------------------------------
+async function renderAntimg(d) {
+  const s = d.summary, rows = d.table;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 0 }));
+  // equity: flat (base size) vs antimartingale-scaled, over period end-dates
+  await plot("am-equity", [
+    { x: d.dates, y: d.flat_equity, mode: "lines", name: "flat (база)",
+      line: { color: "#8b949e", width: 2 } },
+    { x: d.dates, y: d.am_equity, mode: "lines", name: "антимартингейл",
+      line: { color: s.am_total >= s.flat_total ? "#3fb950" : "#f85149", width: 2 },
+      fill: "tonexty", fillcolor: "rgba(163,113,247,0.10)" },
+  ], layout(`ПИ × антимарт. накопл. P&L — ${s.ticker} (${s.period}, DTE ${s.dte_days}д)`, {
+    xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "накопл. P&L $" }, zeroline: true, zerolinecolor: "#8b949e" },
+  }));
+  // shuffle test: histogram of AM totals on shuffled order, with the REAL result as a line
+  if (d.shuffle_samples && d.shuffle_samples.length) {
+    const real = s.am_total;
+    await plot("am-shuffle", [
+      { x: d.shuffle_samples, type: "histogram", name: `shuffle (${d.shuffle_samples.length})`,
+        marker: { color: "rgba(88,166,255,0.6)" } },
+    ], layout(`Shuffle-тест: реал ${f(real)} = ${s.real_pctile}-й перцентиль`, {
+      xaxis: { gridcolor: "#2a3340", title: { text: "антимарт. итог на перемешанном порядке $" } },
+      yaxis: { gridcolor: "#2a3340", title: { text: "# перемешиваний" } },
+      shapes: [
+        { type: "line", x0: real, x1: real, yref: "paper", y0: 0, y1: 1, line: { color: "#e3b341", width: 2, dash: "dash" } },
+        { type: "line", x0: s.flat_total, x1: s.flat_total, yref: "paper", y0: 0, y1: 1, line: { color: "#8b949e", width: 1, dash: "dot" } },
+      ],
+    }));
+  } else {
+    await plot("am-shuffle", [], layout("Shuffle-тест выключен (Shuffles = 0)"));
+  }
+  // verdict
+  const amBeatsFlat = s.am_total > s.flat_total;
+  const clustering = s.n_shuffles > 0
+    ? (s.real_pctile >= 90 ? "✅ ДА — реальный порядок бьёт перемешанный (победы кластеризуются → реальная альфа серий)"
+       : s.real_pctile <= 10 ? "❌ НЕТ (хуже перемешанного — победы РАЗРОЗНЕНЫ, пирамидинг вредит)"
+       : "➖ НЕТ значимой (реал ≈ медиане shuffle ⇒ порядок не важен, это просто ПЛЕЧО на распределении)")
+    : "(shuffle-тест выключен)";
+  $("#am-stats").textContent =
+    `🎲 ПИ × АНТИМАРТИНГЕЙЛ — ${s.ticker} (${s.vol_model}) · ${s.period} периоды (DTE ${s.dte_days}д) · ${s.n_periods} периодов\n`
+    + `правило: после ПЛЮСА ×2 риск, после минуса сброс к базе, фиксация серии на ${s.target_streak} подряд · p(плюс)=${s.win_rate} · макс серия ${s.max_win_streak} · макс множитель ×${s.max_mult}\n`
+    + `\nИТОГ (база за период = 1×):  flat Σ ${f(s.flat_total)}  →  антимарт Σ ${f(s.am_total)}   (альфа ${s.alpha >= 0 ? "+" : ""}${f(s.alpha)})  ${amBeatsFlat ? "📈" : "📉"}\n`
+    + `просадка:  flat ${f(s.flat_max_dd)}  ·  антимарт ${f(s.am_max_dd)}  (плечо увеличивает и просадку)\n`
+    + `\n🎯 SHUFFLE-ТЕСТ (даёт ли пирамидинг РЕАЛЬНУЮ альфу или это просто плечо):\n`
+    + `   реальный антимарт = ${f(s.am_total)} = ${s.real_pctile}-й перцентиль перемешанных (медиана ${f(s.shuffle_median_am)}, 5–95% ${f(s.shuffle_p05)}…${f(s.shuffle_p95)})\n`
+    + `   ⇒ ${clustering}\n`
+    + `\n💡 ДОКТРИНА: антимартингейл сам по себе НЕ создаёт edge — на честной монетке (2p)^N−1=0. Он лишь ПЛЕЧО на\n`
+    + `   уже имеющемся: если периоды ПИ плюсовые в среднем И кластеризуются — добавляет; если разрознены — вредит\n`
+    + `   (на серии теряешь ×множитель). Также: убыток здесь = множитель×|минус| (give-back), стопа внутри периода нет.`;
+  // per-period table
+  const cols = [["i","#"],["open","начало"],["close","конец"],["pnl","P&L периода"],["mult","риск ×"],
+    ["contribution","вклад (×P&L)"],["flat_cum","flat накопл."],["am_cum","антимарт накопл."],["streak_before","серия до"]];
+  let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
+  for (const r of rows) {
+    h += `<tr class="${r.win ? "w" : "l"}">` + cols.map((c) => {
+      let v = r[c[0]];
+      if (c[0] === "pnl" || c[0] === "contribution") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>`;
+      if (c[0] === "mult") return `<td style="font-weight:600">×${v}</td>`;
+      return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }) : v}</td>`;
+    }).join("") + "</tr>";
+  }
+  $("#am-table").innerHTML = h + `</tbody></table></div><div class="tt-note">${rows.length} периодов</div>`;
+}
+$("#form-amov").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () => {
+    toast("Прогон ПИ-бэктеста + антимартингейл + shuffle-тест…", true);
+    renderAntimg(await post("/api/hedged-intraday/antimartingale", formData(e.target)));
+  });
 };
 
 loadInstruments();

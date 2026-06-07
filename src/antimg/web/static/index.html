@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=83"/>
+  <link rel="stylesheet" href="/style.css?v=84"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -24,6 +24,7 @@
       <button class="tab" data-tab="hiexec">9 · ПИ Execution</button>
       <button class="tab" data-tab="straddle">10 · Pure straddle</button>
       <button class="tab" data-tab="legs">11 · Call vs Put</button>
+      <button class="tab" data-tab="amov">12 · ПИ × Antimartingale</button>
     </nav>
   </header>
 
@@ -401,6 +402,38 @@
     </div></div>
   </section>
 
-  <script src="/app.js?v=83"></script>
+  <!-- TAB 12 -->
+  <section id="amov" class="panel">
+    <p class="hint"><b>ПИ × Антимартингейл.</b> Берём результаты стратегии <b>Прикрытый Интрадей</b> по
+      периодам (месяц/квартал) — плюс или минус — и накладываем антимартингейл: после ПЛЮСОВОГО периода
+      <b>удваиваем риск</b>, после минуса сбрасываем к базе, фиксируем серию на target streak. Вопрос: даёт ли
+      пирамидинг на горячих сериях ДОПОЛНИТЕЛЬНУЮ альфу?
+      <br>⚠ <b>Доктрина:</b> сам по себе антимартингейл НЕ создаёт edge (на честной монетке p=0.5 →
+      (2p)^N−1=0). Помогает только если выигрышные периоды реально <b>кластеризуются</b>. Поэтому
+      <b>shuffle-тест</b>: перемешиваем порядок периодов (рушим тайм-ордер, сохраняем распределение) — если
+      реальный результат бьёт перемешанные, кластеризация реальна; если ≈ медиане shuffle — это просто плечо.</p>
+    <form class="controls" id="form-amov">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2010-01-01"></label>
+      <label>End <input name="end" placeholder="latest"></label>
+      <label title="период = срок стреддла ПИ: месяц≈30д, квартал≈90д, as-is = DTE ниже">Period <select name="am_period"><option value="monthly">monthly (≈30д)</option><option value="quarterly">quarterly (≈90д)</option><option value="asis">as-is (DTE)</option></select></label>
+      <label title="as-is: использовать этот DTE">DTE days (as-is) <input name="dte_days" type="number" value="30"></label>
+      <label title="удвоений риска подряд до фиксации серии (1/2/3/4…)">Target streak <input name="target_streak" type="number" value="4" min="1" max="20"></label>
+      <label title="перемешиваний для shuffle-теста (0 = выкл)">Shuffles <input name="n_shuffles" type="number" value="50" min="0" max="500"></label>
+      <label title="бюджет премии ПИ = risk% × банк">Risk % <input name="risk_pct" type="number" step="any" value="0.20"></label>
+      <label title="модель скальпа ПИ">Scalp model <select name="scalp_model"><option value="capture">capture (простая)</option><option value="grid">grid</option><option value="range">range</option></select></label>
+      <label title="ТОЛЬКО capture: доля дневного хода">Capture <input name="scalp_capture" type="number" step="any" value="0.20"></label>
+      <label title="источник IV для цены стреддла">IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label>IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
+      <button type="submit">Прогнать ПИ × антимартингейл</button>
+    </form>
+    <div class="results"><div class="plots"><div id="am-equity"></div><div id="am-shuffle"></div></div>
+      <pre class="stats" id="am-stats"></pre></div>
+    <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧾 По периодам — P&L, множитель риска, накопл. (flat vs антимарт.) ↓</h3>
+    <div class="tradetable" id="am-table"></div>
+  </section>
+
+  <script src="/app.js?v=84"></script>
 </body>
 </html>

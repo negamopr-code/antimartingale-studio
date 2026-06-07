@@ -860,3 +860,24 @@ Not implemented; documented as a rejected tactic.
 - **Fee semantics (clarified, already correct):** commission_pct & slippage_pct are PER SIDE — charged on
   the entry premium AND the exit payoff (twice per straddle), not once.
 - 119 tests (engine field add covered by existing trial tests). assets v83.
+
+## D77 — Tab 12: ПИ × Antimartingale overlay (pyramid-on-wins on ПИ period results) + shuffle test (2026-06-07)
+- **Ask (user):** new tab — take the Hedged Intraday (ПИ) results per monthly/quarterly period (win/loss)
+  and apply the antimartingale (double risk after a win, reset after a loss, stop at target streak) to
+  see if pyramiding on win-streaks adds alpha.
+- **Built:**
+  - `am_overlay.apply_overlay(pnls, target_streak, n_shuffles)` — pyramid-on-wins over a period-P&L
+    sequence (give-back form: loss at high mult costs mult×|loss|, no intra-period stop, matching "double
+    the RISK"). Returns flat vs overlay equity, per-period ledger (mult/contribution/cum), max DD/streak/
+    mult, AND the **shuffle test** (skill doctrine: pyramid makes no edge on a fair coin; only genuine
+    win-CLUSTERING beats a shuffled order — `real_pctile` = where the real result sits in the shuffle dist).
+  - `AntimgOverlayReq(HedgedIntradayReq)` + `am_period` (monthly→DTE30 / quarterly→DTE90 / asis) +
+    `target_streak` + `n_shuffles`; `POST /api/hedged-intraday/antimartingale` runs ПИ → overlay.
+  - Tab-12 UI: equity (flat vs AM), shuffle histogram with real+flat markers, per-period table,
+    doctrine-grounded verdict (clustering vs leverage).
+- **Finding (honest, as doctrine predicts):** SPY monthly ПИ (capture 0.2) is a p=0.28 LOSING series;
+  flat −9.9k, antimartingale −24.8k (alpha −14.9k), real at 16th pctile of shuffles ⇒ wins DISPERSED,
+  pyramiding amplifies a losing non-clustered distribution. GLD quarterly same (real 4th pctile). The
+  overlay adds NO alpha — it's leverage on whatever drift/clustering exists, and ПИ has neither here.
+- 125 tests (+6: pyramid mechanics, give-back, shuffle detects clustering / neutral on IID, order-indep
+  flat, endpoint). assets v84. SKILL sanity-check #3 honored (shuffle, not detrend).
