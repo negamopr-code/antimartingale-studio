@@ -1124,7 +1124,7 @@ def _trial_summary(res, **extra) -> dict:
         **extra, "leg": res.leg,
         "starting_bank": round(res.starting_bank, 2), "final_bank": round(res.final_bank, 2),
         "net_pnl": round(res.net_pnl, 2), "years": round(res.years, 2),
-        "n_periods": res.n_trials, "n_trials": res.n_trials,
+        "n_periods": res.n_trials, "n_trials": res.n_trials, "n_partial": res.n_partial,
         "n_wins": res.n_wins, "n_losses": res.n_losses, "win_rate": round(res.win_rate, 4),
         "max_win_streak": res.max_win_streak, "max_loss_streak": res.max_loss_streak,
         "avg_win": round(res.avg_win, 2), "avg_loss": round(res.avg_loss, 2),
@@ -1166,7 +1166,7 @@ def pure_straddle(req: PureStraddleReq):
         res = ps.run_coinflip_trials(
             daily, vm, leg="straddle", risk_pct=req.risk_pct, dte_days=req.dte_days,
             starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
-            slippage_pct=req.slippage_pct, compounding=req.compounding)
+            slippage_pct=req.slippage_pct, compounding=req.compounding, max_rolls=req.max_rolls)
         if not res.trials:
             raise HTTPException(status_code=422, detail="no coin-flip trial resolved (try a longer window or shorter DTE)")
         return {"params": req.model_dump(), **_trial_payload(res, ticker=req.ticker, vol_model=vm.label)}
@@ -1194,7 +1194,7 @@ def leg_analysis(req: PureStraddleReq):
             res = ps.run_coinflip_trials(
                 daily, vm, leg=leg, risk_pct=req.risk_pct, dte_days=req.dte_days,
                 starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
-                slippage_pct=req.slippage_pct, compounding=req.compounding)
+                slippage_pct=req.slippage_pct, compounding=req.compounding, max_rolls=req.max_rolls)
             if not res.trials:
                 raise HTTPException(status_code=422, detail="no coin-flip trial resolved (try a longer window or shorter DTE)")
             out[leg] = _trial_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)

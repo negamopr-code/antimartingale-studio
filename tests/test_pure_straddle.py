@@ -199,10 +199,10 @@ def test_api_leg_analysis_endpoint():
 
 
 def test_coinflip_loss_capped_at_minus_R():
-    """In coin-flip mode a flat market never moves → every trial loses exactly its risk R (capped)."""
+    """In coin-flip mode a flat market never moves → every trial loses its risk R (capped at −R)."""
     df = _frame(np.full(500, 100.0))
     res = ps.run_coinflip_trials(df, _const_vol(0.2), leg="straddle", risk_pct=0.05, dte_days=30,
-                                 starting_bank=10_000.0)
+                                 starting_bank=10_000.0, max_rolls=50)
     assert res.n_trials > 0
     assert res.n_wins == 0                                   # nothing moves → no trial reaches +R
     for t in res.trials:
@@ -211,15 +211,36 @@ def test_coinflip_loss_capped_at_minus_R():
         assert t.n_rolls == 1                                # a fully-worthless straddle wipes R in one roll
 
 
+def test_coinflip_horizon_closes_partial_and_continues():
+    """A small-vol drift makes trials grind without hitting ±R; the horizon must close them partial
+    (booking actual cum) so the timeline isn't swallowed by one never-ending trial."""
+    rng = np.random.default_rng(2)
+    df = _frame(100.0 + np.cumsum(rng.normal(0.0, 0.25, 2000)))   # tiny moves → straddles seldom resolve
+    short = ps.run_coinflip_trials(df, _const_vol(0.15), leg="straddle", risk_pct=0.02, dte_days=20,
+                                   starting_bank=10_000.0, max_rolls=6)
+    long = ps.run_coinflip_trials(df, _const_vol(0.15), leg="straddle", risk_pct=0.02, dte_days=20,
+                                  starting_bank=10_000.0, max_rolls=60)
+    assert short.n_trials > long.n_trials                    # tighter horizon → more (shorter) trials
+    assert short.n_partial > 0                               # some trials closed by the horizon
+    for t in short.trials:
+        assert t.n_rolls <= 6                                # no trial exceeds the horizon
+        if t.partial:
+            assert abs(t.cum_pnl) < t.R + 1e-6              # partial = booked before reaching ±R
+    # the last trial ends near the end of the data (timeline not swallowed by one endless trial)
+    assert pd.Timestamp(short.trials[-1].end_date) > pd.Timestamp(short.trials[0].end_date)
+
+
 def test_coinflip_wins_can_overshoot_and_streaks_consistent():
     """A win books actual cum (≥ +R, may overshoot); streak counts are self-consistent."""
     rng = np.random.default_rng(21)
     df = _frame(100.0 + np.cumsum(rng.normal(0.05, 1.2, 1500)))   # drifting, volatile → some wins
     res = ps.run_coinflip_trials(df, _const_vol(0.25), leg="straddle", risk_pct=0.02, dte_days=30,
-                                 starting_bank=10_000.0)
+                                 starting_bank=10_000.0, max_rolls=60)
     assert res.n_trials > 0
     assert res.n_wins + res.n_losses == res.n_trials
     for t in res.trials:
+        if t.partial:
+            continue                                         # horizon close → cum booked as-is (not ±R)
         if t.win:
             assert t.cum_pnl >= t.R - 1e-6                   # win reaches at least +R (can overshoot)
         else:

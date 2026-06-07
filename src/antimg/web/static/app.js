@@ -1403,7 +1403,8 @@ async function renderStraddle(d) {
       + `${s.n_trials} испытаний · риск=реворд R=${(d.params.risk_pct * 100).toFixed(2)}% банка (1-е R≈${f(R)} $) · DTE ${d.params.dte_days}д · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
       + `\nИТОГ: ${profitable ? "📈 ПЛЮС" : "📉 МИНУС"}  ·  банк ${f(s.starting_bank)} → ${f(s.final_bank)}  (чистый ${f(s.net_pnl)} $)  ·  CAGR ${s.ann_return_pct}%\n`
       + `выигрышей: ${s.n_wins}/${s.n_trials} (${(s.win_rate * 100).toFixed(1)}%)  ·  проигрышей ${s.n_losses}  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}\n`
-      + `средн. выигрыш ${f(s.avg_win)} $ (≥ +R, выпукло)  ·  средн. проигрыш ${f(s.avg_loss)} $ (= −R, капнут)  ·  роллов/испытание: средн ${s.avg_rolls}, макс ${s.max_rolls}\n`
+      + `средн. выигрыш ${f(s.avg_win)} $ (≥ +R, выпукло)  ·  средн. проигрыш ${f(s.avg_loss)} $ (≈ −R)  ·  роллов/испытание: средн ${s.avg_rolls}, макс ${s.max_rolls} (горизонт ${d.params.max_rolls})\n`
+      + `по горизонту (частичные, не дошли до ±R за ${d.params.max_rolls} роллов): ${s.n_partial}/${s.n_trials}\n`
       + `\n🔁 СЕРИИ ПОДРЯД:  макс ${s.max_win_streak} побед / ${s.max_loss_streak} проигрышей подряд\n`
       + `   победы подряд : ${streakStr(d.win_streaks)}\n`
       + `   убытки подряд : ${streakStr(d.loss_streaks)}\n`
@@ -1413,12 +1414,14 @@ async function renderStraddle(d) {
       + `   фактический (≥ +R, бывает перелёт на крупном движении = выпуклость лонг-опциона).\n`
       + `\n⚠ Премия — модель Блэка-Шоулза по IV (${s.vol_model}), НЕ котировка реального фида; реальный результат обычно ХУЖЕ.`;
     const cols = [["start_date","начало"],["end_date","конец (резолв)"],["n_rolls","роллов"],["R","R (риск=реворд)"],
-      ["spot_start","S старт"],["spot_end","S конец"],["premium_total","премии Σ"],["payoff_total","выплат Σ"],["cum_pnl","P&L испыт."]];
+      ["spot_start","S старт"],["spot_end","S конец"],["premium_total","премии Σ"],["payoff_total","выплат Σ"],
+      ["cum_pnl","P&L испыт."],["partial","как закрыт"]];
     let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
     for (const r of rows) {
       h += `<tr class="${r.win ? "w" : "l"}">` + cols.map((c) => {
         let v = r[c[0]];
         if (c[0] === "cum_pnl") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${f(v)}</td>`;
+        if (c[0] === "partial") return `<td>${v ? "горизонт" : "±R"}</td>`;
         return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</td>`;
       }).join("") + "</tr>";
     }

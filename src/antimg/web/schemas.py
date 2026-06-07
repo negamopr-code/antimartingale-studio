@@ -256,6 +256,9 @@ class PureStraddleReq(BaseModel):
     # 'coinflip' = a TRIAL rolls to expiry until cumulative P&L hits +R (win) or −R (loss), R=risk_pct×bank
     #              — a fixed risk/reward coin flip; loss capped at −R, win books actual (can overshoot).
     resolution: str = Field("expiry", pattern="^(expiry|coinflip)$")
+    # coinflip only: HORIZON — close a trial at its actual cum if it hasn't hit ±R within this many
+    # rolls (a straddle rarely doubles/zeroes in one expiry, so without this a losing trial drags on).
+    max_rolls: int = Field(12, ge=1, le=120)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     # IV surface (same engine as the options/hedged tabs)
     iv_window: int = Field(20, ge=2, le=500)

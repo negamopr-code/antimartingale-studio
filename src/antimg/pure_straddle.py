@@ -299,6 +299,7 @@ class Trial:
     spot_start: float
     spot_end: float
     win: bool
+    partial: bool = False    # True = resolved by the max-roll HORIZON (cum booked as-is), not by ±R
 
 
 @dataclass
@@ -310,6 +311,7 @@ class TrialResult:
     n_trials: int = 0
     n_wins: int = 0
     n_losses: int = 0
+    n_partial: int = 0               # trials closed by the horizon (cum booked as-is) rather than ±R
     win_rate: float = 0.0
     max_win_streak: int = 0
     max_loss_streak: int = 0
@@ -338,7 +340,7 @@ def _leg_prem_and_intrinsic(leg, S0, K, T, r, sigma, S_T):
 def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle",
                         risk_pct: float = 0.01, dte_days: int = 30, starting_bank: float = 10_000.0,
                         r: float = 0.045, commission_pct: float = 0.0, slippage_pct: float = 0.0,
-                        compounding: bool = True) -> TrialResult:
+                        compounding: bool = True, max_rolls: int = 12) -> TrialResult:
     """Resolve the option backtest as a COIN FLIP with fixed risk/reward, translated to option reality.
 
     A *trial* keeps rolling the same construction (straddle, or a single call/put leg) to expiry until
@@ -346,7 +348,12 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
     risk = reward unit. Each roll's premium = the REMAINING capacity to the −R floor (= R + cum), so a
     partial loss is carried forward (next straddle risks less) and the total loss is capped at exactly
     −R; a partial gain is carried forward too (we wait for the rest of +R). Losses book exactly −R;
-    wins book the ACTUAL cum (≥ +R, can overshoot on a big move = long-option convexity)."""
+    wins book the ACTUAL cum (≥ +R, can overshoot on a big move = long-option convexity).
+
+    `max_rolls` is a HORIZON: a straddle rarely doubles or goes worthless in one expiry, so with the
+    remaining-capacity sizing a losing trial would grind toward −R over dozens of ever-smaller rolls
+    (years). If a trial hasn't hit ±R within max_rolls rolls, it is closed at its ACTUAL cum (a partial
+    win if cum≥0 else a partial loss) and a fresh trial begins."""
     res = TrialResult(leg=leg, starting_bank=starting_bank, final_bank=starting_bank)
     if daily is None or daily.empty:
         return res
@@ -371,6 +378,7 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
         start_p = p
         spot_start = float(close.iloc[p])
         outcome = None                                       # 'win' | 'loss' | None(incomplete)
+        partial = False
         end_q = p
         while True:
             entry_date = dates[p]
@@ -416,6 +424,10 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             if cum <= -R + 1e-9:
                 outcome = "loss"
                 break
+            if n_rolls >= max_rolls:                         # horizon hit → book the partial cum
+                outcome = "win" if cum >= 0 else "loss"
+                partial = True
+                break
             if p >= n - 1:
                 break                                        # no room for another roll → incomplete
 
@@ -427,10 +439,13 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             start_date=str(dates[start_p].date()), end_date=str(dates[end_q].date()),
             n_rolls=n_rolls, R=round(R, 2), premium_total=round(prem_tot, 2),
             payoff_total=round(pay_tot, 2), cum_pnl=round(cum, 2),
-            spot_start=round(spot_start, 4), spot_end=round(float(close.iloc[end_q]), 4), win=win))
+            spot_start=round(spot_start, 4), spot_end=round(float(close.iloc[end_q]), 4),
+            win=win, partial=partial))
         res.equity.append({"date": str(dates[end_q].date()), "bank": round(bank, 2)})
         if win:
             res.n_wins += 1
+        if partial:
+            res.n_partial += 1
         p = end_q                                            # next trial starts at this expiry
 
     res.final_bank = bank

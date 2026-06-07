@@ -796,3 +796,21 @@ Not implemented; documented as a rejected tactic.
   win, 23-loss streak). Loss capped at −R, wins overshoot = the convexity.
 - 115 tests (+4: loss-capped-at-−R, win-overshoot+streak-consistency, partial-loss-carried, coin-flip
   endpoints for straddle & legs). assets v78.
+
+## D73 — Coin-flip trials: max-roll HORIZON (fix multi-year / swallowed-timeline trials) (2026-06-07)
+- **Symptom (user):** the straddle coin-flip table stopped at 2011 (only 3 trials). **Cause:** with the
+  remaining-capacity sizing (D72, the user's −80 rule), a 30-day SPY straddle rarely doubles or zeroes in
+  one expiry, so a *losing* trial grinds toward −R over dozens of ever-smaller rolls — and one trial that
+  started 2011 never resolved, rolling until the data ran out in 2026, then got discarded as incomplete →
+  the timeline 2011–2026 was silently swallowed.
+- **Fix (user-chosen): keep the −80 rule + add a max-roll HORIZON.** `run_coinflip_trials(max_rolls=12)`:
+  if a trial hasn't hit ±R within max_rolls rolls, close it at its ACTUAL cum (partial win if cum≥0 else
+  partial loss, `Trial.partial=True`) and start a fresh trial. So loss ≈ −R, but time is bounded.
+- **Built:** engine `max_rolls` param + `partial` flag + `n_partial` count; `PureStraddleReq.max_rolls`
+  (default 12, ge1 le120); both endpoints pass it (NOT run_single_leg); summary carries `n_partial`; UI
+  «Max rolls (горизонт)» input on tabs 10 & 11, verdict shows partial count + horizon, trial table «как
+  закрыт» column (±R vs горизонт).
+- **Result (SPY 2010–26, R=1%, horizon 12):** straddle now 18 trials spanning to 2026-04 (was stuck at
+  2011), 16/18 closed by horizon (partial), 11% win, CAGR −0.8%. Timeline no longer swallowed.
+- 116 tests (+1 horizon-closes-partial-and-continues; updated loss-cap & overshoot tests for partials).
+  assets v79.
