@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=72"/>
+  <link rel="stylesheet" href="/style.css?v=73"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -22,6 +22,7 @@
       <button class="tab" data-tab="inspect">7 · Inspect</button>
       <button class="tab" data-tab="hedged">8 · Hedged Intraday (ПИ)</button>
       <button class="tab" data-tab="hiexec">9 · ПИ Execution</button>
+      <button class="tab" data-tab="straddle">10 · Pure straddle</button>
     </nav>
   </header>
 
@@ -318,6 +319,40 @@
     <div class="tradetable" id="hx-rules"></div>
   </section>
 
-  <script src="/app.js?v=72"></script>
+  <!-- TAB 10 -->
+  <section id="straddle" class="panel">
+    <p class="hint"><b>Чистый стреддл</b> — БЕЗ интрадей-скальпа, БЕЗ раннего ролла. Каждый период тратим
+      выбранный <b>% депозита</b> на ATM-стреддл (колл+пут по текущей цене), держим <b>до экспирации</b>,
+      получаем внутреннюю стоимость |S_T−K|, и роллим в новый стреддл. Видно, во сколько обходится стреддл
+      («аренда» = премия) и зарабатывает ли он, если просто держать до конца.
+      <br>⚠ <b>Данные:</b> отдельного API не нужно. Цена базового актива — реальная (дневная история);
+      премия опциона — <b>модельная цена Блэка-Шоулза</b> по моделируемой IV (реализованная воля / VIX-поверхность),
+      а НЕ котировка с реального опционного фида. Выплата на экспирации |S_T−K| — по реальной цене. Поскольку
+      IV обычно ≥ реализованной (премия за риск волатильности), покупка-и-удержание стреддла обычно −EV — это и проверяем.</p>
+    <form class="controls" id="form-straddle">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label>Start <input name="start" value="2010-01-01"></label>
+      <label>End <input name="end" placeholder="latest"></label>
+      <label title="какой % депозита тратим на стреддл каждый период (= премия). Модифицируемо.">Risk % депозита <input name="risk_pct" type="number" step="any" value="0.01"></label>
+      <label title="срок стреддла = период удержания до экспирации (календарные дни)">DTE days (срок) <input name="dte_days" type="number" value="30"></label>
+      <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
+      <label title="on = премия = risk% от ТЕКУЩЕГО банка (компаундинг); off = от стартового банка (аддитивно, чистая по-периодная экономика)">Compounding <select name="compounding"><option value="true">on (% от текущего банка)</option><option value="false">off (% от стартового)</option></select></label>
+      <label title="источник IV для цены стреддла: auto = вол-индекс по классу (VIX и т.п.), иначе реализованная воля">IV source <select name="iv_source"><option value="auto">auto (vol-index by class)</option><option value="index">force vol-index</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label title="константа IV при iv_source=constant">IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
+      <label title="скос: пусто = дефолт по классу">Skew β <input name="skew_beta" type="number" step="any" placeholder="class default"></label>
+      <label>Term structure <select name="use_term_structure"><option value="true">on (interp to DTE)</option><option value="false">off (flat)</option></select></label>
+      <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
+      <label title="% от премии/выплаты на КАЖДУЮ ногу (вход и выход)">Commission % <input name="commission_pct" type="number" step="any" value="0"></label>
+      <label title="% от премии/выплаты на КАЖДУЮ ногу">Slippage % <input name="slippage_pct" type="number" step="any" value="0"></label>
+      <button type="submit">Прогнать чистый стреддл</button>
+    </form>
+    <div class="results"><div class="plots"><div id="str-equity"></div><div id="str-hist"></div></div>
+      <pre class="stats" id="str-stats"></pre></div>
+    <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧾 По периодам — вход/экспирация, премия, выплата, P&L ↓</h3>
+    <div class="tradetable" id="str-table"></div>
+  </section>
+
+  <script src="/app.js?v=73"></script>
 </body>
 </html>

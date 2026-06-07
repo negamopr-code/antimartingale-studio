@@ -20,13 +20,15 @@ from .. import atr_strategy as strat
 from .. import data as datamod
 from .. import hedged_intraday as hi
 from .. import pi_model as pim
+from .. import pure_straddle as ps
 from .. import vol as volmod
 from .. import instruments, scenarios, signals, tradingview
 from ..simcore import Simulation, expected_trades_per_cycle
 from . import serialization as ser
 from .config import settings
 from .schemas import (BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
-                      HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq, ScanReq)
+                      HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
+                      PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1086,6 +1088,45 @@ def hedged_intraday_scan(req: HedgedIntradayScanReq):
         "worst": min(ok, key=lambda r: r["cagr_pct"], default=None),
     }
     return {"params": req.model_dump(), "results": rows, "summary": summary}
+
+
+@app.post("/api/pure-straddle")
+def pure_straddle(req: PureStraddleReq):
+    """Pure long-straddle backtest (Tab 10): spend risk_pct of the deposit on an ATM straddle each
+    period, HOLD TO EXPIRATION, settle at intrinsic |S_T−K|, roll. No scalp overlay, no early roll —
+    the raw economics of being long volatility and paying theta to expiry. Premium is a BS model
+    price from the vol surface (no option-chain feed); the expiry payoff uses the REAL price path."""
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=req.end)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if req.end:
+        daily = daily.loc[daily.index <= pd.Timestamp(req.end)]
+    if daily.empty or len(daily) < 5:
+        raise HTTPException(status_code=422, detail="not enough price data for this window")
+    vm, _realized = _build_vol(req, daily)
+    res = ps.run_pure_straddle(
+        daily, vm, risk_pct=req.risk_pct, dte_days=req.dte_days, starting_bank=req.starting_bank,
+        r=req.r, commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
+        compounding=req.compounding)
+    if not res.table:
+        raise HTTPException(status_code=422, detail="no straddle period could be resolved (try a longer window or shorter DTE)")
+    inf = lambda x: (None if x == float("inf") else round(x, 3))
+    summary = {
+        "ticker": req.ticker, "vol_model": vm.label,
+        "starting_bank": round(res.starting_bank, 2), "final_bank": round(res.final_bank, 2),
+        "net_pnl": round(res.net_pnl, 2), "years": round(res.years, 2),
+        "n_periods": res.n_periods, "n_wins": res.n_wins, "win_rate": round(res.win_rate, 4),
+        "ann_return_pct": round(res.ann_return_pct, 2), "avg_pnl": round(res.avg_pnl, 2),
+        "profit_factor": inf(res.profit_factor),
+        "total_premium": round(res.total_premium, 2), "total_payoff": round(res.total_payoff, 2),
+        "premium_recovered_pct": round(res.premium_recovered_pct, 1),
+        "avg_breakeven_pct": round(res.avg_breakeven_pct, 3),
+        "avg_move_pct": round(res.avg_move_pct, 3),
+    }
+    return {"params": req.model_dump(), "summary": summary,
+            "table": [vars(t) for t in res.table], "equity": res.equity}
 
 
 # ----------------------------------------------------------------- TradingView ingest

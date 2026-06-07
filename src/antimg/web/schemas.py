@@ -241,6 +241,28 @@ class HedgedIntradayScanReq(BaseModel):
     slippage_pct: float = Field(0.0, ge=0, le=50)
 
 
+class PureStraddleReq(BaseModel):
+    """Pure long-straddle backtest (Tab 10): each period spend risk_pct of the deposit on an ATM
+    straddle (call+put), HOLD TO EXPIRATION, settle at intrinsic |S_T−K|, roll. No scalp, no early
+    roll. Premium = BS model price (vol surface); expiry payoff uses the real price path."""
+    ticker: str = Field("GLD", min_length=1, max_length=20)
+    start: str = "2010-01-01"
+    end: str | None = None
+    risk_pct: float = Field(0.01, gt=0, le=1.0)              # % of deposit spent on the straddle per period
+    dte_days: int = Field(30, ge=1, le=730)                  # straddle tenor = holding period to expiry
+    starting_bank: float = Field(10_000.0, gt=0)
+    compounding: bool = True                                 # size bet to current bank (vs starting bank)
+    r: float = Field(0.045, ge=-0.05, le=0.5)
+    # IV surface (same engine as the options/hedged tabs)
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
+    iv_const: float = Field(0.20, gt=0, le=3)
+    skew_beta: float | None = Field(None, ge=-2, le=2)
+    use_term_structure: bool = True
+    commission_pct: float = Field(0.0, ge=0, le=50)          # % of premium/payoff per leg
+    slippage_pct: float = Field(0.0, ge=0, le=50)
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

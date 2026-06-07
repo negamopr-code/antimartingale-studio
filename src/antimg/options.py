@@ -38,6 +38,21 @@ def call_price(S, K, T, r, sigma, q=0.0):
             - K * np.exp(-r * T) * ndtr(d2))
 
 
+def put_price(S, K, T, r, sigma, q=0.0):
+    """European put price (per 1 unit underlying) via put–call parity / direct BS."""
+    d1, d2 = d1_d2(S, K, T, r, sigma, q)
+    T = np.maximum(np.asarray(T, dtype=float), 1e-9)
+    return (K * np.exp(-r * T) * ndtr(-d2)
+            - np.asarray(S, dtype=float) * np.exp(-q * T) * ndtr(-d1))
+
+
+def straddle_price(S, K, T, r, sigma, q=0.0):
+    """Long straddle premium (per 1 unit underlying) = ATM call + put. The 'rent' you pay to be
+    long volatility for T years. At expiry the position is worth |S_T − K| (intrinsic), so it
+    profits only when the realized move exceeds this premium."""
+    return call_price(S, K, T, r, sigma, q) + put_price(S, K, T, r, sigma, q)
+
+
 def price_for_value(target_value, K, T, r, sigma, q=0.0, S_lo=None, S_hi=None):
     """Underlying price S at which a call is worth `target_value` (per 1 unit underlying).
 

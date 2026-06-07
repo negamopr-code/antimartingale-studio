@@ -1321,6 +1321,70 @@ $("#form-hiexec").onsubmit = (e) => {
     renderHiExec(await post("/api/hedged-intraday/inspect", formData(e.target))));
 };
 
+// ---- tab 10 · pure straddle (hold to expiry, no scalp) -----------------------------------------
+async function renderStraddle(d) {
+  const s = d.summary, rows = d.table;
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  // equity curve
+  await plot("str-equity", [
+    { x: d.equity.map((p) => p.date), y: d.equity.map((p) => p.bank), mode: "lines",
+      name: "bank", line: { color: "#a371f7", width: 2 },
+      fill: "tozeroy", fillcolor: "rgba(163,113,247,0.10)" },
+    { x: [d.equity[0].date, d.equity[d.equity.length - 1].date],
+      y: [s.starting_bank, s.starting_bank], mode: "lines", name: "start bank",
+      line: { color: "#8b949e", dash: "dot", width: 1 } },
+  ], layout(`Банк: чистый стреддл до экспирации — ${s.ticker} (${s.vol_model})`));
+  // per-period P&L histogram (win/loss split)
+  const pnls = rows.map((r) => r.pnl);
+  const W = pnls.filter((v) => v > 0), L = pnls.filter((v) => v <= 0);
+  const nbins = Math.min(60, Math.max(12, Math.ceil(Math.sqrt(pnls.length || 1))));
+  const xbins = pnls.length
+    ? (() => { const lo = Math.min(...pnls), hi = Math.max(...pnls);
+               return { start: lo, end: hi, size: (hi - lo) / nbins || 1 }; })()
+    : undefined;
+  await plot("str-hist", [
+    { x: L, type: "histogram", name: `losses (${L.length})`, xbins, marker: { color: "rgba(248,81,73,0.75)" } },
+    { x: W, type: "histogram", name: `wins (${W.length})`, xbins, marker: { color: "rgba(63,185,80,0.8)" } },
+  ], layout(`P&L по периодам (среднее ${f(s.avg_pnl)})`, {
+    barmode: "overlay",
+    xaxis: { gridcolor: "#2a3340", title: { text: "P&L за период ($)" }, zeroline: true, zerolinecolor: "#8b949e" },
+    yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
+  }));
+  // verdict — lead with the honest long-straddle economics
+  const profitable = s.net_pnl > 0;
+  const vrp = s.avg_breakeven_pct - s.avg_move_pct;   // how much IV cost exceeded the realized move
+  $("#str-stats").textContent =
+    `🎯 ЧИСТЫЙ СТРЕДДЛ ДО ЭКСПИРАЦИИ — ${s.ticker}  ·  IV-модель: ${s.vol_model}\n`
+    + `${s.n_periods} периодов × DTE ${d.params.dte_days}д · risk ${(d.params.risk_pct*100).toFixed(2)}%/период · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
+    + `\nИТОГ: ${profitable ? "📈 ПЛЮС" : "📉 МИНУС"}  ·  банк ${f(s.starting_bank)} → ${f(s.final_bank)}  (чистый ${f(s.net_pnl)} $)  ·  CAGR ${s.ann_return_pct}%\n`
+    + `прибыльных периодов: ${s.n_wins}/${s.n_periods} (${(s.win_rate*100).toFixed(1)}%)  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}  ·  средн. P&L ${f(s.avg_pnl)} $\n`
+    + `\n💸 «АРЕНДА» (стоимость стреддла): заплачено премии Σ ${f(s.total_premium)}  ·  получено на экспирации Σ ${f(s.total_payoff)}\n`
+    + `   возврат премии: ${s.premium_recovered_pct}%  ⇒ ${s.premium_recovered_pct >= 100 ? "выплаты ПОКРЫЛИ премию (стреддл окупился)" : "выплаты НЕ покрыли премию (стреддл стоил дороже, чем дал)"}\n`
+    + `\n📏 ПОЧЕМУ: чтобы выйти в ноль, нужен ход ≥ премии. Средний нужный ход (breakeven) = ${s.avg_breakeven_pct}%;\n`
+    + `   средний РЕАЛЬНЫЙ ход к экспирации = ${s.avg_move_pct}%.  Разница ${vrp >= 0 ? "+" : ""}${vrp.toFixed(2)}пп ${vrp > 0 ? "= IV дороже движения ⇒ премия за риск волатильности съедает стреддл (−EV)" : "= движение перекрыло IV ⇒ стреддл в плюсе"}.\n`
+    + `\n⚠ Данные: цена базового — реальная; премия — модель Блэка-Шоулза по IV (${s.vol_model}), НЕ котировка реального опционного фида.\n`
+    + `   Качество ответа зависит от IV-модели. Реальные опционы обычно ещё дороже (бид-аск, IV-надбавка) → реальный результат ХУЖЕ.`;
+  // per-period table
+  const cols = [["entry_date","вход"],["expiry_date","экспирация"],["spot_entry","S вход (=K)"],
+    ["spot_expiry","S экспир."],["iv","IV"],["prem_per_unit","премия/ед"],["units","единиц"],
+    ["premium_paid","заплачено $"],["payoff","выплата $"],["pnl","P&L $"],["bank_after","банк после"],
+    ["breakeven_pct","нужен ход %"],["move_pct","реальн. ход %"]];
+  let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
+  for (const r of rows) {
+    h += `<tr class="${r.win ? "w" : "l"}">` + cols.map((c) => {
+      let v = r[c[0]];
+      if (c[0] === "pnl") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${f(v)}</td>`;
+      return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</td>`;
+    }).join("") + "</tr>";
+  }
+  $("#str-table").innerHTML = h + `</tbody></table></div><div class="tt-note">${rows.length} периодов · прокрути</div>`;
+}
+$("#form-straddle").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () =>
+    renderStraddle(await post("/api/pure-straddle", formData(e.target))));
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

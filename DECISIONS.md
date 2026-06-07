@@ -692,3 +692,27 @@ Not implemented; documented as a rejected tactic.
   mean-reversion edge is regime-specific and varies WITHIN a class (ETH ranged, BTC trended). Result stays
   linear in capture, so the flat knob still works for sensitivity.
 - 97 tests (+1: per-class preset ordering + anchor + band). assets v72.
+
+## D67 — Tab 10: Pure straddle backtest (hold to expiry, no scalp) (2026-06-07)
+- **Ask (user):** a new tab for a PURE straddle (no intraday) — spend a configurable % of the deposit
+  (default 1%) on a straddle, hold to expiration, see the result. "We have all data, no extra API,
+  options priced backwards, right?"
+- **Data answer (honest):** no extra API needed, BUT we do NOT pull real historical option quotes (that
+  needs a paid chain feed). The entry premium is a **Black-Scholes model price** from the vol surface
+  (realized vol / CBOE VIX term structure) on the REAL underlying price; the expiry payoff |S_T−K| uses
+  the real price path. Accuracy rides on the IV model; since IV usually ≥ realized (variance-risk
+  premium), buy-and-hold straddles are typically −EV — which is exactly what the tab shows.
+- **Built:**
+  - `options.put_price` + `options.straddle_price` (ATM call+put, the "rent" to be long vol).
+  - `src/antimg/pure_straddle.py::run_pure_straddle`: roll ATM straddles to expiry, size each to
+    `risk_pct` of the (optionally compounding) bank; per-period record entry/expiry/IV/premium/units/
+    payoff/pnl/bank + move% vs breakeven%; summary = win rate, net, CAGR, profit factor, total premium
+    vs payoff, **premium_recovered_pct**, **avg_breakeven_pct vs avg_move_pct** (the VRP gap). Loss is
+    floored at the premium (a long option can't lose more than it cost).
+  - `PureStraddleReq` + `POST /api/pure-straddle`; Tab 10 UI (equity curve, win/loss P&L histogram,
+    honest verdict incl. the BS-model-not-a-quote caveat, per-period table). assets v73.
+- **Live finding (sanity):** SPY 30d ATM straddles 2012–23 (real VIX surface) = 28% win, **−3%/yr**,
+  premium only 74% recovered, breakeven 4.24% vs 3.14% realized move = the VRP eating it. GLD similar
+  (−1.8%/yr, 85% recovered). Confirms long straddles bleed held to expiry — the rent the ПИ scalp must pay.
+- 105 tests (+8: put-call parity, straddle=call+put, flat-loses-premium, big-move-wins, P&L identity,
+  risk_pct linearity, breakeven, endpoint).
