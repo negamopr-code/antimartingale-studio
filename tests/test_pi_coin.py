@@ -90,3 +90,13 @@ def test_api_pi_coin_single_and_scan_keys():
     assert {"p_net", "c_net", "curve", "c_star_060", "rv_over_iv", "wickiness", "variance_ratio",
             "p_in", "p_out", "payoff_ratio"} <= e.keys()
     assert len(e["curve"]) > 5
+
+
+def test_dvol_currency_mapping():
+    """BTC/ETH map to a Deribit DVOL currency; lookalikes (ETC, BCH, SOL) do NOT (no real IV for them)."""
+    from antimg import vol as v
+    assert v._dvol_currency("BTC-USD") == "BTC"
+    assert v._dvol_currency("ETH-USDT") == "ETH"
+    assert v._dvol_currency("XBTUSD") == "BTC"
+    for t in ("ETC-USD", "BCH-USD", "SOL-USD", "SPY", "GLD"):
+        assert v._dvol_currency(t) is None

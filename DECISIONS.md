@@ -995,3 +995,19 @@ Not implemented; documented as a rejected tactic.
   still better but honest + flagged; only the 7 real-IV classes are trustworthy without an options feed.
 - Skill: coin-flip-decomposition.md §10 + lessons (cross-instrument IV reliability). 133 tests (+1). v89.
 - TODO to make non-index ratings real: a true IV feed (Deribit DVOL for BTC/ETH; ORATS/option chains).
+
+## D85 — Wire real Deribit DVOL for BTC/ETH + harden daily cache (2026-06-07)
+- **Ask (user):** wire DVOL (Deribit's real 30-day implied-vol index for BTC/ETH) so crypto rows use a
+  TRUE option premium instead of the IV=realized proxy.
+- **Built:** `data.fetch_dvol(currency)` — public Deribit `get_volatility_index_data` (resolution 1D,
+  paged, cached); returns daily DVOL as a fraction. `vol.build`: BTC*/ETH* tickers (via `_dvol_currency`)
+  now build `VolModel(label="index:dvol-BTC/ETH")` from DVOL when iv_source∈{auto,vix,index} → pi_coin
+  flags them `iv_is_real=True` (no VRP haircut). Graceful fallthrough to realized if Deribit unreachable.
+- **The reveal (real IV flips the verdict):** crypto vol is RICH, not cheap. ETH IV ~75%, BTC ~62% (vs
+  realized → RV/IV 0.73/0.68). So as a long STRADDLE, ETH p_net 0.31, BTC 0.26, SPY 0.37 — all mediocre,
+  all carry the VRP. ETH/BTC's ПИ case rests ENTIRELY on the scalp (need c*≈0.57–0.66), exactly the guru's
+  "ETH wins on the scalp, not cheap vol." The earlier proxy "ETH 0.75" was pure artifact.
+- **Cache bug fixed:** found ETH-USD daily cached as only 86 rows (a recent-start fetch poisoned the
+  cache). Hardened `fetch()` to ALWAYS download deep history (dl_start=1990) regardless of requested
+  `start`; `_slice` serves the window. Cleared the container cache volume on deploy so poisoned entries
+  rebuild deep. 134 tests (+1 dvol mapping). assets v90.

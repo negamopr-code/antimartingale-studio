@@ -67,6 +67,17 @@ def classify(ticker: str) -> str:
     return "other"
 
 
+def _dvol_currency(ticker: str) -> str | None:
+    """Map a crypto ticker to a Deribit DVOL currency (BTC/ETH) — real implied vol exists only for these.
+    Matches BTC*/ETH* (BTC-USD, ETH-USDT, …) but NOT lookalikes (ETC-, BCH-)."""
+    t = ticker.upper().replace("X:", "")
+    if t.startswith("BTC") or t.startswith("XBT"):
+        return "BTC"
+    if t.startswith("ETH"):
+        return "ETH"
+    return None
+
+
 def default_skew_beta(ticker: str) -> float:
     return SKEW_BY_CLASS.get(classify(ticker), SKEW_BY_CLASS["other"])
 
@@ -134,6 +145,14 @@ def build(ticker: str, start: str, *, iv_source: str = "auto",
         return VolModel({1.0: pd.Series(iv_const, index=idx)}, beta, label="constant")
 
     if iv_source in ("auto", "vix", "index"):
+        ccy = _dvol_currency(ticker)                          # BTC/ETH → real Deribit DVOL (the crypto VIX)
+        if ccy:
+            try:
+                dv = datamod.fetch_dvol(ccy, start=start)
+                if dv is not None and not dv.empty:
+                    return VolModel({30.0 / 365.0: dv}, beta, label=f"index:dvol-{ccy}")
+            except Exception:
+                pass                                          # Deribit unreachable → fall through to realized
         tenors_days = VOL_INDEX_BY_CLASS.get(cls)
         if tenors_days:
             loaded: dict[float, pd.Series] = {}

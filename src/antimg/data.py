@@ -37,7 +37,10 @@ def fetch(ticker: str, start: str = "1990-01-01", end: str | None = None,
         if not df.empty:
             return _slice(df, start, end)
 
-    df = _fetch_yfinance(ticker, start, end)
+    # ALWAYS download deep history into the cache (ignore the requested `start` for the download) so a
+    # caller passing a recent start can't poison the cache with a short window; `_slice` serves the window.
+    dl_start = "1990-01-01"
+    df = _fetch_yfinance(ticker, dl_start, end)
     if df is None or df.empty:
         df = _fetch_stooq(ticker)
     if (df is None or df.empty) and _to_binance_symbol(ticker):
@@ -63,6 +66,57 @@ def _slice(df: pd.DataFrame, start: str, end: str | None) -> pd.DataFrame:
     if end:
         out = out.loc[out.index <= pd.Timestamp(end)]
     return out
+
+
+def _slice_series(s: pd.Series, start: str, end: str | None) -> pd.Series:
+    out = s.loc[s.index >= pd.Timestamp(start)]
+    if end:
+        out = out.loc[out.index <= pd.Timestamp(end)]
+    return out
+
+
+def fetch_dvol(currency: str, start: str = "2021-01-01", end: str | None = None,
+               refresh: bool = False) -> pd.Series:
+    """Deribit **DVOL** — the real 30-day implied-vol index for BTC/ETH (the "crypto VIX"). Returns a
+    daily Series as a FRACTION (e.g. 0.55 = 55% IV), so a long-vol model can use a TRUE option premium
+    for crypto instead of proxying IV by realized. Public API, no key. Cached; raises on total failure.
+    History starts ~2021-03 (BTC) / later (ETH) — use start≥2021 for full coverage."""
+    import json
+    currency = currency.upper()
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cp = _cache_path(f"DVOL_{currency}")
+    if not refresh and cp.exists():
+        s = pd.read_pickle(cp)
+        if isinstance(s, pd.Series) and not s.empty:
+            return _slice_series(s, start, end)
+
+    def _get(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "antimg/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    end_ts = pd.Timestamp(end) if end else pd.Timestamp.utcnow().tz_localize(None)
+    cur = pd.Timestamp("2021-01-01")                      # DVOL inception-ish; page forward to today
+    rows = []
+    while cur < end_ts:
+        chunk_end = min(cur + pd.Timedelta(days=300), end_ts)
+        url = ("https://www.deribit.com/api/v2/public/get_volatility_index_data"
+               f"?currency={currency}&start_timestamp={int(cur.timestamp() * 1000)}"
+               f"&end_timestamp={int(chunk_end.timestamp() * 1000)}&resolution=1D")
+        try:
+            rows.extend(_get(url).get("result", {}).get("data", []) or [])
+        except Exception:
+            pass
+        cur = chunk_end + pd.Timedelta(days=1)
+    if not rows:
+        raise RuntimeError(f"Deribit DVOL fetch failed for {currency} (network blocked?)")
+    arr = {}
+    for row in rows:                                      # [ts_ms, open, high, low, close]
+        arr[pd.Timestamp(row[0], unit="ms").normalize()] = float(row[4]) / 100.0
+    s = pd.Series(arr).sort_index()
+    s = s[~s.index.duplicated(keep="last")]
+    s.to_pickle(cp)
+    return _slice_series(s, start, end)
 
 
 def _fetch_yfinance(ticker: str, start: str, end: str | None) -> pd.DataFrame | None:
