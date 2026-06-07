@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=86"/>
+  <link rel="stylesheet" href="/style.css?v=87"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -461,13 +461,14 @@
       <label>IV window <input name="iv_window" type="number" value="20"></label>
       <label>IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
       <label title="ранжировать ВЕСЬ каталог по p_net при этом c (медленно, первый прогон 1-2 мин)">Scan all <select name="scan"><option value="false">off (один инструмент)</option><option value="true">on (ранжировать каталог)</option></select></label>
-      <button type="submit">Оценить монетку</button>
+      <button type="submit">Оценить монетку (один)</button>
+      <button type="button" id="picoin-rate-all" title="ОДНОЙ КНОПКОЙ: оценить и ранжировать ВСЕ инструменты каталога по p_net при текущих c / cost / DTE. Первый прогон ~1-2 мин (тянет данные по всему каталогу).">🏆 Оценить ВСЕ инструменты (рейтинг)</button>
     </form>
     <div class="results"><div class="plots"><div id="pc-curve"></div><div id="pc-scan"></div></div>
       <pre class="stats" id="pc-stats"></pre></div>
     <div class="tradetable" id="pc-table"></div>
   </section>
 
-  <script src="/app.js?v=86"></script>
+  <script src="/app.js?v=87"></script>
 </body>
 </html>

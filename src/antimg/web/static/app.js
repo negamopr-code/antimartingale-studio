@@ -1753,6 +1753,13 @@ $("#form-picoin").onsubmit = (e) => {
     renderPiCoin(await post("/api/pi-coin", o));
   });
 };
+// one-click: rate & rank the WHOLE catalog (forces scan=true regardless of the dropdown)
+$("#picoin-rate-all").onclick = (e) => withBusy(e.target, async () => {
+  toast("Рейтинг всех инструментов: тяну данные по каталогу (первый прогон ~1–2 мин)…", true);
+  const o = formData($("#form-picoin"));
+  o.scan = "true";
+  renderPiCoin(await post("/api/pi-coin", o));
+});
 
 loadInstruments();
 window.addEventListener("load", () => {
