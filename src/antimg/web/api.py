@@ -1116,6 +1116,30 @@ def _ps_payload(res, **summary_extra) -> dict:
             "win_streaks": res.win_streaks, "loss_streaks": res.loss_streaks}
 
 
+def _trial_summary(res, **extra) -> dict:
+    """Summary for a coin-flip TrialResult (mirrors _ps_summary keys so the UI charts are reusable:
+    n_periods≡n_trials, win/loss counts, streaks, avg win/loss, CAGR) + trial-specific avg/max rolls."""
+    inf = lambda x: (None if x == float("inf") else round(x, 3))
+    return {
+        **extra, "leg": res.leg,
+        "starting_bank": round(res.starting_bank, 2), "final_bank": round(res.final_bank, 2),
+        "net_pnl": round(res.net_pnl, 2), "years": round(res.years, 2),
+        "n_periods": res.n_trials, "n_trials": res.n_trials,
+        "n_wins": res.n_wins, "n_losses": res.n_losses, "win_rate": round(res.win_rate, 4),
+        "max_win_streak": res.max_win_streak, "max_loss_streak": res.max_loss_streak,
+        "avg_win": round(res.avg_win, 2), "avg_loss": round(res.avg_loss, 2),
+        "ann_return_pct": round(res.ann_return_pct, 2),
+        "profit_factor": inf(res.profit_factor),
+        "avg_rolls": round(res.avg_rolls, 2), "max_rolls": res.max_rolls,
+    }
+
+
+def _trial_payload(res, **summary_extra) -> dict:
+    return {"mode": "coinflip", "summary": _trial_summary(res, **summary_extra),
+            "table": [vars(t) for t in res.trials], "equity": res.equity,
+            "win_streaks": res.win_streaks, "loss_streaks": res.loss_streaks}
+
+
 def _ps_load_daily(req):
     """Fetch + window the daily bars for the straddle/leg tabs (shared)."""
     try:
@@ -1138,13 +1162,21 @@ def pure_straddle(req: PureStraddleReq):
     price from the vol surface (no option-chain feed); the expiry payoff uses the REAL price path."""
     daily = _ps_load_daily(req)
     vm, _realized = _build_vol(req, daily)
+    if req.resolution == "coinflip":
+        res = ps.run_coinflip_trials(
+            daily, vm, leg="straddle", risk_pct=req.risk_pct, dte_days=req.dte_days,
+            starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
+            slippage_pct=req.slippage_pct, compounding=req.compounding)
+        if not res.trials:
+            raise HTTPException(status_code=422, detail="no coin-flip trial resolved (try a longer window or shorter DTE)")
+        return {"params": req.model_dump(), **_trial_payload(res, ticker=req.ticker, vol_model=vm.label)}
     res = ps.run_pure_straddle(
         daily, vm, risk_pct=req.risk_pct, dte_days=req.dte_days, starting_bank=req.starting_bank,
         r=req.r, commission_pct=req.commission_pct, slippage_pct=req.slippage_pct,
         compounding=req.compounding)
     if not res.table:
         raise HTTPException(status_code=422, detail="no straddle period could be resolved (try a longer window or shorter DTE)")
-    return {"params": req.model_dump(), **_ps_payload(res, ticker=req.ticker, vol_model=vm.label)}
+    return {"params": req.model_dump(), "mode": "expiry", **_ps_payload(res, ticker=req.ticker, vol_model=vm.label)}
 
 
 @app.post("/api/leg-analysis")
@@ -1156,15 +1188,26 @@ def leg_analysis(req: PureStraddleReq):
     daily = _ps_load_daily(req)
     vm, _realized = _build_vol(req, daily)
     out = {}
+    coinflip = req.resolution == "coinflip"
     for leg in ("call", "put"):
-        res = ps.run_single_leg(
-            daily, vm, leg=leg, risk_pct=req.risk_pct, dte_days=req.dte_days,
-            starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
-            slippage_pct=req.slippage_pct, compounding=req.compounding)
-        if not res.table:
-            raise HTTPException(status_code=422, detail="no option period could be resolved (try a longer window or shorter DTE)")
-        out[leg] = _ps_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)
-    return {"params": req.model_dump(), "ticker": req.ticker, "vol_model": vm.label, **out}
+        if coinflip:
+            res = ps.run_coinflip_trials(
+                daily, vm, leg=leg, risk_pct=req.risk_pct, dte_days=req.dte_days,
+                starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
+                slippage_pct=req.slippage_pct, compounding=req.compounding)
+            if not res.trials:
+                raise HTTPException(status_code=422, detail="no coin-flip trial resolved (try a longer window or shorter DTE)")
+            out[leg] = _trial_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)
+        else:
+            res = ps.run_single_leg(
+                daily, vm, leg=leg, risk_pct=req.risk_pct, dte_days=req.dte_days,
+                starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
+                slippage_pct=req.slippage_pct, compounding=req.compounding)
+            if not res.table:
+                raise HTTPException(status_code=422, detail="no option period could be resolved (try a longer window or shorter DTE)")
+            out[leg] = _ps_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)
+    return {"params": req.model_dump(), "mode": req.resolution, "ticker": req.ticker,
+            "vol_model": vm.label, **out}
 
 
 # ----------------------------------------------------------------- TradingView ingest

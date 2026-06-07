@@ -773,3 +773,26 @@ Not implemented; documented as a rejected tactic.
   PUT only 20.5% win, **max 17-loss streak**, −4.5%/yr, 62% recovered. Directional asymmetry is stark —
   puts almost never paid in a rising market. Both legs −EV (IV premium); call+put together = Tab 10.
 - 111 tests (+3: call-wins-up / put-wins-down, leg streak+1%-sizing+cost-column, leg endpoint). assets v77.
+
+## D72 — Coin-flip ±R trial resolution for Tabs 10 & 11 (fixed risk/reward, roll to ±R) (2026-06-07)
+- **Ask (user):** reframe win/loss as a COIN FLIP with fixed risk/reward translated to option reality —
+  a "trial" rolls the straddle/leg across expiries until cumulative P&L reaches +R (win) or −R (loss),
+  R = risk_pct × bank. A partial loss is carried (next roll risks only the remaining capacity, total loss
+  capped at −R); a partial gain is carried (wait for the rest of +R). Apply to Tab 10 and Tab 11.
+- **Decision (user-confirmed):** book ACTUAL P&L — loss = exactly −R, win = the actual cum at crossing
+  (≥ +R, can overshoot on a big move = long-option convexity). Capped loss + convex win.
+- **Built:**
+  - Engine `run_coinflip_trials(daily, vol, leg='straddle'|'call'|'put', …)` → `TrialResult` (n_trials,
+    win/loss, streaks, avg win/loss, avg/max rolls, equity, trials table). Each roll's premium =
+    R + cum (remaining capacity to the −R floor); a worthless roll lands cum exactly at −R.
+  - Schema `PureStraddleReq.resolution` ('expiry' | 'coinflip'). Endpoints branch: `/api/pure-straddle`
+    and `/api/leg-analysis` run the trial engine when resolution='coinflip'; shared `_trial_summary`/
+    `_trial_payload` mirror the per-expiry payload keys so the UI charts are reused.
+  - UI: a **Resolution** toggle on both tabs (UI default coin-flip). renderStraddle/renderLegs branch on
+    `d.mode`; shared `outcomeWalk`/`outcomeStreaks`/`outcomeHist` helpers drive both modes; coin-flip
+    verdicts explain the ±R mechanic + avg/max rolls; trial table (start/end, rolls, R, premia Σ, P&L).
+- **Finding (SPY 2010–26, R=1%):** straddle coin-flip resolves SLOWLY (~34 rolls/trial → only ~5 trials,
+  20% win, avg win 181 vs loss −99 capped). Legs resolve fast (call ~2 rolls/33% win; put ~1.3 rolls/12%
+  win, 23-loss streak). Loss capped at −R, wins overshoot = the convexity.
+- 115 tests (+4: loss-capped-at-−R, win-overshoot+streak-consistency, partial-loss-carried, coin-flip
+  endpoints for straddle & legs). assets v78.

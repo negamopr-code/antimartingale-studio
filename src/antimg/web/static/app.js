@@ -1321,80 +1321,111 @@ $("#form-hiexec").onsubmit = (e) => {
     renderHiExec(await post("/api/hedged-intraday/inspect", formData(e.target))));
 };
 
-// ---- tab 10 · pure straddle (hold to expiry, no scalp) -----------------------------------------
-async function renderStraddle(d) {
-  const s = d.summary, rows = d.table;
-  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
-  // equity curve
-  await plot("str-equity", [
-    { x: d.equity.map((p) => p.date), y: d.equity.map((p) => p.bank), mode: "lines",
-      name: "bank", line: { color: "#a371f7", width: 2 },
-      fill: "tozeroy", fillcolor: "rgba(163,113,247,0.10)" },
-    { x: [d.equity[0].date, d.equity[d.equity.length - 1].date],
-      y: [s.starting_bank, s.starting_bank], mode: "lines", name: "start bank",
-      line: { color: "#8b949e", dash: "dot", width: 1 } },
-  ], layout(`Банк: чистый стреддл до экспирации — ${s.ticker} (${s.vol_model})`));
-  // win/loss random walk: +1 per win, −1 per loss, cumulative over periods. Down-slopes = losing
-  // streaks, up-slopes = winning streaks; the ending level = (#wins − #losses).
+// ---- shared row helpers (per-expiry rows vs coin-flip trial rows) -------------------------------
+const rowDate = (r) => r.expiry_date || r.end_date;          // resolution date of a period/trial
+const rowPnl = (r) => (r.pnl != null ? r.pnl : r.cum_pnl);   // P&L of a period/trial
+const streakStr = (m) => (m && Object.keys(m).length
+  ? Object.entries(m).map(([k, v]) => `${k}×${v}`).join(", ") : "—");
+function outcomeWalk(id, rows, title) {                      // win/loss ±1 cumulative random walk
   let acc = 0;
   const walk = rows.map((r) => (acc += (r.win ? 1 : -1)));
-  const wx = rows.map((r) => r.expiry_date);
-  const wEnd = walk.length ? walk[walk.length - 1] : 0;
-  await plot("str-walk", [
+  const wx = rows.map(rowDate);
+  const end = walk.length ? walk[walk.length - 1] : 0;
+  return plot(id, [
     { x: wx, y: walk, mode: "lines", name: "побед − убытков",
-      line: { color: wEnd >= 0 ? "#3fb950" : "#f85149", width: 2 },
-      fill: "tozeroy", fillcolor: wEnd >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
+      line: { color: end >= 0 ? "#3fb950" : "#f85149", width: 2 },
+      fill: "tozeroy", fillcolor: end >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
     { x: [wx[0], wx[wx.length - 1]], y: [0, 0], mode: "lines", name: "0",
       line: { color: "#8b949e", dash: "dot", width: 1 } },
-  ], layout(`Серии: +1 победа / −1 убыток, накопит. (итог ${wEnd >= 0 ? "+" : ""}${wEnd})`, {
+  ], layout(`${title} (итог ${end >= 0 ? "+" : ""}${end})`, {
     xaxis: { gridcolor: "#2a3340" },
-    yaxis: { gridcolor: "#2a3340", title: { text: "победы − убытки (нараст.)" },
-             zeroline: true, zerolinecolor: "#8b949e" },
+    yaxis: { gridcolor: "#2a3340", title: { text: "победы − убытки" }, zeroline: true, zerolinecolor: "#8b949e" },
   }));
-  // per-period P&L histogram (win/loss split)
-  const pnls = rows.map((r) => r.pnl);
+}
+function outcomeStreaks(id, ws, ls, title) {                 // streak-length distribution (grouped)
+  ws = ws || {}; ls = ls || {};
+  const maxLen = Math.max(0, ...Object.keys(ws).map(Number), ...Object.keys(ls).map(Number));
+  const lens = []; for (let i = 1; i <= maxLen; i++) lens.push(i);
+  return plot(id, [
+    { x: lens, y: lens.map((n) => ws[n] || 0), type: "bar", name: "побед подряд", marker: { color: "rgba(63,185,80,0.85)" } },
+    { x: lens, y: lens.map((n) => ls[n] || 0), type: "bar", name: "убытков подряд", marker: { color: "rgba(248,81,73,0.85)" } },
+  ], layout(title, {
+    barmode: "group",
+    xaxis: { gridcolor: "#2a3340", title: { text: "длина серии (подряд)" }, dtick: 1 },
+    yaxis: { gridcolor: "#2a3340", title: { text: "сколько раз" } },
+  }));
+}
+function outcomeHist(id, rows, unit, U1, avg) {              // P&L per period/trial histogram
+  const pnls = rows.map(rowPnl);
   const W = pnls.filter((v) => v > 0), L = pnls.filter((v) => v <= 0);
   const nbins = Math.min(60, Math.max(12, Math.ceil(Math.sqrt(pnls.length || 1))));
   const xbins = pnls.length
-    ? (() => { const lo = Math.min(...pnls), hi = Math.max(...pnls);
-               return { start: lo, end: hi, size: (hi - lo) / nbins || 1 }; })()
+    ? (() => { const lo = Math.min(...pnls), hi = Math.max(...pnls); return { start: lo, end: hi, size: (hi - lo) / nbins || 1 }; })()
     : undefined;
-  await plot("str-hist", [
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  return plot(id, [
     { x: L, type: "histogram", name: `losses (${L.length})`, xbins, marker: { color: "rgba(248,81,73,0.75)" } },
     { x: W, type: "histogram", name: `wins (${W.length})`, xbins, marker: { color: "rgba(63,185,80,0.8)" } },
-  ], layout(`P&L по периодам (среднее ${f(s.avg_pnl)})`, {
+  ], layout(`P&L за ${U1} (среднее ${f(avg)})`, {
     barmode: "overlay",
-    xaxis: { gridcolor: "#2a3340", title: { text: "P&L за период ($)" }, zeroline: true, zerolinecolor: "#8b949e" },
-    yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
+    xaxis: { gridcolor: "#2a3340", title: { text: `P&L за ${U1} ($)` }, zeroline: true, zerolinecolor: "#8b949e" },
+    yaxis: { gridcolor: "#2a3340", title: { text: `# ${unit}` } },
   }));
-  // outcome distribution — how many periods in profit vs in loss (the coin-flip-style tally)
+}
+
+// ---- tab 10 · pure straddle (per-expiry) OR coin-flip ±R trials ---------------------------------
+async function renderStraddle(d) {
+  const s = d.summary, rows = d.table, coin = d.mode === "coinflip";
+  const unit = coin ? "испытаний" : "периодов", U1 = coin ? "испытание" : "период";
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  await plot("str-equity", [
+    { x: d.equity.map((p) => p.date), y: d.equity.map((p) => p.bank), mode: "lines",
+      name: "bank", line: { color: "#a371f7", width: 2 }, fill: "tozeroy", fillcolor: "rgba(163,113,247,0.10)" },
+    { x: [d.equity[0].date, d.equity[d.equity.length - 1].date], y: [s.starting_bank, s.starting_bank],
+      mode: "lines", name: "start bank", line: { color: "#8b949e", dash: "dot", width: 1 } },
+  ], layout(`Банк — ${coin ? "монетка ±R" : "чистый стреддл"} — ${s.ticker} (${s.vol_model})`));
+  await outcomeWalk("str-walk", rows, `Серии: +1 победа / −1 убыток, накопит. по ${unit}`);
+  await outcomeHist("str-hist", rows, unit, U1, s.avg_pnl != null ? s.avg_pnl : s.net_pnl / (s.n_periods || 1));
   await plot("str-dist", [
     { x: ["в плюсе", "в минусе"], y: [s.n_wins, s.n_losses], type: "bar",
       marker: { color: ["rgba(63,185,80,0.85)", "rgba(248,81,73,0.85)"] },
-      text: [`${s.n_wins} (${(s.win_rate*100).toFixed(1)}%)`,
-             `${s.n_losses} (${((1-s.win_rate)*100).toFixed(1)}%)`], textposition: "auto" },
-  ], layout(`Исходы: в плюсе vs в минусе (${s.n_periods} периодов)`, {
-    yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
+      text: [`${s.n_wins} (${(s.win_rate * 100).toFixed(1)}%)`, `${s.n_losses} (${((1 - s.win_rate) * 100).toFixed(1)}%)`],
+      textposition: "auto" },
+  ], layout(`Исходы: в плюсе vs в минусе (${s.n_periods} ${unit})`, {
+    yaxis: { gridcolor: "#2a3340", title: { text: `# ${unit}` } },
   }));
-  // streak distribution — runs of N consecutive wins / losses ("3/4/5 in a row")
-  const ws = d.win_streaks || {}, ls = d.loss_streaks || {};
-  const maxLen = Math.max(0, ...Object.keys(ws).map(Number), ...Object.keys(ls).map(Number));
-  const lens = []; for (let i = 1; i <= maxLen; i++) lens.push(i);
-  await plot("str-streaks", [
-    { x: lens, y: lens.map((n) => ws[n] || 0), type: "bar", name: "побед подряд",
-      marker: { color: "rgba(63,185,80,0.85)" } },
-    { x: lens, y: lens.map((n) => ls[n] || 0), type: "bar", name: "убытков подряд",
-      marker: { color: "rgba(248,81,73,0.85)" } },
-  ], layout(`Серии подряд (макс: ${s.max_win_streak}W / ${s.max_loss_streak}L)`, {
-    barmode: "group",
-    xaxis: { gridcolor: "#2a3340", title: { text: "длина серии (подряд)" }, dtick: 1 },
-    yaxis: { gridcolor: "#2a3340", title: { text: "сколько раз случилось" } },
-  }));
-  const streakStr = (m) => Object.keys(m).length
-    ? Object.entries(m).map(([k, v]) => `${k}×${v}`).join(", ") : "—";
-  // verdict — lead with the honest long-straddle economics
+  await outcomeStreaks("str-streaks", d.win_streaks, d.loss_streaks, `Серии подряд (макс ${s.max_win_streak}W / ${s.max_loss_streak}L)`);
   const profitable = s.net_pnl > 0;
-  const vrp = s.avg_breakeven_pct - s.avg_move_pct;   // how much IV cost exceeded the realized move
+  if (coin) {
+    const R = rows.length ? rows[0].R : 0;
+    $("#str-stats").textContent =
+      `🪙 КОИН-ФЛИП ±R — ЧИСТЫЙ СТРЕДДЛ — ${s.ticker} (${s.vol_model})\n`
+      + `${s.n_trials} испытаний · риск=реворд R=${(d.params.risk_pct * 100).toFixed(2)}% банка (1-е R≈${f(R)} $) · DTE ${d.params.dte_days}д · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
+      + `\nИТОГ: ${profitable ? "📈 ПЛЮС" : "📉 МИНУС"}  ·  банк ${f(s.starting_bank)} → ${f(s.final_bank)}  (чистый ${f(s.net_pnl)} $)  ·  CAGR ${s.ann_return_pct}%\n`
+      + `выигрышей: ${s.n_wins}/${s.n_trials} (${(s.win_rate * 100).toFixed(1)}%)  ·  проигрышей ${s.n_losses}  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}\n`
+      + `средн. выигрыш ${f(s.avg_win)} $ (≥ +R, выпукло)  ·  средн. проигрыш ${f(s.avg_loss)} $ (= −R, капнут)  ·  роллов/испытание: средн ${s.avg_rolls}, макс ${s.max_rolls}\n`
+      + `\n🔁 СЕРИИ ПОДРЯД:  макс ${s.max_win_streak} побед / ${s.max_loss_streak} проигрышей подряд\n`
+      + `   победы подряд : ${streakStr(d.win_streaks)}\n`
+      + `   убытки подряд : ${streakStr(d.loss_streaks)}\n`
+      + `\n💡 КАК ЧИТАТЬ: каждое испытание = монетка с фикс. риск/реворд R. Роллим стреддл по экспирациям, пока\n`
+      + `   накопл. P&L не дойдёт до +R (победа) или −R (проигрыш). Частичный минус переносится (следующий стреддл\n`
+      + `   рискует остатком до −R), частичный плюс тоже (ждём добор до +R). Убыток капнут на −R; выигрыш книжится\n`
+      + `   фактический (≥ +R, бывает перелёт на крупном движении = выпуклость лонг-опциона).\n`
+      + `\n⚠ Премия — модель Блэка-Шоулза по IV (${s.vol_model}), НЕ котировка реального фида; реальный результат обычно ХУЖЕ.`;
+    const cols = [["start_date","начало"],["end_date","конец (резолв)"],["n_rolls","роллов"],["R","R (риск=реворд)"],
+      ["spot_start","S старт"],["spot_end","S конец"],["premium_total","премии Σ"],["payoff_total","выплат Σ"],["cum_pnl","P&L испыт."]];
+    let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
+    for (const r of rows) {
+      h += `<tr class="${r.win ? "w" : "l"}">` + cols.map((c) => {
+        let v = r[c[0]];
+        if (c[0] === "cum_pnl") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${f(v)}</td>`;
+        return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</td>`;
+      }).join("") + "</tr>";
+    }
+    $("#str-table").innerHTML = h + `</tbody></table></div><div class="tt-note">${rows.length} испытаний · прокрути</div>`;
+    return;
+  }
+  const vrp = s.avg_breakeven_pct - s.avg_move_pct;
   $("#str-stats").textContent =
     `🎯 ЧИСТЫЙ СТРЕДДЛ ДО ЭКСПИРАЦИИ — ${s.ticker}  ·  IV-модель: ${s.vol_model}\n`
     + `${s.n_periods} периодов × DTE ${d.params.dte_days}д · risk ${(d.params.risk_pct*100).toFixed(2)}%/период · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
@@ -1402,8 +1433,8 @@ async function renderStraddle(d) {
     + `прибыльных периодов: ${s.n_wins}/${s.n_periods} (${(s.win_rate*100).toFixed(1)}%)  ·  убыточных ${s.n_losses}  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}\n`
     + `средн. выигрыш ${f(s.avg_win)} $  ·  средн. проигрыш ${f(s.avg_loss)} $  ·  средн. P&L ${f(s.avg_pnl)} $\n`
     + `\n🔁 СЕРИИ ПОДРЯД (длина×сколько раз):  макс ${s.max_win_streak} побед / ${s.max_loss_streak} убытков подряд\n`
-    + `   победы подряд : ${streakStr(ws)}\n`
-    + `   убытки подряд : ${streakStr(ls)}\n`
+    + `   победы подряд : ${streakStr(d.win_streaks)}\n`
+    + `   убытки подряд : ${streakStr(d.loss_streaks)}\n`
     + `   (читается «3×2» = серия из 3 подряд случилась 2 раза. Стреддл чаще проигрывает → длинные серии убытков, редкие но крупные победы.)\n`
     + `   (risk % = ВЕСЬ стреддл колл+пут вместе; для ATM делится ≈ поровну — см. столбцы «колл $» / «пут $» в таблице.)\n`
     + `\n💸 «АРЕНДА» (стоимость стреддла): заплачено премии Σ ${f(s.total_premium)}  ·  получено на экспирации Σ ${f(s.total_payoff)}\n`
@@ -1412,7 +1443,6 @@ async function renderStraddle(d) {
     + `   средний РЕАЛЬНЫЙ ход к экспирации = ${s.avg_move_pct}%.  Разница ${vrp >= 0 ? "+" : ""}${vrp.toFixed(2)}пп ${vrp > 0 ? "= IV дороже движения ⇒ премия за риск волатильности съедает стреддл (−EV)" : "= движение перекрыло IV ⇒ стреддл в плюсе"}.\n`
     + `\n⚠ Данные: цена базового — реальная; премия — модель Блэка-Шоулза по IV (${s.vol_model}), НЕ котировка реального опционного фида.\n`
     + `   Качество ответа зависит от IV-модели. Реальные опционы обычно ещё дороже (бид-аск, IV-надбавка) → реальный результат ХУЖЕ.`;
-  // per-period table
   const cols = [["entry_date","вход"],["expiry_date","экспирация"],["spot_entry","S вход (=K)"],
     ["spot_expiry","S экспир."],["iv","IV"],["prem_per_unit","премия/ед"],["units","единиц"],
     ["call_cost","колл $"],["put_cost","пут $"],["premium_paid","заплачено $ (=колл+пут)"],
@@ -1436,67 +1466,39 @@ $("#form-straddle").onsubmit = (e) => {
     renderStraddle(await post("/api/pure-straddle", o)));
 };
 
-// ---- tab 11 · call vs put, each leg analysed separately ----------------------------------------
-const _streakStr = (m) => (m && Object.keys(m).length
-  ? Object.entries(m).map(([k, v]) => `${k}×${v}`).join(", ") : "—");
-function legWalk(id, leg, name) {
-  let acc = 0;
-  const walk = leg.table.map((r) => (acc += (r.win ? 1 : -1)));
-  const wx = leg.table.map((r) => r.expiry_date);
-  const end = walk.length ? walk[walk.length - 1] : 0;
-  return plot(id, [
-    { x: wx, y: walk, mode: "lines", name: "побед − убытков",
-      line: { color: end >= 0 ? "#3fb950" : "#f85149", width: 2 },
-      fill: "tozeroy", fillcolor: end >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
-    { x: [wx[0], wx[wx.length - 1]], y: [0, 0], mode: "lines", name: "0",
-      line: { color: "#8b949e", dash: "dot", width: 1 } },
-  ], layout(`${name}: +1 победа / −1 убыток, накопит. (итог ${end >= 0 ? "+" : ""}${end})`, {
-    xaxis: { gridcolor: "#2a3340" },
-    yaxis: { gridcolor: "#2a3340", title: { text: "победы − убытки" }, zeroline: true, zerolinecolor: "#8b949e" },
-  }));
-}
-function legStreaks(id, leg, name) {
-  const ws = leg.win_streaks || {}, ls = leg.loss_streaks || {}, s = leg.summary;
-  const maxLen = Math.max(0, ...Object.keys(ws).map(Number), ...Object.keys(ls).map(Number));
-  const lens = []; for (let i = 1; i <= maxLen; i++) lens.push(i);
-  return plot(id, [
-    { x: lens, y: lens.map((n) => ws[n] || 0), type: "bar", name: "побед подряд",
-      marker: { color: "rgba(63,185,80,0.85)" } },
-    { x: lens, y: lens.map((n) => ls[n] || 0), type: "bar", name: "убытков подряд",
-      marker: { color: "rgba(248,81,73,0.85)" } },
-  ], layout(`${name} серии подряд (макс ${s.max_win_streak}W / ${s.max_loss_streak}L)`, {
-    barmode: "group",
-    xaxis: { gridcolor: "#2a3340", title: { text: "длина серии" }, dtick: 1 },
-    yaxis: { gridcolor: "#2a3340", title: { text: "сколько раз" } },
-  }));
-}
+// ---- tab 11 · call vs put, each leg analysed separately (per-expiry OR coin-flip ±R) ------------
 async function renderLegs(d) {
-  const c = d.call.summary, p = d.put.summary;
-  // outcome counts per leg (grouped: wins vs losses for call and put)
+  const c = d.call.summary, p = d.put.summary, coin = d.mode === "coinflip";
+  const unit = coin ? "испытаний" : "периодов";
   await plot("lg-counts", [
     { x: ["колл", "пут"], y: [c.n_wins, p.n_wins], type: "bar", name: "в плюсе",
       marker: { color: "rgba(63,185,80,0.85)" }, text: [`${c.n_wins}`, `${p.n_wins}`], textposition: "auto" },
     { x: ["колл", "пут"], y: [c.n_losses, p.n_losses], type: "bar", name: "в минусе",
       marker: { color: "rgba(248,81,73,0.85)" }, text: [`${c.n_losses}`, `${p.n_losses}`], textposition: "auto" },
-  ], layout(`Исходы по ногам (${c.n_periods} периодов)`, {
-    barmode: "group", yaxis: { gridcolor: "#2a3340", title: { text: "# периодов" } },
+  ], layout(`Исходы по ногам (колл ${c.n_periods} / пут ${p.n_periods} ${unit})`, {
+    barmode: "group", yaxis: { gridcolor: "#2a3340", title: { text: `# ${unit}` } },
   }));
-  await legWalk("lg-call-walk", d.call, "КОЛЛ");
-  await legStreaks("lg-call-streaks", d.call, "КОЛЛ");
-  await legWalk("lg-put-walk", d.put, "ПУТ");
-  await legStreaks("lg-put-streaks", d.put, "ПУТ");
+  await outcomeWalk("lg-call-walk", d.call.table, `КОЛЛ: +1/−1 накопит. по ${unit}`);
+  await outcomeStreaks("lg-call-streaks", d.call.win_streaks, d.call.loss_streaks, `КОЛЛ серии (макс ${c.max_win_streak}W / ${c.max_loss_streak}L)`);
+  await outcomeWalk("lg-put-walk", d.put.table, `ПУТ: +1/−1 накопит. по ${unit}`);
+  await outcomeStreaks("lg-put-streaks", d.put.win_streaks, d.put.loss_streaks, `ПУТ серии (макс ${p.max_win_streak}W / ${p.max_loss_streak}L)`);
+  const tail = coin
+    ? (lg) => `  ·  CAGR ${lg.summary.ann_return_pct}%  ·  роллов/исп. средн ${lg.summary.avg_rolls}`
+    : (lg) => `  ·  CAGR ${lg.summary.ann_return_pct}%  ·  возврат премии ${lg.summary.premium_recovered_pct}%`;
   const block = (name, lg) => {
     const s = lg.summary;
-    return `${name}: в плюсе ${s.n_wins}/${s.n_periods} (${(s.win_rate * 100).toFixed(1)}%)  ·  макс серия ${s.max_win_streak}W / ${s.max_loss_streak}L  ·  CAGR ${s.ann_return_pct}%  ·  возврат премии ${s.premium_recovered_pct}%\n`
-      + `   победы подряд : ${_streakStr(lg.win_streaks)}\n`
-      + `   убытки подряд : ${_streakStr(lg.loss_streaks)}\n`;
+    return `${name}: в плюсе ${s.n_wins}/${s.n_periods} (${(s.win_rate * 100).toFixed(1)}%)  ·  макс серия ${s.max_win_streak}W / ${s.max_loss_streak}L${tail(lg)}\n`
+      + `   победы подряд : ${streakStr(lg.win_streaks)}\n`
+      + `   убытки подряд : ${streakStr(lg.loss_streaks)}\n`;
   };
   $("#lg-stats").textContent =
-    `📊 КОЛЛ vs ПУТ — каждая нога отдельно — ${d.ticker} (${d.vol_model})\n\n`
+    `📊 КОЛЛ vs ПУТ — каждая нога отдельно${coin ? " · коин-флип ±R" : ""} — ${d.ticker} (${d.vol_model})\n\n`
     + block("📈 КОЛЛ (выигрывает на росте)", d.call) + "\n"
     + block("📉 ПУТ (выигрывает на падении)", d.put)
     + `\n💡 Серии колла и пута почти ЗЕРКАЛЬНЫ: когда рынок растёт — колл копит победы, пут копит убытки, и наоборот.\n`
-    + `   Каждая нога по отдельности обычно −EV (платишь IV-премию за риск волатильности). Колл+пут вместе = стреддл (Tab 10).`;
+    + (coin
+        ? `   coin-flip: каждое испытание роллит ногу до +R (победа) или −R (проигрыш); убыток капнут на −R, выигрыш фактический (выпукло).`
+        : `   Каждая нога по отдельности обычно −EV (платишь IV-премию за риск волатильности). Колл+пут вместе = стреддл (Tab 10).`);
 }
 $("#form-legs").onsubmit = (e) => {
   e.preventDefault();

@@ -252,6 +252,10 @@ class PureStraddleReq(BaseModel):
     dte_days: int = Field(30, ge=1, le=730)                  # straddle tenor = holding period to expiry
     starting_bank: float = Field(10_000.0, gt=0)
     compounding: bool = True                                 # size bet to current bank (vs starting bank)
+    # 'expiry'   = each expiration is its own win/loss (original).
+    # 'coinflip' = a TRIAL rolls to expiry until cumulative P&L hits +R (win) or −R (loss), R=risk_pct×bank
+    #              — a fixed risk/reward coin flip; loss capped at −R, win books actual (can overshoot).
+    resolution: str = Field("expiry", pattern="^(expiry|coinflip)$")
     r: float = Field(0.045, ge=-0.05, le=0.5)
     # IV surface (same engine as the options/hedged tabs)
     iv_window: int = Field(20, ge=2, le=500)

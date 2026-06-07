@@ -198,6 +198,74 @@ def test_api_leg_analysis_endpoint():
         assert len(d[leg]["table"]) == d[leg]["summary"]["n_periods"]
 
 
+def test_coinflip_loss_capped_at_minus_R():
+    """In coin-flip mode a flat market never moves → every trial loses exactly its risk R (capped)."""
+    df = _frame(np.full(500, 100.0))
+    res = ps.run_coinflip_trials(df, _const_vol(0.2), leg="straddle", risk_pct=0.05, dte_days=30,
+                                 starting_bank=10_000.0)
+    assert res.n_trials > 0
+    assert res.n_wins == 0                                   # nothing moves → no trial reaches +R
+    for t in res.trials:
+        assert not t.win
+        assert t.cum_pnl == pytest.approx(-t.R, rel=1e-6)    # loss capped at exactly −R
+        assert t.n_rolls == 1                                # a fully-worthless straddle wipes R in one roll
+
+
+def test_coinflip_wins_can_overshoot_and_streaks_consistent():
+    """A win books actual cum (≥ +R, may overshoot); streak counts are self-consistent."""
+    rng = np.random.default_rng(21)
+    df = _frame(100.0 + np.cumsum(rng.normal(0.05, 1.2, 1500)))   # drifting, volatile → some wins
+    res = ps.run_coinflip_trials(df, _const_vol(0.25), leg="straddle", risk_pct=0.02, dte_days=30,
+                                 starting_bank=10_000.0)
+    assert res.n_trials > 0
+    assert res.n_wins + res.n_losses == res.n_trials
+    for t in res.trials:
+        if t.win:
+            assert t.cum_pnl >= t.R - 1e-6                   # win reaches at least +R (can overshoot)
+        else:
+            assert t.cum_pnl == pytest.approx(-t.R, rel=1e-6)
+    assert sum(k * v for k, v in res.win_streaks.items()) == res.n_wins
+    assert sum(k * v for k, v in res.loss_streaks.items()) == res.n_losses
+    assert res.max_rolls >= 1 and res.avg_rolls >= 1.0
+    # bank identity
+    assert res.final_bank == pytest.approx(
+        res.starting_bank + sum(t.cum_pnl for t in res.trials), abs=0.01 * res.n_trials + 0.01)
+
+
+def test_coinflip_partial_loss_is_carried_not_a_full_loss():
+    """A trial that takes several rolls to reach −R should appear (n_rolls>1 somewhere): a partial
+    loss is carried into the next roll instead of resolving immediately."""
+    rng = np.random.default_rng(5)
+    df = _frame(100.0 + np.cumsum(rng.normal(0, 0.6, 1200)))
+    res = ps.run_coinflip_trials(df, _const_vol(0.15), leg="straddle", risk_pct=0.02, dte_days=20,
+                                 starting_bank=10_000.0)
+    assert res.n_trials > 0
+    assert res.max_rolls >= 2                                # at least one trial rolled more than once
+
+
+def test_api_coinflip_modes_for_straddle_and_legs():
+    from fastapi.testclient import TestClient
+    from antimg.web.api import app
+    c = TestClient(app)
+    base = {"ticker": "SPY", "start": "2012-01-01", "end": "2022-01-01", "risk_pct": 0.01,
+            "dte_days": 30, "iv_source": "constant", "iv_const": 0.18, "resolution": "coinflip"}
+    r = c.post("/api/pure-straddle", json=base)
+    if r.status_code == 502:
+        pytest.skip("price data unavailable")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["mode"] == "coinflip" and d["summary"]["n_trials"] > 0
+    assert {"avg_rolls", "max_rolls"} <= d["summary"].keys()
+    assert d["table"][0]["R"] > 0 and "cum_pnl" in d["table"][0]
+    r2 = c.post("/api/leg-analysis", json=base)
+    assert r2.status_code == 200, r2.text
+    d2 = r2.json()
+    assert d2["mode"] == "coinflip"
+    for leg in ("call", "put"):
+        assert d2[leg]["summary"]["n_trials"] > 0
+        assert "win_streaks" in d2[leg]
+
+
 def test_api_pure_straddle_endpoint():
     from fastapi.testclient import TestClient
     from antimg.web.api import app

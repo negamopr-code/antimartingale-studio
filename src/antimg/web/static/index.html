@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=77"/>
+  <link rel="stylesheet" href="/style.css?v=78"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -335,6 +335,7 @@
       <label>Start <input name="start" value="2010-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
       <label title="ПРОЦЕНТ депозита на ВЕСЬ стреддл (колл+пут вместе) каждый период. Введи 1 = 1% (так 1% покрывает обе ноги, ≈ поровну для ATM). Модифицируемо.">Risk % депозита (1 = 1%) <input name="risk_pct" type="number" step="any" value="1"></label>
+      <label title="coin-flip = ИСПЫТАНИЕ роллит стреддл до экспираций, пока накопл. P&L не достигнет +R (выигрыш) или −R (проигрыш), R=risk%·банк — монетка с фикс. риск/реворд (убыток ровно −R, выигрыш ≥ +R, может перелететь). по экспирации = каждая экспирация = отдельный исход (как было).">Resolution <select name="resolution"><option value="coinflip">coin-flip (±R, монетка)</option><option value="expiry">по экспирации (как было)</option></select></label>
       <label title="срок стреддла = период удержания до экспирации (календарные дни)">DTE days (срок) <input name="dte_days" type="number" value="30"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label title="on = премия = risk% от ТЕКУЩЕГО банка (компаундинг); off = от стартового банка (аддитивно, чистая по-периодная экономика)">Compounding <select name="compounding"><option value="true">on (% от текущего банка)</option><option value="false">off (% от стартового)</option></select></label>
@@ -368,6 +369,7 @@
       <label>Start <input name="start" value="2010-01-01"></label>
       <label>End <input name="end" placeholder="latest"></label>
       <label title="ПРОЦЕНТ депозита на ОДНУ ногу каждый период. Введи 1 = 1%.">Risk % депозита (1 = 1%) <input name="risk_pct" type="number" step="any" value="1"></label>
+      <label title="coin-flip = ИСПЫТАНИЕ роллит ногу до экспираций, пока накопл. P&L не достигнет +R или −R (R=risk%·банк) — монетка с фикс. риск/реворд. по экспирации = каждая экспирация отдельно.">Resolution <select name="resolution"><option value="coinflip">coin-flip (±R, монетка)</option><option value="expiry">по экспирации (как было)</option></select></label>
       <label title="срок опциона = период удержания до экспирации (календарные дни)">DTE days (срок) <input name="dte_days" type="number" value="30"></label>
       <label>Start bank $ <input name="starting_bank" type="number" step="any" value="10000"></label>
       <label title="on = % от текущего банка (компаундинг); off = от стартового банка">Compounding <select name="compounding"><option value="true">on (% от текущего банка)</option><option value="false">off (% от стартового)</option></select></label>
@@ -389,6 +391,6 @@
     </div></div>
   </section>
 
-  <script src="/app.js?v=77"></script>
+  <script src="/app.js?v=78"></script>
 </body>
 </html>

@@ -284,3 +284,179 @@ def run_single_leg(daily: pd.DataFrame, vol_model, *, leg: str = "call", risk_pc
     res.final_bank = bank
     _finalize(res, compounding)
     return res
+
+
+# ── coin-flip TRIAL resolution (fixed risk/reward, roll across expiries to ±R) ──────────────────
+@dataclass
+class Trial:
+    start_date: str
+    end_date: str
+    n_rolls: int             # how many straddles/legs were rolled before the trial resolved
+    R: float                 # the fixed risk = reward unit for this trial (risk_pct × bank at start)
+    premium_total: float     # Σ premium spent across the rolls
+    payoff_total: float      # Σ payoff received across the rolls
+    cum_pnl: float           # trial P&L = payoff_total − premium_total (loss = −R; win ≥ +R, can overshoot)
+    spot_start: float
+    spot_end: float
+    win: bool
+
+
+@dataclass
+class TrialResult:
+    leg: str = "straddle"
+    starting_bank: float = 0.0
+    final_bank: float = 0.0
+    years: float = 0.0
+    n_trials: int = 0
+    n_wins: int = 0
+    n_losses: int = 0
+    win_rate: float = 0.0
+    max_win_streak: int = 0
+    max_loss_streak: int = 0
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    profit_factor: float = 0.0
+    avg_rolls: float = 0.0
+    max_rolls: int = 0
+    net_pnl: float = 0.0
+    ann_return_pct: float = 0.0
+    win_streaks: dict = field(default_factory=dict)
+    loss_streaks: dict = field(default_factory=dict)
+    trials: list = field(default_factory=list)
+    equity: list = field(default_factory=list)
+
+
+def _leg_prem_and_intrinsic(leg, S0, K, T, r, sigma, S_T):
+    """(premium per unit, intrinsic at expiry) for 'straddle' | 'call' | 'put'."""
+    if leg == "call":
+        return float(options.call_price(S0, K, T, r, sigma)), max(S_T - K, 0.0)
+    if leg == "put":
+        return float(options.put_price(S0, K, T, r, sigma)), max(K - S_T, 0.0)
+    return float(options.straddle_price(S0, K, T, r, sigma)), abs(S_T - K)
+
+
+def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle",
+                        risk_pct: float = 0.01, dte_days: int = 30, starting_bank: float = 10_000.0,
+                        r: float = 0.045, commission_pct: float = 0.0, slippage_pct: float = 0.0,
+                        compounding: bool = True) -> TrialResult:
+    """Resolve the option backtest as a COIN FLIP with fixed risk/reward, translated to option reality.
+
+    A *trial* keeps rolling the same construction (straddle, or a single call/put leg) to expiry until
+    its cumulative P&L reaches **+R (WIN)** or **−R (LOSS)**, where R = risk_pct × bank — the fixed
+    risk = reward unit. Each roll's premium = the REMAINING capacity to the −R floor (= R + cum), so a
+    partial loss is carried forward (next straddle risks less) and the total loss is capped at exactly
+    −R; a partial gain is carried forward too (we wait for the rest of +R). Losses book exactly −R;
+    wins book the ACTUAL cum (≥ +R, can overshoot on a big move = long-option convexity)."""
+    res = TrialResult(leg=leg, starting_bank=starting_bank, final_bank=starting_bank)
+    if daily is None or daily.empty:
+        return res
+    close = daily["Close"].astype(float)
+    dates = daily.index
+    n = len(dates)
+    T_years = max(dte_days / 365.0, 1e-6)
+    fee_rate = max(commission_pct + slippage_pct, 0.0) / 100.0
+    bank = starting_bank
+    res.equity.append({"date": str(dates[0].date()), "bank": round(bank, 2)})
+
+    p = 0
+    while p < n - 1:
+        sized_bank = bank if compounding else starting_bank
+        R = risk_pct * sized_bank
+        if R <= 0:
+            break
+        cum = 0.0
+        n_rolls = 0
+        prem_tot = 0.0
+        pay_tot = 0.0
+        start_p = p
+        spot_start = float(close.iloc[p])
+        outcome = None                                       # 'win' | 'loss' | None(incomplete)
+        end_q = p
+        while True:
+            entry_date = dates[p]
+            S0 = float(close.iloc[p])
+            if not np.isfinite(S0) or S0 <= 0:
+                p += 1
+                if p >= n - 1:
+                    break
+                continue
+            K = S0
+            sigma = float(vol_model.sigma(entry_date, T_years, K, S0))
+            ppu, _i = _leg_prem_and_intrinsic(leg, S0, K, T_years, r, sigma, S0)
+            if ppu <= 0:
+                p += 1
+                if p >= n - 1:
+                    break
+                continue
+            q = int(dates.searchsorted(entry_date + pd.Timedelta(days=dte_days), side="left"))
+            if q >= n:
+                break                                        # ran out of data → trial incomplete
+            if q <= p:
+                q = p + 1
+            S_T = float(close.iloc[q])
+            _ppu2, intrinsic = _leg_prem_and_intrinsic(leg, S0, K, T_years, r, sigma, S_T)
+
+            budget = R + cum                                 # deploy the full remaining risk capacity
+            if budget <= 0:
+                outcome = "loss"
+                end_q = p
+                break
+            units = budget / ppu
+            payoff_gross = units * intrinsic
+            pnl = payoff_gross - budget - budget * fee_rate - payoff_gross * fee_rate
+            cum += pnl
+            prem_tot += budget + budget * fee_rate
+            pay_tot += payoff_gross - payoff_gross * fee_rate
+            n_rolls += 1
+            end_q = q
+            p = q                                            # roll: next leg entered at this expiry
+            if cum >= R:
+                outcome = "win"
+                break
+            if cum <= -R + 1e-9:
+                outcome = "loss"
+                break
+            if p >= n - 1:
+                break                                        # no room for another roll → incomplete
+
+        if outcome is None:                                  # discard the unfinished trial at the tail
+            break
+        bank += cum
+        win = outcome == "win"
+        res.trials.append(Trial(
+            start_date=str(dates[start_p].date()), end_date=str(dates[end_q].date()),
+            n_rolls=n_rolls, R=round(R, 2), premium_total=round(prem_tot, 2),
+            payoff_total=round(pay_tot, 2), cum_pnl=round(cum, 2),
+            spot_start=round(spot_start, 4), spot_end=round(float(close.iloc[end_q]), 4), win=win))
+        res.equity.append({"date": str(dates[end_q].date()), "bank": round(bank, 2)})
+        if win:
+            res.n_wins += 1
+        p = end_q                                            # next trial starts at this expiry
+
+    res.final_bank = bank
+    res.n_trials = len(res.trials)
+    if res.n_trials:
+        res.n_losses = res.n_trials - res.n_wins
+        res.win_rate = res.n_wins / res.n_trials
+        res.net_pnl = res.final_bank - res.starting_bank
+        wins = [t.cum_pnl for t in res.trials if t.win]
+        losses = [t.cum_pnl for t in res.trials if not t.win]
+        res.avg_win = float(np.mean(wins)) if wins else 0.0
+        res.avg_loss = float(np.mean(losses)) if losses else 0.0
+        gw = sum(wins)
+        gl = -sum(losses)
+        res.profit_factor = (gw / gl) if gl > 1e-9 else float("inf")
+        res.win_streaks, res.loss_streaks = _streak_counts([t.win for t in res.trials])
+        res.max_win_streak = max(res.win_streaks, default=0)
+        res.max_loss_streak = max(res.loss_streaks, default=0)
+        rolls = [t.n_rolls for t in res.trials]
+        res.avg_rolls = float(np.mean(rolls))
+        res.max_rolls = max(rolls)
+        d0 = pd.Timestamp(res.trials[0].start_date)
+        d1 = pd.Timestamp(res.trials[-1].end_date)
+        res.years = max((d1 - d0).days / 365.0, 1e-6)
+        if compounding and res.starting_bank > 0 and res.final_bank > 0:
+            res.ann_return_pct = 100.0 * ((res.final_bank / res.starting_bank) ** (1.0 / res.years) - 1.0)
+        else:
+            res.ann_return_pct = 100.0 * (res.net_pnl / res.starting_bank) / res.years
+    return res
