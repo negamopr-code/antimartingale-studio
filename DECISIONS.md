@@ -814,3 +814,16 @@ Not implemented; documented as a rejected tactic.
   2011), 16/18 closed by horizon (partial), 11% win, CAGR −0.8%. Timeline no longer swallowed.
 - 116 tests (+1 horizon-closes-partial-and-continues; updated loss-cap & overshoot tests for partials).
   assets v79.
+
+## D74 — Coin-flip trials: book the data-truncated TAIL (fix "stops at 2025") (2026-06-07)
+- **Symptom (user, DTE≈90):** straddle coin-flip table stopped at 2025-03-17 though data runs to 2026.
+  **Cause:** with DTE 90 × horizon 12 a trial can need ~3 years; the final trial started 2025 and ran
+  past end-of-data before hitting ±R or the horizon, so it was DISCARDED as incomplete → the tail dropped.
+- **Fix:** when data runs out mid-trial, BOOK the tail as a partial (close at actual cum, `partial=True`,
+  win if cum≥0) instead of discarding — so the timeline always reaches the last available expiry. Only
+  drop a tail that couldn't complete even one roll (n_rolls==0).
+- **UI:** trial table «как закрыт» now distinguishes ±R / горизонт (partial & n_rolls≥max_rolls) / данные
+  (partial & n_rolls<max_rolls = data-truncated tail).
+- **Result:** SPY DTE90 coin-flip now reaches 2026-03-16 (was 2025). Tail no longer dropped.
+- Also confirmed the coin-flip risk approach is fully on Tab 11 (per-leg, with horizon) — user request.
+- 117 tests (+1 truncated-tail-is-booked-not-dropped). assets v80.

@@ -264,6 +264,20 @@ def test_coinflip_partial_loss_is_carried_not_a_full_loss():
     assert res.max_rolls >= 2                                # at least one trial rolled more than once
 
 
+def test_coinflip_truncated_tail_is_booked_not_dropped():
+    """When data runs out mid-trial, the tail must be booked as a partial (so the timeline reaches the
+    end) rather than discarded — with a long DTE×horizon a final trial can't fully resolve before EOD."""
+    rng = np.random.default_rng(8)
+    df = _frame(100.0 + np.cumsum(rng.normal(0.0, 0.3, 900)))
+    res = ps.run_coinflip_trials(df, _const_vol(0.15), leg="straddle", risk_pct=0.02, dte_days=90,
+                                 starting_bank=10_000.0, max_rolls=12)
+    assert res.n_trials > 0
+    last = res.trials[-1]
+    # the last trial ends within ~1 DTE of the final bar (timeline not truncated by a dropped tail)
+    days_to_eod = (df.index[-1] - pd.Timestamp(last.end_date)).days
+    assert days_to_eod <= 95, f"timeline dropped {days_to_eod} days of tail"
+
+
 def test_api_coinflip_modes_for_straddle_and_legs():
     from fastapi.testclient import TestClient
     from antimg.web.api import app

@@ -1421,7 +1421,7 @@ async function renderStraddle(d) {
       h += `<tr class="${r.win ? "w" : "l"}">` + cols.map((c) => {
         let v = r[c[0]];
         if (c[0] === "cum_pnl") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${f(v)}</td>`;
-        if (c[0] === "partial") return `<td>${v ? "горизонт" : "±R"}</td>`;
+        if (c[0] === "partial") return `<td>${r.partial ? (r.n_rolls >= d.params.max_rolls ? "горизонт" : "данные") : "±R"}</td>`;
         return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</td>`;
       }).join("") + "</tr>";
     }

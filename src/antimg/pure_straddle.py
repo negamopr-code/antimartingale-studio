@@ -431,8 +431,14 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             if p >= n - 1:
                 break                                        # no room for another roll → incomplete
 
-        if outcome is None:                                  # discard the unfinished trial at the tail
-            break
+        if outcome is None:                                  # ran out of data mid-trial
+            if n_rolls == 0:
+                break                                        # couldn't complete even one roll → nothing to book
+            outcome = "win" if cum >= 0 else "loss"          # book the data-truncated tail as a partial
+            partial = True
+            truncated = True
+        else:
+            truncated = False
         bank += cum
         win = outcome == "win"
         res.trials.append(Trial(
@@ -446,6 +452,8 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             res.n_wins += 1
         if partial:
             res.n_partial += 1
+        if truncated:                                        # nothing left after this tail → stop
+            break
         p = end_q                                            # next trial starts at this expiry
 
     res.final_bank = bank
