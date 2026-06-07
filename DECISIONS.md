@@ -918,3 +918,21 @@ Not implemented; documented as a rejected tactic.
   ПИ bridge under the EV identity. NEXT (build on it): a Tab-12 calculator panel that takes
   p_straddle/c/f/cost → p_net → feeds the antimartingale EV (one screen).
 - No app/test change this turn (theory + skill only). Tests still 127.
+
+## D80 — CORRECTION to D79: the math breaks Korovin's 0.75 — own coin ≈ 0.51–0.55 (2026-06-07)
+- **User challenge (correct):** if the scalp covers only 10–15% of premium/month (= 30–45% of theta),
+  you mathematically CANNOT claim a 0.75 win-rate. Challenge it.
+- **Worked it out:** a delta-hedged straddle's monthly P&L = RV²−IV² (gamma), so a month wins iff
+  `RV > IV·√(1 − c − f)` (c = scalp coverage of θ ≈ 0.35, f = free-margin carry coverage). With
+  IV=(1+vrp)·mean(RV), vrp≈0.10, RV lognormal CV≈0.5:
+  - **scalp ONLY (c=0.35): win-rate ≈ 0.51 — a FAIR COIN.** Cannot reach 0.75 from the scalp.
+  - 0.73–0.75 needs coverage ~0.63 → the extra ~0.28 is the **free-margin CARRY at 20% RUB rates** (idle
+    cash in T-bills), NOT the straddle+scalp edge. At USD ~4% rates carry ≈ 0.06 → win-rate ≈ 0.55.
+- **Critical for the antimartingale:** the carry is a CONSTANT additive drip that does NOT pyramid with
+  wins/losses ⇒ it must NOT be in the AM coin `p`. The AM coin = the strategy's OWN win-rate **≈ 0.51–0.55**
+  ⇒ `(2p)^N−1 ≈ 0` ⇒ **the antimartingale adds ~nothing to ПИ.** ПИ's real edge is the ASYMMETRIC payoff
+  (loss ≤ −1R, win 2–3R convex) → +EV at a ~fair coin, precisely the regime where AM gives no edge.
+- **Supersedes D79's 0.55→0.60→0.75 (carry-inflated + optimistic). Honest own-coin ≈ 0.51–0.55.**
+- Skills updated: coin-flip-decomposition.md gets a binding **§0 REALITY CHECK** (the RV>IV·√(1−c−f)
+  identity + win-rate table); hedgedintraday SKILL INVARIANT #8 + antimartingal SKILL bridge both revised
+  to "strip carry, sanity-check p against the gamma identity, AM adds ~nothing at p≈0.5". No app/test change.
