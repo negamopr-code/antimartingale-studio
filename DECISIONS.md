@@ -844,3 +844,19 @@ Not implemented; documented as a rejected tactic.
   survives only by letting the rare big wins run (the convexity). Honest "0.6?" answer: no — ~0.1–0.3.
 - 119 tests (+2: take-profit-clean-±R, coin-language-fields; fixed overshoot test to take_profit=False +
   volatile GBM path so wins occur). assets v82.
+
+## D76 — Per-trial picture (roll-by-roll), disable irrelevant IV inputs, fee clarity (2026-06-07)
+- **Ask (user):** (a) per-line picture of each coin-flip trial (why premium is sometimes >R, sometimes
+  <R over 12 rolls); (b) disable IV window/const when IV source=auto; (c) clarify Skew β / Term structure
+  / Risk-free r / commission & slippage per-side vs round-trip.
+- **Per-trial picture:** engine `Trial.rolls` = per-roll ledger (entry/expiry/spot_in/out/iv/premium/
+  payoff/pnl/cum). Tab-10 trial table rows are now CLICKABLE → `renderTrialDetail`: a dual-axis chart
+  (per-roll premium bars + cumulative-P&L line walking to the ±R rails) + a price chart + per-roll ledger
+  (premium colored green/red vs R). Shows directly that each roll's premium = R + cum (below R after a
+  partial loss, above R after a partial gain). First trial auto-shown.
+- **IV input gating:** `gateIvInputs()` greys+disables IV window unless iv_source=realized, and IV const
+  unless iv_source=constant (disabled inputs aren't submitted → backend default). Wired on tabs 3? no —
+  tabs 10, 11, 8, 9 (the ones with these inputs). [Skew β ~no-op for ATM; term structure on; r minor.]
+- **Fee semantics (clarified, already correct):** commission_pct & slippage_pct are PER SIDE — charged on
+  the entry premium AND the exit payoff (twice per straddle), not once.
+- 119 tests (engine field add covered by existing trial tests). assets v83.

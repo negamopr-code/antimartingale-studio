@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Antimartingale studio</title>
-  <link rel="stylesheet" href="/style.css?v=82"/>
+  <link rel="stylesheet" href="/style.css?v=83"/>
   <!-- Plotly vendored locally (no CDN dependency — works offline / behind firewalls) -->
   <script src="/vendor/plotly.min.js" charset="utf-8"></script>
 </head>
@@ -354,8 +354,14 @@
     <div class="results"><div class="plots"><div id="str-equity"></div><div id="str-walk"></div>
       <div id="str-dist"></div><div id="str-streaks"></div><div id="str-hist"></div></div>
       <pre class="stats" id="str-stats"></pre></div>
-    <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧾 По периодам — вход/экспирация, премия, выплата, P&L ↓</h3>
+    <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧾 По периодам — вход/экспирация, премия, выплата, P&L ↓ <span style="color:#6e7681">(coin-flip: кликни строку — покажу картинку испытания по роллам)</span></h3>
     <div class="tradetable" id="str-table"></div>
+    <div id="str-trial-detail" hidden>
+      <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🔬 Разбор испытания по роллам ↓</h3>
+      <div class="plots"><div id="str-trial-chart"></div><div id="str-trial-price"></div></div>
+      <pre class="stats" id="str-trial-stats"></pre>
+      <div class="tradetable" id="str-trial-ledger"></div>
+    </div>
   </section>
 
   <!-- TAB 11 -->
@@ -395,6 +401,6 @@
     </div></div>
   </section>
 
-  <script src="/app.js?v=82"></script>
+  <script src="/app.js?v=83"></script>
 </body>
 </html>

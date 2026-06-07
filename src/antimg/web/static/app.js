@@ -101,6 +101,28 @@ function gateScalpData(formSel) {
   if (tk) tk.addEventListener("change", () => gateScalpData(f));
 });
 
+// IV window matters only for iv_source=realized; IV const only for iv_source=constant. Grey out the
+// irrelevant one (disabled inputs aren't submitted → backend just uses its default).
+function gateIvInputs(formSel) {
+  const src = $(formSel + " [name=iv_source]");
+  if (!src) return;
+  const v = src.value;
+  const set = (name, relevant) => {
+    const el = $(formSel + ` [name=${name}]`);
+    if (!el) return;
+    el.disabled = !relevant;
+    const lab = el.closest("label");
+    if (lab) lab.style.opacity = relevant ? "1" : "0.4";
+  };
+  set("iv_window", v === "realized");
+  set("iv_const", v === "constant");
+}
+["#form-straddle", "#form-legs", "#form-hedged", "#form-hiexec"].forEach((f) => {
+  const src = $(f + " [name=iv_source]");
+  if (src) src.addEventListener("change", () => gateIvInputs(f));
+  gateIvInputs(f);                                            // apply on load
+});
+
 const statsText = (s) => Object.entries(s)
   .map(([k, v]) => `${k.padEnd(18)}: ${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}`)
   .join("\n");
@@ -1373,6 +1395,60 @@ function outcomeHist(id, rows, unit, U1, avg) {              // P&L per period/t
   }));
 }
 
+// ---- per-trial picture (coin-flip): how the rolls walked the cumulative P&L to ±R ---------------
+async function renderTrialDetail(d, i) {
+  const t = d.table[i], rolls = t.rolls || [];
+  const f = (v) => (v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  $("#str-trial-detail").hidden = false;
+  const xs = rolls.map((r) => r.roll);
+  const R = t.R;
+  // chart 1: per-roll premium deployed (bars) + cumulative P&L path (line, 2nd axis) with ±R rails
+  await plot("str-trial-chart", [
+    { x: xs, y: rolls.map((r) => r.premium), type: "bar", name: "премия ролла (= R + накопл.)",
+      marker: { color: "rgba(88,166,255,0.55)" }, yaxis: "y" },
+    { x: xs, y: rolls.map((r) => r.cum), mode: "lines+markers", name: "накопл. P&L → к ±R",
+      line: { color: "#e3b341", width: 2 }, marker: { size: 6 }, yaxis: "y2" },
+    { x: [xs[0], xs[xs.length - 1]], y: [R, R], mode: "lines", name: "+R (выигрыш)",
+      line: { color: "#3fb950", dash: "dash", width: 1 }, yaxis: "y2" },
+    { x: [xs[0], xs[xs.length - 1]], y: [-R, -R], mode: "lines", name: "−R (проигрыш)",
+      line: { color: "#f85149", dash: "dash", width: 1 }, yaxis: "y2" },
+    { x: [xs[0], xs[xs.length - 1]], y: [R, R], mode: "lines", name: "R (отметка премии)",
+      line: { color: "#8b949e", dash: "dot", width: 1 }, yaxis: "y" },
+  ], layout(`Испытание #${i + 1}: ${t.n_rolls} роллов · ${t.win ? "ВЫИГРЫШ" : "ПРОИГРЫШ"} ${f(t.cum_pnl)} (${t.partial ? (t.n_rolls >= d.params.max_rolls ? "горизонт" : "данные") : "±R"})`, {
+    xaxis: { gridcolor: "#2a3340", title: { text: "ролл №" }, dtick: 1 },
+    yaxis: { gridcolor: "#2a3340", title: { text: "премия ролла $" }, rangemode: "tozero" },
+    yaxis2: { title: { text: "накопл. P&L $" }, overlaying: "y", side: "right", zeroline: true, zerolinecolor: "#8b949e" },
+  }));
+  // chart 2: the underlying price across the trial's rolls (entry→expiry of each roll)
+  const px = []; const py = [];
+  rolls.forEach((r) => { px.push(r.entry, r.expiry); py.push(r.spot_in, r.spot_out); });
+  await plot("str-trial-price", [
+    { x: px, y: py, mode: "lines+markers", name: "цена базового",
+      line: { color: "#a371f7", width: 2 }, marker: { size: 4 } },
+  ], layout(`Цена ${d.summary.ticker} за испытание (${t.start_date} → ${t.end_date})`, {
+    xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: { text: "цена" } },
+  }));
+  $("#str-trial-stats").textContent =
+    `🔬 ИСПЫТАНИЕ #${i + 1}  ·  ${t.start_date} → ${t.end_date}  ·  R = ${f(R)}\n`
+    + `${t.n_rolls} роллов · премии Σ ${f(t.premium_total)} · выплат Σ ${f(t.payoff_total)} · ИТОГ ${f(t.cum_pnl)} (${t.win ? "выигрыш" : "проигрыш"})\n`
+    + `закрыт: ${t.partial ? (t.n_rolls >= d.params.max_rolls ? "по ГОРИЗОНТУ (не дошёл до ±R)" : "по концу ДАННЫХ (хвост)") : "по ±R"}\n`
+    + `\n💡 Премия каждого ролла = R + накопл.P&L: после частичного минуса она НИЖЕ R (рискуем остатком до −R),\n`
+    + `   после частичного плюса — ВЫШЕ R (на столе и заработанное). Поэтому «премии Σ» гуляет вокруг ${f(R)}×роллов.`;
+  // per-roll ledger
+  const cols = [["roll","ролл"],["entry","вход"],["expiry","экспир."],["spot_in","S вход"],["spot_out","S выход"],
+    ["iv","IV"],["premium","премия (=R+накопл.)"],["payoff","выплата"],["pnl","P&L ролла"],["cum","накопл. P&L"]];
+  let lh = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
+  for (const r of rolls) {
+    lh += "<tr>" + cols.map((c) => {
+      let v = r[c[0]];
+      if (c[0] === "pnl" || c[0] === "cum") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${f(v)}</td>`;
+      if (c[0] === "premium") return `<td style="color:${v > R ? "#3fb950" : (v < R ? "#f85149" : "#e6edf3")}">${f(v)}</td>`;
+      return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</td>`;
+    }).join("") + "</tr>";
+  }
+  $("#str-trial-ledger").innerHTML = lh + `</tbody></table></div><div class="tt-note">${rolls.length} роллов в испытании #${i + 1}</div>`;
+}
+
 // ---- tab 10 · pure straddle (per-expiry) OR coin-flip ±R trials ---------------------------------
 async function renderStraddle(d) {
   const s = d.summary, rows = d.table, coin = d.mode === "coinflip";
@@ -1421,17 +1497,20 @@ async function renderStraddle(d) {
       ["spot_start","S старт"],["spot_end","S конец"],["premium_total","премии Σ"],["payoff_total","выплат Σ"],
       ["cum_pnl","P&L испыт."],["partial","как закрыт"]];
     let h = "<div class='tt-scroll'><table><thead><tr>" + cols.map((c) => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>";
-    for (const r of rows) {
-      h += `<tr class="${r.win ? "w" : "l"}">` + cols.map((c) => {
+    rows.forEach((r, i) => {
+      h += `<tr class="${r.win ? "w" : "l"}" data-i="${i}" style="cursor:pointer">` + cols.map((c) => {
         let v = r[c[0]];
         if (c[0] === "cum_pnl") return `<td style="color:${v >= 0 ? "#3fb950" : "#f85149"};font-weight:600">${f(v)}</td>`;
         if (c[0] === "partial") return `<td>${r.partial ? (r.n_rolls >= d.params.max_rolls ? "горизонт" : "данные") : "±R"}</td>`;
         return `<td>${typeof v === "number" ? (+v).toLocaleString(undefined, { maximumFractionDigits: 4 }) : v}</td>`;
       }).join("") + "</tr>";
-    }
-    $("#str-table").innerHTML = h + `</tbody></table></div><div class="tt-note">${rows.length} испытаний · прокрути</div>`;
+    });
+    $("#str-table").innerHTML = h + `</tbody></table></div><div class="tt-note">${rows.length} испытаний · кликни строку для разбора по роллам</div>`;
+    $$("#str-table tr[data-i]").forEach((tr) => tr.onclick = () => renderTrialDetail(d, +tr.dataset.i));
+    if (rows.length) renderTrialDetail(d, 0);                 // show the first trial by default
     return;
   }
+  $("#str-trial-detail").hidden = true;                       // expiry mode: no per-roll picture
   const vrp = s.avg_breakeven_pct - s.avg_move_pct;
   $("#str-stats").textContent =
     `🎯 ЧИСТЫЙ СТРЕДДЛ ДО ЭКСПИРАЦИИ — ${s.ticker}  ·  IV-модель: ${s.vol_model}\n`

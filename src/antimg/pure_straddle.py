@@ -300,6 +300,7 @@ class Trial:
     spot_end: float
     win: bool
     partial: bool = False    # True = resolved by the max-roll HORIZON (cum booked as-is), not by ±R
+    rolls: list = field(default_factory=list)   # per-roll ledger (the "picture" of this trial)
 
 
 @dataclass
@@ -386,6 +387,7 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
         outcome = None                                       # 'win' | 'loss' | None(incomplete)
         partial = False
         end_q = p
+        roll_log = []                                        # per-roll picture of this trial
         while True:
             entry_date = dates[p]
             S0 = float(close.iloc[p])
@@ -423,12 +425,18 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             pay_tot += payoff_gross - payoff_gross * fee_rate
             n_rolls += 1
             end_q = q
+            roll_log.append({                                # one straddle/leg roll within this trial
+                "roll": n_rolls, "entry": str(entry_date.date()), "expiry": str(dates[q].date()),
+                "spot_in": round(S0, 2), "spot_out": round(S_T, 2), "iv": round(sigma, 4),
+                "premium": round(budget, 2),                 # = R + cum_before (capacity deployed)
+                "payoff": round(payoff_gross, 2), "pnl": round(pnl, 2), "cum": round(cum, 2)})
             p = q                                            # roll: next leg entered at this expiry
             if cum >= R:
                 outcome = "win"
                 if take_profit:                              # take profit at +R → clean ±R coin flip
                     cum = R
                     pay_tot = prem_tot + R                   # booked as closing at the +R level
+                    roll_log[-1]["cum"] = round(R, 2)        # the last roll path ends exactly at +R
                 break
             if cum <= -R + 1e-9:
                 outcome = "loss"
@@ -455,7 +463,7 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             n_rolls=n_rolls, R=round(R, 2), premium_total=round(prem_tot, 2),
             payoff_total=round(pay_tot, 2), cum_pnl=round(cum, 2),
             spot_start=round(spot_start, 4), spot_end=round(float(close.iloc[end_q]), 4),
-            win=win, partial=partial))
+            win=win, partial=partial, rolls=roll_log))
         res.equity.append({"date": str(dates[end_q].date()), "bank": round(bank, 2)})
         if win:
             res.n_wins += 1
