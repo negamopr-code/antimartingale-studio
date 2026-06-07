@@ -340,15 +340,21 @@ def _leg_prem_and_intrinsic(leg, S0, K, T, r, sigma, S_T):
 def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle",
                         risk_pct: float = 0.01, dte_days: int = 30, starting_bank: float = 10_000.0,
                         r: float = 0.045, commission_pct: float = 0.0, slippage_pct: float = 0.0,
-                        compounding: bool = True, max_rolls: int = 12) -> TrialResult:
+                        compounding: bool = True, max_rolls: int = 12,
+                        take_profit: bool = True) -> TrialResult:
     """Resolve the option backtest as a COIN FLIP with fixed risk/reward, translated to option reality.
 
     A *trial* keeps rolling the same construction (straddle, or a single call/put leg) to expiry until
     its cumulative P&L reaches **+R (WIN)** or **−R (LOSS)**, where R = risk_pct × bank — the fixed
     risk = reward unit. Each roll's premium = the REMAINING capacity to the −R floor (= R + cum), so a
     partial loss is carried forward (next straddle risks less) and the total loss is capped at exactly
-    −R; a partial gain is carried forward too (we wait for the rest of +R). Losses book exactly −R;
-    wins book the ACTUAL cum (≥ +R, can overshoot on a big move = long-option convexity).
+    −R; a partial gain is carried forward too (we wait for the rest of +R). Losses book exactly −R.
+
+    `take_profit` (default True): when the trial reaches +R we BOOK exactly +R and roll a fresh trial —
+    a clean symmetric ±R coin flip (every full win = +R, full loss = −R, so the only number that matters
+    is p, the win rate). We assume the position is closed when it first crosses +R (true if it rose to
+    there before expiry). With take_profit=False a win instead books the ACTUAL cum (≥ +R, overshoots on
+    a big move = long-option convexity) — winners run.
 
     `max_rolls` is a HORIZON: a straddle rarely doubles or goes worthless in one expiry, so with the
     remaining-capacity sizing a losing trial would grind toward −R over dozens of ever-smaller rolls
@@ -420,6 +426,9 @@ def run_coinflip_trials(daily: pd.DataFrame, vol_model, *, leg: str = "straddle"
             p = q                                            # roll: next leg entered at this expiry
             if cum >= R:
                 outcome = "win"
+                if take_profit:                              # take profit at +R → clean ±R coin flip
+                    cum = R
+                    pay_tot = prem_tot + R                   # booked as closing at the +R level
                 break
             if cum <= -R + 1e-9:
                 outcome = "loss"

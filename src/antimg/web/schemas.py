@@ -259,6 +259,9 @@ class PureStraddleReq(BaseModel):
     # coinflip only: HORIZON — close a trial at its actual cum if it hasn't hit ±R within this many
     # rolls (a straddle rarely doubles/zeroes in one expiry, so without this a losing trial drags on).
     max_rolls: int = Field(12, ge=1, le=120)
+    # coinflip only: take profit at +R (clean ±R coin flip, every full win = +R) vs let winners run
+    # (a win books the actual cum, ≥ +R, overshoots = long-option convexity).
+    take_profit: bool = True
     r: float = Field(0.045, ge=-0.05, le=0.5)
     # IV surface (same engine as the options/hedged tabs)
     iv_window: int = Field(20, ge=2, le=500)

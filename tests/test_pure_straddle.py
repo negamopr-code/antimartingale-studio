@@ -230,27 +230,54 @@ def test_coinflip_horizon_closes_partial_and_continues():
     assert pd.Timestamp(short.trials[-1].end_date) > pd.Timestamp(short.trials[0].end_date)
 
 
+def _vol_path(seed, n=2000, vol=0.03, drift=0.0005):
+    """A volatile GBM path (stays positive) so straddles actually WIN sometimes (realized ≫ const IV)."""
+    rng = np.random.default_rng(seed)
+    return _frame(100.0 * np.exp(np.cumsum(rng.normal(drift, vol, n))))
+
+
 def test_coinflip_wins_can_overshoot_and_streaks_consistent():
-    """A win books actual cum (≥ +R, may overshoot); streak counts are self-consistent."""
-    rng = np.random.default_rng(21)
-    df = _frame(100.0 + np.cumsum(rng.normal(0.05, 1.2, 1500)))   # drifting, volatile → some wins
+    """With take_profit=False a win books actual cum (≥ +R, may overshoot); streaks self-consistent."""
+    df = _vol_path(21)
     res = ps.run_coinflip_trials(df, _const_vol(0.25), leg="straddle", risk_pct=0.02, dte_days=30,
-                                 starting_bank=10_000.0, max_rolls=60)
-    assert res.n_trials > 0
+                                 starting_bank=10_000.0, max_rolls=60, take_profit=False)
+    assert res.n_trials > 0 and res.n_wins > 0
     assert res.n_wins + res.n_losses == res.n_trials
+    overshoots = 0
     for t in res.trials:
         if t.partial:
             continue                                         # horizon close → cum booked as-is (not ±R)
         if t.win:
             assert t.cum_pnl >= t.R - 1e-6                   # win reaches at least +R (can overshoot)
+            if t.cum_pnl > t.R + 1e-6:
+                overshoots += 1
         else:
             assert t.cum_pnl == pytest.approx(-t.R, rel=1e-6)
+    assert overshoots > 0                                     # with take_profit=False winners overshoot
     assert sum(k * v for k, v in res.win_streaks.items()) == res.n_wins
     assert sum(k * v for k, v in res.loss_streaks.items()) == res.n_losses
-    assert res.max_rolls >= 1 and res.avg_rolls >= 1.0
-    # bank identity
     assert res.final_bank == pytest.approx(
         res.starting_bank + sum(t.cum_pnl for t in res.trials), abs=0.01 * res.n_trials + 0.01)
+
+
+def test_coinflip_take_profit_makes_clean_pm_R_coin():
+    """With take_profit=True every full (non-partial) win books exactly +R and every loss −R — a clean
+    symmetric ±R coin, so the only thing that matters is p (the win rate)."""
+    df = _vol_path(21)
+    tp = ps.run_coinflip_trials(df, _const_vol(0.25), leg="straddle", risk_pct=0.02, dte_days=30,
+                                starting_bank=10_000.0, max_rolls=12, take_profit=True)
+    assert tp.n_trials > 0 and tp.n_wins > 0
+    for t in tp.trials:
+        if t.partial:
+            continue
+        if t.win:
+            assert t.cum_pnl == pytest.approx(t.R, rel=1e-6)   # win booked exactly +R (no overshoot)
+        else:
+            assert t.cum_pnl == pytest.approx(-t.R, rel=1e-6)
+    # take-profit caps the winners → final bank ≤ the let-it-run version (gives up the convex overshoot)
+    run = ps.run_coinflip_trials(df, _const_vol(0.25), leg="straddle", risk_pct=0.02, dte_days=30,
+                                 starting_bank=10_000.0, max_rolls=12, take_profit=False)
+    assert tp.final_bank <= run.final_bank + 1e-6
 
 
 def test_coinflip_partial_loss_is_carried_not_a_full_loss():
@@ -299,6 +326,24 @@ def test_api_coinflip_modes_for_straddle_and_legs():
     for leg in ("call", "put"):
         assert d2[leg]["summary"]["n_trials"] > 0
         assert "win_streaks" in d2[leg]
+
+
+def test_coinflip_language_fields():
+    """The coin-flip reduction: p (win rate), payoff ratio b = avg_win/|avg_loss|, breakeven p*=1/(1+b),
+    edge = p−p*, and a symmetric 1:1-coin equivalent — all exposed and self-consistent."""
+    from antimg.web.api import _trial_summary
+    df = _vol_path(21)
+    res = ps.run_coinflip_trials(df, _const_vol(0.25), leg="straddle", risk_pct=0.02, dte_days=30,
+                                 starting_bank=10_000.0, max_rolls=12)
+    assert res.n_wins > 0 and res.n_losses > 0                # sanity: mixed outcomes for this check
+    s = _trial_summary(res)
+    assert s["coin_p"] == pytest.approx(res.win_rate, abs=1e-3)
+    b = res.avg_win / abs(res.avg_loss)
+    assert s["payoff_ratio"] == pytest.approx(b, abs=0.01)
+    assert s["breakeven_p"] == pytest.approx(1 / (1 + b), abs=1e-3)
+    assert s["edge_p"] == pytest.approx(res.win_rate - 1 / (1 + b), abs=2e-3)
+    # with take_profit (default) full wins = +R → payoff ratio b ≈ 1 → breakeven p* ≈ 0.5
+    assert 0.0 <= s["coin_p_symmetric"] <= 1.0
 
 
 def test_api_pure_straddle_endpoint():

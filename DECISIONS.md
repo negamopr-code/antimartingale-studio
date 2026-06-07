@@ -827,3 +827,20 @@ Not implemented; documented as a rejected tactic.
 - **Result:** SPY DTE90 coin-flip now reaches 2026-03-16 (was 2025). Tail no longer dropped.
 - Also confirmed the coin-flip risk approach is fully on Tab 11 (per-leg, with horizon) — user request.
 - 117 tests (+1 truncated-tail-is-booked-not-dropped). assets v80.
+
+## D75 — Coin-flip: TAKE-PROFIT at +R + "coin-flip language" (p, payoff b, breakeven p*) (2026-06-07)
+- **Ask (user):** "you're not fixing profit — when up +R, take it and roll a fresh straddle" + "how to
+  translate to coin-flip language, like 0.6?".
+- **Take-profit (D75a):** `run_coinflip_trials(take_profit=True, default)` — when cum reaches +R, book
+  EXACTLY +R (close at the +R level, assume we exited when it crossed) and roll fresh → a clean symmetric
+  ±R coin (every full win = +R, full loss = −R). `take_profit=False` = let winners run (book actual cum
+  ≥ +R = convex overshoot). Schema `take_profit` (default True) + UI toggle on tabs 10 & 11 + verdict note.
+- **Coin-flip language (D75b):** `_trial_summary` now emits `coin_p` (= win rate), `payoff_ratio`
+  b = avg_win/|avg_loss|, `breakeven_p` p*=1/(1+b), `edge_p` = p−p*, `coin_p_symmetric` (the fair 1:1
+  coin with the same EV per R). Shown in both verdicts (tabs 10 & 11).
+- **The insight (SPY, R=1%):** with take-profit ON it's a CLEAN ±R coin and p is THE number — SPY straddle
+  is only a **p≈0.11–0.29 coin (1:1, breakeven 0.5) ⇒ −EV**. With take-profit OFF, p is the same but wins
+  overshoot (b≈2.4) → breakeven drops to ≈p → roughly break-even. So the straddle is a LOSING coin that
+  survives only by letting the rare big wins run (the convexity). Honest "0.6?" answer: no — ~0.1–0.3.
+- 119 tests (+2: take-profit-clean-±R, coin-language-fields; fixed overshoot test to take_profit=False +
+  volatile GBM path so wins occur). assets v82.

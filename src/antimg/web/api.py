@@ -1120,6 +1120,16 @@ def _trial_summary(res, **extra) -> dict:
     """Summary for a coin-flip TrialResult (mirrors _ps_summary keys so the UI charts are reusable:
     n_periods≡n_trials, win/loss counts, streaks, avg win/loss, CAGR) + trial-specific avg/max rolls."""
     inf = lambda x: (None if x == float("inf") else round(x, 3))
+    # ── "coin-flip language" reduction ──────────────────────────────────────────────────────────
+    # p = win rate. The payoff is ASYMMETRIC (wins overshoot +R via convexity; losses ≈ −R), so the
+    # fair comparison is a coin with reward:risk b = avg_win/|avg_loss| and breakeven win-rate
+    # p* = 1/(1+b). edge = p − p*. We also give the EV-equivalent SYMMETRIC (1:1) coin: a fair coin
+    # whose (2p−1) equals this strategy's EV per unit R → p_sym = (1 + EV/R)/2 (clamped to [0,1]).
+    b = (res.avg_win / abs(res.avg_loss)) if res.avg_loss < 0 else None        # reward:risk ratio
+    p_star = (1.0 / (1.0 + b)) if b else None                                  # breakeven win-rate
+    avg_R = (sum(t.R for t in res.trials) / len(res.trials)) if res.trials else 0.0
+    ev_per_R = ((res.net_pnl / res.n_trials) / avg_R) if (res.n_trials and avg_R) else 0.0
+    p_sym = max(0.0, min(1.0, 0.5 * (1.0 + ev_per_R)))                         # 1:1-coin equivalent
     return {
         **extra, "leg": res.leg,
         "starting_bank": round(res.starting_bank, 2), "final_bank": round(res.final_bank, 2),
@@ -1131,6 +1141,12 @@ def _trial_summary(res, **extra) -> dict:
         "ann_return_pct": round(res.ann_return_pct, 2),
         "profit_factor": inf(res.profit_factor),
         "avg_rolls": round(res.avg_rolls, 2), "max_rolls": res.max_rolls,
+        # coin-flip reduction
+        "coin_p": round(res.win_rate, 3),               # the coin's win probability (= win rate)
+        "payoff_ratio": round(b, 2) if b is not None else None,     # reward:risk b = avg win / |avg loss|
+        "breakeven_p": round(p_star, 3) if p_star is not None else None,   # p* = 1/(1+b)
+        "edge_p": round(res.win_rate - p_star, 3) if p_star is not None else None,
+        "coin_p_symmetric": round(p_sym, 3),            # equivalent FAIR 1:1 coin (same EV per R)
     }
 
 
@@ -1166,7 +1182,8 @@ def pure_straddle(req: PureStraddleReq):
         res = ps.run_coinflip_trials(
             daily, vm, leg="straddle", risk_pct=req.risk_pct, dte_days=req.dte_days,
             starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
-            slippage_pct=req.slippage_pct, compounding=req.compounding, max_rolls=req.max_rolls)
+            slippage_pct=req.slippage_pct, compounding=req.compounding, max_rolls=req.max_rolls,
+            take_profit=req.take_profit)
         if not res.trials:
             raise HTTPException(status_code=422, detail="no coin-flip trial resolved (try a longer window or shorter DTE)")
         return {"params": req.model_dump(), **_trial_payload(res, ticker=req.ticker, vol_model=vm.label)}
@@ -1194,7 +1211,8 @@ def leg_analysis(req: PureStraddleReq):
             res = ps.run_coinflip_trials(
                 daily, vm, leg=leg, risk_pct=req.risk_pct, dte_days=req.dte_days,
                 starting_bank=req.starting_bank, r=req.r, commission_pct=req.commission_pct,
-                slippage_pct=req.slippage_pct, compounding=req.compounding, max_rolls=req.max_rolls)
+                slippage_pct=req.slippage_pct, compounding=req.compounding, max_rolls=req.max_rolls,
+            take_profit=req.take_profit)
             if not res.trials:
                 raise HTTPException(status_code=422, detail="no coin-flip trial resolved (try a longer window or shorter DTE)")
             out[leg] = _trial_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)

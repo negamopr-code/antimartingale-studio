@@ -1401,10 +1401,14 @@ async function renderStraddle(d) {
     $("#str-stats").textContent =
       `🪙 КОИН-ФЛИП ±R — ЧИСТЫЙ СТРЕДДЛ — ${s.ticker} (${s.vol_model})\n`
       + `${s.n_trials} испытаний · риск=реворд R=${(d.params.risk_pct * 100).toFixed(2)}% банка (1-е R≈${f(R)} $) · DTE ${d.params.dte_days}д · ${s.years} лет · компаундинг ${d.params.compounding ? "вкл" : "выкл"}\n`
+      + `take-profit на +R: ${d.params.take_profit === false ? "ВЫКЛ (даём прибыли течь → выигрыш ≥ +R, выпукло)" : "ВКЛ (фиксируем +R → чистая ±R монетка: выигрыш = +R, проигрыш = −R)"}\n`
       + `\nИТОГ: ${profitable ? "📈 ПЛЮС" : "📉 МИНУС"}  ·  банк ${f(s.starting_bank)} → ${f(s.final_bank)}  (чистый ${f(s.net_pnl)} $)  ·  CAGR ${s.ann_return_pct}%\n`
       + `выигрышей: ${s.n_wins}/${s.n_trials} (${(s.win_rate * 100).toFixed(1)}%)  ·  проигрышей ${s.n_losses}  ·  profit factor ${s.profit_factor == null ? "∞" : s.profit_factor}\n`
       + `средн. выигрыш ${f(s.avg_win)} $ (≥ +R, выпукло)  ·  средн. проигрыш ${f(s.avg_loss)} $ (≈ −R)  ·  роллов/испытание: средн ${s.avg_rolls}, макс ${s.max_rolls} (горизонт ${d.params.max_rolls})\n`
       + `по горизонту (частичные, не дошли до ±R за ${d.params.max_rolls} роллов): ${s.n_partial}/${s.n_trials}\n`
+      + `\n🪙 ЯЗЫК МОНЕТКИ: p(выигрыш) = ${s.coin_p}  ·  payoff (выигрыш:проигрыш) b = ${s.payoff_ratio == null ? "—" : s.payoff_ratio}:1 (выигрыши перелетают +R, убытки ≈ −R)\n`
+      + `   точка безубытка p* = 1/(1+b) = ${s.breakeven_p == null ? "—" : s.breakeven_p}  ·  перевес p−p* = ${s.edge_p == null ? "—" : (s.edge_p >= 0 ? "+" : "") + s.edge_p}  ${s.edge_p > 0 ? "✅ есть перевес" : "❌ нет перевеса"}\n`
+      + `   эквивалент СИММЕТРИЧНОЙ 1:1-монетки (тот же EV на R) ≈ ${s.coin_p_symmetric}  ⇒ ${s.coin_p_symmetric >= 0.5 ? "лучше 0.5" : "хуже 0.5"}\n`
       + `\n🔁 СЕРИИ ПОДРЯД:  макс ${s.max_win_streak} побед / ${s.max_loss_streak} проигрышей подряд\n`
       + `   победы подряд : ${streakStr(d.win_streaks)}\n`
       + `   убытки подряд : ${streakStr(d.loss_streaks)}\n`
@@ -1488,9 +1492,14 @@ async function renderLegs(d) {
   const tail = coin
     ? (lg) => `  ·  CAGR ${lg.summary.ann_return_pct}%  ·  роллов/исп. средн ${lg.summary.avg_rolls}`
     : (lg) => `  ·  CAGR ${lg.summary.ann_return_pct}%  ·  возврат премии ${lg.summary.premium_recovered_pct}%`;
+  const coinLine = (lg) => {
+    const s = lg.summary;
+    return `   🪙 монетка: p=${s.coin_p} · payoff b=${s.payoff_ratio == null ? "—" : s.payoff_ratio}:1 · безубыток p*=${s.breakeven_p == null ? "—" : s.breakeven_p} · перевес ${s.edge_p == null ? "—" : (s.edge_p >= 0 ? "+" : "") + s.edge_p} · 1:1-эквив. ${s.coin_p_symmetric}\n`;
+  };
   const block = (name, lg) => {
     const s = lg.summary;
     return `${name}: в плюсе ${s.n_wins}/${s.n_periods} (${(s.win_rate * 100).toFixed(1)}%)  ·  макс серия ${s.max_win_streak}W / ${s.max_loss_streak}L${tail(lg)}\n`
+      + (coin ? coinLine(lg) : "")
       + `   победы подряд : ${streakStr(lg.win_streaks)}\n`
       + `   убытки подряд : ${streakStr(lg.loss_streaks)}\n`;
   };
