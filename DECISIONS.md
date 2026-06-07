@@ -936,3 +936,19 @@ Not implemented; documented as a rejected tactic.
 - Skills updated: coin-flip-decomposition.md gets a binding **§0 REALITY CHECK** (the RV>IV·√(1−c−f)
   identity + win-rate table); hedgedintraday SKILL INVARIANT #8 + antimartingal SKILL bridge both revised
   to "strip carry, sanity-check p against the gamma identity, AM adds ~nothing at p≈0.5". No app/test change.
+
+## D81 — Guru-validated the carry-stripped correction (discuss-before-edit) + instrument refinement (2026-06-07)
+- **User process correction:** discuss the correction WITH the guru BEFORE editing the skill; explicitly
+  tell it the model leans on RUB 20% carry and must be market-agnostic (US/EU/crypto, not just RF).
+- **4th consult (market-agnostic challenge).** Corpus CONFIRMS: (1) without free-margin carry, straddle+
+  scalp win-rate "на спокойном рынке стремится к 0.5" (D80's ~0.51 holds); (2) the ASYMMETRY (convex
+  2–3R win, capped loss) is the cornerstone, win-rate is a derivative; (3) the 75% IS RUB-rate-dependent.
+- **Refinement (new):** on low-carry markets the lever that keeps p>0.5 is the INSTRUMENT, not carry —
+  high-vol *wicky / mean-reverting* underlyings (ETH, metals) give the scalp more round-trips ⇒ higher
+  coverage c ⇒ higher p. But `p = P(RV > IV·√(1−c))` is VOL-SCALE-INVARIANT, so it's `c` (intraday
+  mean-reversion), not the vol level, that lifts p (ties to INVARIANT #7: ETH ranged c↑ / BTC trended
+  c≈0→p<0.5). Modest targets / earlier rolling raise win-rate but shrink per-win b (win-rate↔payoff trade).
+- **Market-agnostic honest coin: ~0.5 on calm assets, ~0.55–0.60 on wicky mean-reverting assets (ETH),
+  carry on top (RUB only); the durable universal edge is the asymmetry.** Skill §0 + lessons updated with
+  the validated refinement. PROCESS LESSON: consult the guru to validate a correction BEFORE locking the
+  skill — here the dialogue confirmed D80 AND added the instrument lever. No app/test change (127 tests).
