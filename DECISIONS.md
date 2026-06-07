@@ -747,3 +747,11 @@ Not implemented; documented as a rejected tactic.
   long-straddle signature: frequent clustered losses, rare isolated wins — exactly why it bleeds.
 - 108 tests (+2: `_streak_counts` cases; engine streak/count self-consistency Σ run_len×count == totals).
   assets v75.
+
+## D70 — Tab 10: win/loss random-walk chart (+1 win / −1 loss, cumulative) (2026-06-07)
+- **Ask (user):** add a graph where loss = −1, win = +1, plotted cumulatively over all periods.
+- **Built (frontend-only, derived from the per-period `win` flags already in the payload):** new
+  **«Серии: +1 победа / −1 убыток, накопит.»** chart on Tab 10 — cumulative ±1 over the expiry-date axis,
+  zero line, line/fill green if it ends ≥0 else red, title shows the ending level (= #wins − #losses).
+  Down-slopes = losing streaks, up-slopes = winning streaks (the streak-shape view over time).
+- No backend/test change (pure visualization of tested data). assets v76.

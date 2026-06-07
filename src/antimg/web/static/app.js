@@ -1334,6 +1334,23 @@ async function renderStraddle(d) {
       y: [s.starting_bank, s.starting_bank], mode: "lines", name: "start bank",
       line: { color: "#8b949e", dash: "dot", width: 1 } },
   ], layout(`Банк: чистый стреддл до экспирации — ${s.ticker} (${s.vol_model})`));
+  // win/loss random walk: +1 per win, −1 per loss, cumulative over periods. Down-slopes = losing
+  // streaks, up-slopes = winning streaks; the ending level = (#wins − #losses).
+  let acc = 0;
+  const walk = rows.map((r) => (acc += (r.win ? 1 : -1)));
+  const wx = rows.map((r) => r.expiry_date);
+  const wEnd = walk.length ? walk[walk.length - 1] : 0;
+  await plot("str-walk", [
+    { x: wx, y: walk, mode: "lines", name: "побед − убытков",
+      line: { color: wEnd >= 0 ? "#3fb950" : "#f85149", width: 2 },
+      fill: "tozeroy", fillcolor: wEnd >= 0 ? "rgba(63,185,80,0.10)" : "rgba(248,81,73,0.10)" },
+    { x: [wx[0], wx[wx.length - 1]], y: [0, 0], mode: "lines", name: "0",
+      line: { color: "#8b949e", dash: "dot", width: 1 } },
+  ], layout(`Серии: +1 победа / −1 убыток, накопит. (итог ${wEnd >= 0 ? "+" : ""}${wEnd})`, {
+    xaxis: { gridcolor: "#2a3340" },
+    yaxis: { gridcolor: "#2a3340", title: { text: "победы − убытки (нараст.)" },
+             zeroline: true, zerolinecolor: "#8b949e" },
+  }));
   // per-period P&L histogram (win/loss split)
   const pnls = rows.map((r) => r.pnl);
   const W = pnls.filter((v) => v > 0), L = pnls.filter((v) => v <= 0);
