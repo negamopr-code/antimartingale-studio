@@ -528,17 +528,24 @@ def rolling_periods(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: flo
         "avg_move_pct": round(mean("move_pct"), 2), "avg_abs_move_pct": round(sum(abs(x["move_pct"]) for x in rows) / n, 2),
         "avg_breakeven_pct": round(mean("breakeven_pct"), 2), "avg_iv": round(mean("iv"), 4),
         "ann_return_pct": round(100.0 * sum(x["total"] for x in rows) / deposit / span_years, 2),
+        "straddle_ann_return_pct": round(100.0 * sum(x["straddle"] for x in rows) / deposit / span_years, 2),
         "risk_reward": _risk_reward([x["total"] for x in rows]),       # avg/max win & loss, RR, PF
+        "straddle_risk_reward": _risk_reward([x["straddle"] for x in rows]),   # PURE straddle (no scalp)
     }
-    # recovery-antimartingale overlay (double on a win below the peak, reset at a new equity high)
-    am = recovery_antimartingale([x["total"] for x in rows], deposit=deposit, cap_mult=am_cap_mult)
-    am["dates"] = [x["close"] for x in rows]
     span = max(span_years, 1e-6)
-    am["am_ann_return_pct"] = round(100.0 * (am["am_final"] - deposit) / deposit / span, 2)
-    am["flat_ann_return_pct"] = agg["ann_return_pct"]
-    for x, mlt, sc in zip(rows, am["multipliers"], am["scaled"]):       # per-row AM fields for the table
+    # recovery-antimartingale overlay (double on a win below the peak, reset at a new equity high) — for
+    # the FULL ПИ result and, separately, for the PURE straddle (no scalp at all).
+    am = recovery_antimartingale([x["total"] for x in rows], deposit=deposit, cap_mult=am_cap_mult)
+    am_str = recovery_antimartingale([x["straddle"] for x in rows], deposit=deposit, cap_mult=am_cap_mult)
+    for ov, key in ((am, "total"), (am_str, "straddle")):
+        ov["dates"] = [x["close"] for x in rows]
+        ov["am_ann_return_pct"] = round(100.0 * (ov["am_final"] - deposit) / deposit / span, 2)
+        ov["flat_ann_return_pct"] = round(100.0 * (ov["flat_final"] - deposit) / deposit / span, 2)
+    for x, mlt, sc, smlt, ssc in zip(rows, am["multipliers"], am["scaled"],
+                                     am_str["multipliers"], am_str["scaled"]):
         x["am_mult"] = round(mlt, 2); x["am_total"] = round(sc, 1)
-    return {"rows": rows, "aggregate": agg, "am": am}
+        x["am_str_mult"] = round(smlt, 2); x["am_str_total"] = round(ssc, 1)
+    return {"rows": rows, "aggregate": agg, "am": am, "am_straddle": am_str}
 
 
 def _stuck_drag_fixed(grid: list[dict], S0: float, S_T: float) -> float:

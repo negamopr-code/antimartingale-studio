@@ -515,6 +515,10 @@
       <div class="results"><div class="plots"><div id="sim-periods-payoff"></div><div id="sim-periods-equity"></div><div id="sim-periods-hist"></div></div></div>
       <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">📋 По периодам — каждая строка = один срок DTE (ядро РЕАЛЬНОЕ; скальп = чоп-модель − залипшие части, БЕЗ активного гейта = консервативно) ↓</h3>
       <div class="tradetable" id="sim-periods-table"></div>
+      <h3 style="margin:22px 0 4px;font-size:14px;color:#8b949e">🔵 ЧИСТЫЙ СТРЕДДЛ — БЕЗ скальпа вообще (только гамма-ядро: купил стреддл, держал до экспирации) ↓</h3>
+      <pre class="stats" id="sim-straddle-stats"></pre>
+      <div class="results"><div class="plots"><div id="sim-straddle-equity"></div></div></div>
+      <div class="tradetable" id="sim-straddle-table"></div>
     </div>
     <div id="sim-scan" hidden>
       <pre class="stats" id="sim-scan-stats"></pre>
@@ -530,6 +534,6 @@
     <div class="tradetable" id="sim-grid"></div>
   </section>
 
-  <script src="/app.js?v=99"></script>
+  <script src="/app.js?v=100"></script>
 </body>
 </html>

@@ -1851,6 +1851,28 @@ async function renderPiSimPeriods(d) {
     row.outcome = r.outcome;
     return row;
   }));
+
+  // ── PURE STRADDLE (no scalp at all) — same windows, result = the gamma core only ──
+  const srr = a.straddle_risk_reward, ams = d.am_straddle;
+  $("#sim-straddle-stats").textContent =
+    `🔵 ЧИСТЫЙ СТРЕДДЛ ${a.ticker} — ${a.n}×${a.dte_days}дн, БЕЗ скальпа (premium−theta, держим до экспирации)\n`
+    + `среднее : ${money(a.straddle_mean)}/период  (выигрышных ${a.straddle_win_pct}%)  ·  сумма ${money(a.straddle_sum)}  ·  ${a.straddle_ann_return_pct >= 0 ? "+" : ""}${a.straddle_ann_return_pct}%/год\n`
+    + `🎯 risk/reward: ср.выигрыш ${money(srr.avg_win)} / ср.проигрыш ${money(srr.avg_loss)}  ·  макс ${money(srr.max_win)} / ${money(srr.max_loss)}  ·  payoff ${srr.payoff_ratio ?? "—"}× PF ${srr.profit_factor ?? "—"}\n`
+    + `⇒ ${a.straddle_mean < 0 ? "сам по себе длинный стреддл КРОВОТОЧИТ (VRP: платим за волатильность дороже реализованной) — нужен скальп/большое движение" : "длинный стреддл сам в плюсе (реализ.>подразум.)"}`
+    + (amOn ? `\n🎲 антимартингейл на чистом стреддле: ${ams.am_ann_return_pct}%/год vs база ${ams.flat_ann_return_pct}%/год · maxDD ${money(ams.am_max_dd)} vs ${money(ams.flat_max_dd)} · ×${ams.max_mult}` : "");
+  const sTraces = [{ x: ams.dates, y: ams.flat_equity, mode: "lines", name: "стреддл база 10%", line: { color: "#58a6ff", width: 2 } }];
+  if (amOn) sTraces.push({ x: ams.dates, y: ams.am_equity, mode: "lines", name: `стреддл + антимарт. (×${ams.cap_mult})`, line: { color: "#d29922", width: 2 } });
+  await plot("sim-straddle-equity", sTraces, layout(
+    `Эквити ЧИСТОГО стреддла (без скальпа) — ${ams.flat_ann_return_pct}%/год`,
+    { height: 340, shapes: [{ type: "line", x0: ams.dates[0], x1: ams.dates[ams.dates.length - 1], y0: a.deposit, y1: a.deposit, line: { color: "#8b949e", width: 1, dash: "dot" } }],
+      xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: "эквити, $" } }));
+  renderTable("sim-straddle-table", rows.map((r) => {
+    const row = { "#": r.i, "вход": r.open, "экспир": r.close, "S0": r.S0, "S_T": r.S_T, "ход %": r.move_pct,
+      "б/у %": r.breakeven_pct, "СТРЕДДЛ $": Math.round(r.straddle) };
+    if (amOn) { row["AM ×"] = r.am_str_mult; row["AM стреддл $"] = Math.round(r.am_str_total); }
+    row.outcome = r.straddle > 0 ? "win" : "loss";
+    return row;
+  }));
 }
 
 // ---- Tab 14 scan: edge across ALL instruments + the pooled straddle-core distribution
