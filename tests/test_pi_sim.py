@@ -191,6 +191,34 @@ def test_rolling_edge_aggregates_and_c_star():
     assert e2.core_mean > 0 and e2.c_star <= 0
 
 
+def test_rolling_periods_table_and_aggregate():
+    """rolling_periods: one row per non-overlapping DTE window with straddle/scalp(osc−stuck)/total, and
+    an aggregate whose total_mean equals straddle_mean + scalp_mean."""
+    daily = _daily(100.0 * np.exp(np.cumsum(np.random.default_rng(5).standard_normal(900) * 0.012)))
+    out = pisim.rolling_periods(daily, _const_vol(0.30), ticker="T", deposit=10_000, dte_days=90,
+                                risk_pct=0.10, r=0.045, atr_period=14, n_parts=5, grid_atr_frac=0.05,
+                                grid_mult=1.8, intraday_frac=0.333, f_chop=0.667, trades_per_day=10,
+                                scalp_eff=0.5, flat_frac=0.25, start="2015-01-01")
+    rows, a = out["rows"], out["aggregate"]
+    assert a["n"] == len(rows) >= 5
+    for x in rows:                                            # scalp = oscillation + stuck (≤0), total = straddle+scalp
+        assert x["scalp"] == pytest.approx(x["scalp_osc"] + x["stuck"], abs=0.2)
+        assert x["stuck"] <= 0
+        assert x["total"] == pytest.approx(x["straddle"] + x["scalp"], abs=0.2)
+    assert a["total_mean"] == pytest.approx(a["straddle_mean"] + a["scalp_mean"], abs=0.5)
+    assert a["worst"] <= a["best"]
+
+
+def test_chop_cap_bounds_outliers():
+    """The уверенный-флэт ceiling caps the raw harvest at cap_per_month×(n_days/21)×theta."""
+    m = pisim.chop_coverage_model(daily_range=50.0, part_lots=50.0, theta=1000.0, n_days=21,
+                                  flat_frac=0.5, cap_per_month=1.0)
+    assert m["capped"] is True and m["income"] == pytest.approx(1000.0)   # capped at 100%/mo
+    m2 = pisim.chop_coverage_model(daily_range=50.0, part_lots=50.0, theta=1000.0, n_days=21,
+                                   flat_frac=0.5, cap_per_month=0.0)
+    assert m2["capped"] is False and m2["income"] > 1000.0               # cap disabled
+
+
 def test_uptrend_straddle_wins_scalp_bleeds():
     """INVARIANT #3 on the measured path: a strong one-way trend → straddle gamma wins, the
     counter-trend scalp's stuck legs bleed (open_mtm < 0)."""

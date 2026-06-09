@@ -1107,3 +1107,18 @@ Not implemented; documented as a rejected tactic.
   ≈ flat (+$4, was +$133). The gate («don't fade the breakout») is exactly what saves the parts — both shown.
 - UI/verdict/narration show net-of-parts (oscillation − stuck = net) + fixed-vs-gate stuck. 146 tests (+1
   _stuck_drag_fixed monotonic). assets v95.
+
+## D91 — payoff loss/profit zones (v96) · D92 — result point (v97) · D93 — per-period history table (v98)
+- **D91:** shaded the payoff graph — red loss zone between breakevens, green profit wings; breakeven drawn at
+  the FULL-position level (S0 ∓ (premium−scalp)/M) so the scalp's narrowing of the loss zone shows, + faint
+  dotted straddle-alone b/e. SPY: ±5.03%→±3.73% with scalp, S_T(+3.75%) lands just inside green. v96.
+- **D92:** ★ result point at (S_T, total P&L = core+scalp) + hollow marker on the straddle curve (gamma-core). v97.
+- **D93 (ask):** a table where each row = one DTE window over the whole history (SPY from 2010, 90-DTE → ~66
+  rows) with straddle/scalp/total; payoff graph reflects the AVERAGE period. Built `pi_sim.rolling_periods` +
+  `/api/pi-sim/periods` + «📋 Таблица по периодам» button. Per row: straddle (real), scalp_osc (chop), stuck
+  (fixed-grid no-gate conservative bound), scalp net, total. Average-period payoff drawn in MOVE-% space
+  (price-independent: straddle_$(m)=premium·(|m|/be−1)) with zones + ★ average-ИТОГО + per-period histogram.
+  Chop harvest CAPPED at the уверенный-флэт ceiling cap_per_month×(n_days/21)×theta (default 100%/mo) — 2010's
+  5.9%-of-price ATR gave a 451% outlier, capped. **Finding:** SPY 90-DTE = +8.9%/yr (64% win) vs 30-DTE =
+  −7.4%/yr (37%) — quarterly's slow theta lets the scalp cover; the table uses the no-gate stuck bound
+  (conservative; single-run 1m/60m with gate+response-orders is better). 148 tests (+2). assets v98.

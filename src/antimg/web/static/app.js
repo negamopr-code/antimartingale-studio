@@ -1766,11 +1766,77 @@ $("#picoin-rate-all").onclick = (e) => withBusy(e.target, async () => {
   renderPiCoin(await post("/api/pi-coin", o));
 });
 
+// ---- Tab 14 periods: one instrument's WHOLE history as a table + the AVERAGE-period payoff
+async function renderPiSimPeriods(d) {
+  const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
+  const a = d.aggregate, rows = d.rows;
+  $("#sim-periods").hidden = false; $("#sim-scan").hidden = true;
+  $("#sim-verdict").textContent = ""; $("#sim-steps").innerHTML = "";
+  $("#sim-stats").textContent = ""; $("#sim-grid").innerHTML = "";
+  Plotly.purge("sim-chart"); Plotly.purge("sim-payoff");
+  const asset = (a.ticker || "").split("-")[0] || a.ticker;
+
+  $("#sim-periods-stats").textContent =
+    `📋 ${a.ticker} — ${a.n} периодов по ${a.dte_days} дн (${a.start} → ${a.end}), депозит $${a.deposit.toLocaleString()}, премия $${Math.round(a.premium).toLocaleString()}/период\n`
+    + `\n── СРЕДНЕЕ ЗА ПЕРИОД ──\n`
+    + `стреддл-ядро : ${money(a.straddle_mean)}/период  (выигрышных ${a.straddle_win_pct}% — длинный стреддл сам по себе ${a.straddle_mean < 0 ? "кровоточит" : "в плюсе"})\n`
+    + `скальп       : ${money(a.scalp_mean)}/период  (чоп-модель − залипшие части)\n`
+    + `ИТОГО        : ${money(a.total_mean)}/период  (выигрышных ${a.total_win_pct}%)\n`
+    + `\n── ЗА ВСЮ ИСТОРИЮ ──\n`
+    + `сумма ИТОГО  : ${money(a.total_sum)}  (стреддл ${money(a.straddle_sum)} + скальп ${money(a.scalp_sum)})\n`
+    + `доходность   : ${a.ann_return_pct >= 0 ? "+" : ""}${a.ann_return_pct}%/год  ·  лучший ${money(a.best)}  ·  худший ${money(a.worst)}\n`
+    + `средний ход  : ${a.avg_move_pct >= 0 ? "+" : ""}${a.avg_move_pct}% (|${a.avg_abs_move_pct}%|)  ·  средний безубыток ±${a.avg_breakeven_pct}%  ·  средняя IV ${(a.avg_iv * 100).toFixed(0)}%`;
+
+  // ── AVERAGE-period payoff (in move-% space, price-independent) ──
+  const prem = a.premium, beFrac = a.avg_breakeven_pct / 100;
+  const beNetFrac = Math.max(0, beFrac * (1 - a.scalp_mean / prem));      // scalp shifts the V up
+  const span = Math.max(0.15, 1.5 * beFrac + a.avg_abs_move_pct / 100);
+  const N = 81, xs = [], strad = [], withScalp = [];
+  for (let i = 0; i < N; i++) {
+    const m = -span + 2 * span * i / (N - 1); xs.push(+(m * 100).toFixed(2));
+    strad.push(+(prem * (Math.abs(m) / beFrac - 1)).toFixed(1));
+    withScalp.push(+(prem * (Math.abs(m) / beFrac - 1) + a.scalp_mean).toFixed(1));
+  }
+  const ymin = Math.min(...strad), ymax = Math.max(...withScalp);
+  const beNetPct = beNetFrac * 100;
+  const band = (x0, x1, color) => ({ type: "rect", xref: "x", yref: "paper", x0, x1, y0: 0, y1: 1, fillcolor: color, line: { width: 0 }, layer: "below" });
+  const shapes = [
+    band(-span * 100, -beNetPct, "rgba(63,185,80,0.10)"), band(beNetPct, span * 100, "rgba(63,185,80,0.10)"),
+    band(-beNetPct, beNetPct, "rgba(248,81,73,0.12)"),
+    { type: "line", x0: -beNetPct, x1: -beNetPct, y0: ymin, y1: ymax, line: { color: "#3fb950", width: 1, dash: "dash" } },
+    { type: "line", x0: beNetPct, x1: beNetPct, y0: ymin, y1: ymax, line: { color: "#3fb950", width: 1, dash: "dash" } },
+    { type: "line", x0: a.avg_move_pct, x1: a.avg_move_pct, y0: ymin, y1: ymax, line: { color: "#8b949e", width: 1, dash: "dot" } },
+  ];
+  const traces = [
+    { x: xs, y: xs.map(() => 0), mode: "lines", line: { color: "#3a4452", width: 1, dash: "dot" }, hoverinfo: "skip", showlegend: false },
+    { x: xs, y: strad, mode: "lines", name: "среднее ядро (стреддл)", line: { color: "#58a6ff", width: 2.4 } },
+    { x: xs, y: withScalp, mode: "lines", name: "+ средний скальп", line: { color: "#d29922", width: 2, dash: "dash" } },
+    { x: [a.avg_move_pct], y: [a.total_mean], mode: "markers+text", name: "★ среднее ИТОГО",
+      marker: { color: a.total_mean >= 0 ? "#3fb950" : "#f85149", size: 17, symbol: "star", line: { color: "#0f1419", width: 1 } },
+      text: [`  среднее ${money(a.total_mean)}/период`], textposition: "middle right", textfont: { size: 12, color: a.total_mean >= 0 ? "#3fb950" : "#f85149" } },
+  ];
+  await plot("sim-periods-payoff", traces, layout(
+    `Средний период (${a.n}×${a.dte_days}дн): 🟢 прибыль / 🔴 убыток · ★ = среднее ИТОГО`,
+    { shapes, height: 360, xaxis: { gridcolor: "#2a3340", title: "ход за период, %", zeroline: true }, yaxis: { gridcolor: "#2a3340", title: "P&L, $" } }));
+
+  // distribution of per-period TOTAL
+  await plot("sim-periods-hist", [{ x: rows.map((r) => r.total), type: "histogram", nbinsx: 40, marker: { color: "#58a6ff" } }],
+    layout("Распределение ИТОГО по периодам, $", { height: 360, shapes: [{ type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#8b949e", width: 1, dash: "dot" } }],
+      xaxis: { gridcolor: "#2a3340", title: "ИТОГО за период, $" }, yaxis: { gridcolor: "#2a3340", title: "периодов" } }));
+
+  renderTable("sim-periods-table", rows.map((r) => ({
+    "#": r.i, "вход": r.open, "экспир": r.close, "S0": r.S0, "S_T": r.S_T, "ход %": r.move_pct,
+    "б/у %": r.breakeven_pct, "стреддл $": Math.round(r.straddle), "скальп-осц $": Math.round(r.scalp_osc),
+    "залип $": Math.round(r.stuck), "скальп $": Math.round(r.scalp), "ИТОГО $": Math.round(r.total),
+    outcome: r.outcome,
+  })));
+}
+
 // ---- Tab 14 scan: edge across ALL instruments + the pooled straddle-core distribution
 async function renderPiSimScan(d) {
   const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
   const a = d.aggregate;
-  $("#sim-scan").hidden = false;
+  $("#sim-scan").hidden = false; $("#sim-periods").hidden = true;
   $("#sim-verdict").textContent = ""; $("#sim-steps").innerHTML = "";
   $("#sim-stats").textContent = ""; $("#sim-grid").innerHTML = "";
   Plotly.purge("sim-chart"); Plotly.purge("sim-payoff");
@@ -1992,12 +2058,18 @@ $("#form-pisim").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () => {
     const o = formData(e.target);
-    $("#sim-scan").hidden = true;                            // single run → hide the scan block
+    $("#sim-scan").hidden = true; $("#sim-periods").hidden = true;   // single run → hide scan/periods
     if (o.use_1m === "true" && isCryptoTicker(o.ticker))
       toast("Меряю скальп по реальному 1-мин пути Binance (первый прогон тянет историю)…", true);
     renderPiSim(await post("/api/pi-sim", o));
   });
 };
+// one instrument's whole history as a table of DTE periods + the average-period payoff
+$("#pisim-periods").onclick = (e) => withBusy(e.target, async () => {
+  const o = formData($("#form-pisim"));
+  toast(`Катаю всю историю ${o.ticker} по периодам ${o.dte_days}дн…`, true);
+  renderPiSimPeriods(await post("/api/pi-sim/periods", o));
+});
 // one-click: edge across the WHOLE catalog (rolling months, real core + anchor scalp)
 $("#pisim-scan-all").onclick = (e) => withBusy(e.target, async () => {
   toast("Скан каталога: катаю месяцы по всем инструментам (первый прогон ~1–2 мин)…", true);

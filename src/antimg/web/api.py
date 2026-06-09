@@ -1407,6 +1407,37 @@ def pi_sim(req: PiSimReq):
     return {"params": req.model_dump(), **payload}
 
 
+@app.post("/api/pi-sim/periods")
+def pi_sim_periods(req: PiSimReq):
+    """Tab 14 — the WHOLE history of one instrument as a table: each row is one NON-overlapping `dte_days`
+    window with its straddle-core result (real), scalp result (adaptive chop model net of stuck parts),
+    and total. The aggregate carries the AVERAGE-period parameters the payoff graph draws."""
+    warmup = (pd.Timestamp(req.start) - pd.Timedelta(days=max(req.atr_period, req.iv_window) * 2 + 90)).date().isoformat()
+    try:
+        daily = datamod.fetch(req.ticker, start=warmup, end=None)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    if daily.empty or (daily.index >= pd.Timestamp(req.start)).sum() < 2:
+        raise HTTPException(status_code=422, detail="not enough data at/after this start date")
+    realized = datamod.realized_vol(daily["Close"], req.iv_window)
+    vm = volmod.build(req.ticker, req.start, iv_source=req.iv_source, skew_beta=req.skew_beta,
+                      realized=realized, iv_const=req.iv_const)
+    if not req.use_term_structure and len(vm._T) > 1:
+        target = req.dte_days / 365.0
+        keep = min(vm._T, key=lambda t: abs(t - target))
+        vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
+    out = pisim.rolling_periods(
+        daily, vm, ticker=req.ticker, deposit=req.deposit, dte_days=req.dte_days, risk_pct=req.risk_pct,
+        r=req.r, atr_period=req.atr_period, n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac,
+        grid_mult=req.grid_mult, intraday_frac=req.intraday_frac, f_chop=req.f_chop,
+        trades_per_day=req.trades_per_day, scalp_eff=req.scalp_eff, flat_frac=req.flat_frac,
+        start=req.start, end=req.scan_end)
+    if not out["rows"]:
+        raise HTTPException(status_code=422, detail="no DTE window resolved (longer history or shorter DTE)")
+    out["params"] = req.model_dump(); out["vol_model"] = vm.label
+    return out
+
+
 @app.post("/api/pi-sim/scan")
 def pi_sim_scan(req: PiSimReq):
     """Tab 14 scan: roll NON-overlapping monthly windows for EVERY catalog instrument over

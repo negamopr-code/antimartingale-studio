@@ -413,6 +413,76 @@ def rolling_edge(daily: pd.DataFrame, vol_model, *, ticker: str, label: str = ""
     return e
 
 
+def rolling_periods(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, dte_days: int,
+                    risk_pct: float, r: float, atr_period: int, n_parts: int, grid_atr_frac: float,
+                    grid_mult: float, intraday_frac: float, f_chop: float, trades_per_day: float,
+                    scalp_eff: float, flat_frac: float, start: str, end: str | None = None) -> dict:
+    """One instrument, the WHOLE history: every NON-overlapping `dte_days` window is one row with the
+    straddle-core result (REAL: prices+IV), the scalp result (adaptive chop model net of fixed-grid stuck
+    parts — closed-form, no intraday over 15y), and the total. Returns rows + an aggregate (means/sums/win
+    rates + the AVERAGE-period parameters the payoff graph draws). Scalp uses the assumed f_chop here (no
+    per-window 1m feed); the single-run tab refines it with the measured chop fraction + gate-managed stuck."""
+    df = daily.loc[daily.index >= pd.Timestamp(start)]
+    if end:
+        df = df.loc[df.index <= pd.Timestamp(end)]
+    T = dte_days / 365.0
+    premium = risk_pct * deposit
+    rows = []
+    if df.empty or len(df) < 2:
+        return {"rows": rows, "aggregate": {}}
+    cur, last = df.index[0], df.index[-1]
+    i = 0
+    while cur + pd.Timedelta(days=dte_days) <= last:
+        win = df.loc[(df.index >= cur) & (df.index <= cur + pd.Timedelta(days=dte_days))]
+        if len(win) < 2:
+            break
+        S0 = float(win["Close"].iloc[0]); S_T = float(win["Close"].iloc[-1])
+        iv = float(vol_model.sigma(cur, T, S0, S0)) if vol_model is not None else 0.20
+        c0 = float(opt.call_price(S0, S0, T, r, iv)); unit = 2.0 * c0
+        if unit <= 0:
+            cur = cur + pd.Timedelta(days=dte_days); continue
+        M = premium / unit
+        straddle_net = M * abs(S_T - S0) - premium
+        atr = _atr(daily, atr_period, cur)
+        limit = max(2.0 * M * intraday_frac, 0.0); part_lots = limit / max(1, n_parts)
+        first_step = grid_atr_frac * atr if atr > 0 else S0 * 0.01
+        grid = _build_grid(S0, first_step, grid_mult, n_parts, part_lots)
+        chop = chop_coverage_model(daily_range=atr, part_lots=part_lots, theta=premium, n_days=len(win),
+                                   f_chop=f_chop, trades_per_day=trades_per_day, eff=scalp_eff,
+                                   flat_frac=flat_frac)
+        scalp_osc = chop["income"]
+        stuck = min(0.0, _stuck_drag_fixed(grid, S0, S_T))     # no-gate conservative bound (see header)
+        scalp_net = scalp_osc + stuck
+        total = straddle_net + scalp_net
+        i += 1
+        rows.append({"i": i, "open": cur.date().isoformat(), "close": win.index[-1].date().isoformat(),
+                     "S0": round(S0, 2), "S_T": round(S_T, 2), "move_pct": round(100.0 * (S_T - S0) / S0, 2),
+                     "breakeven_pct": round(100.0 * unit / S0, 2), "iv": round(iv, 4),
+                     "straddle": round(straddle_net, 1), "scalp_osc": round(scalp_osc, 1),
+                     "stuck": round(stuck, 1), "scalp": round(scalp_net, 1),
+                     "total": round(total, 1), "outcome": "win" if total > 0 else "loss"})
+        cur = cur + pd.Timedelta(days=dte_days)
+    if not rows:
+        return {"rows": rows, "aggregate": {}}
+    n = len(rows)
+    mean = lambda k: sum(x[k] for x in rows) / n
+    span_years = max((pd.Timestamp(rows[-1]["close"]) - pd.Timestamp(rows[0]["open"])).days / 365.0, 1e-6)
+    agg = {
+        "ticker": ticker, "n": n, "dte_days": dte_days, "deposit": deposit, "premium": premium,
+        "start": rows[0]["open"], "end": rows[-1]["close"],
+        "straddle_mean": round(mean("straddle"), 1), "straddle_sum": round(sum(x["straddle"] for x in rows), 1),
+        "straddle_win_pct": round(100.0 * sum(1 for x in rows if x["straddle"] > 0) / n, 1),
+        "scalp_mean": round(mean("scalp"), 1), "scalp_sum": round(sum(x["scalp"] for x in rows), 1),
+        "total_mean": round(mean("total"), 1), "total_sum": round(sum(x["total"] for x in rows), 1),
+        "total_win_pct": round(100.0 * sum(1 for x in rows if x["total"] > 0) / n, 1),
+        "best": round(max(x["total"] for x in rows), 1), "worst": round(min(x["total"] for x in rows), 1),
+        "avg_move_pct": round(mean("move_pct"), 2), "avg_abs_move_pct": round(sum(abs(x["move_pct"]) for x in rows) / n, 2),
+        "avg_breakeven_pct": round(mean("breakeven_pct"), 2), "avg_iv": round(mean("iv"), 4),
+        "ann_return_pct": round(100.0 * sum(x["total"] for x in rows) / deposit / span_years, 2),
+    }
+    return {"rows": rows, "aggregate": agg}
+
+
 def _stuck_drag_fixed(grid: list[dict], S0: float, S_T: float) -> float:
     """«Net of working parts» for a FIXED (un-adjusted) grid: every working part the net move passed got
     filled counter-trend and is stranded at expiry. Up-move → sell-levels below S_T are stuck short
@@ -431,7 +501,7 @@ def _stuck_drag_fixed(grid: list[dict], S0: float, S_T: float) -> float:
 
 def chop_coverage_model(*, daily_range: float, part_lots: float, theta: float, n_days: int,
                         f_chop: float = 2.0 / 3.0, trades_per_day: float = 10.0, eff: float = 0.5,
-                        flat_frac: float = 0.25) -> dict:
+                        flat_frac: float = 0.25, cap_per_month: float = 1.0) -> dict:
     """ADAPTIVE CHOP-SCALP model (the trader's know-how, made conservative & vol-invariant).
 
     Premise: in a chop phase the trader READS the current realized flat and re-sizes the grid to it —
@@ -454,11 +524,17 @@ def chop_coverage_model(*, daily_range: float, part_lots: float, theta: float, n
     flat_width = flat_frac * max(daily_range, 0.0)
     tp = eff * flat_width
     per_chop_day = trades_per_day * tp * max(part_lots, 0.0)
-    income = n_days * f_chop * per_chop_day
+    income_raw = n_days * f_chop * per_chop_day
+    # CEILING (doctrine): even in a sustained уверенный флэт the scalp ≈ 100%/mo of theta, not more — so
+    # cap at cap_per_month × (n_days/21) × theta. This bounds high-realized-vol / long-DTE outliers (where
+    # RV≫IV inflates the raw harvest) at a defensible level. cap_per_month=0 disables the cap.
+    cap = cap_per_month * (n_days / 21.0) * theta if cap_per_month > 0 else float("inf")
+    income = min(income_raw, cap)
     return {
         "flat_frac": flat_frac, "f_chop": f_chop, "trades_per_day": trades_per_day, "eff": eff,
         "flat_width": round(flat_width, 4), "tp": round(tp, 4),
         "per_chop_day": round(per_chop_day, 2), "income": round(income, 2),
+        "income_raw": round(income_raw, 2), "capped": bool(income_raw > cap),
         "coverage": round(income / theta, 4) if theta > 0 else 0.0,
         "path_needed_per_day": round(trades_per_day * tp * 2.0, 4),
     }
