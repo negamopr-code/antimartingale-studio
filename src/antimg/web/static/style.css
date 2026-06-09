@@ -47,3 +47,13 @@ th { color:var(--muted); }
 .tradetable tr[data-camp]:hover td { background:#1c2530; }
 .tradetable tr.sel td { background:#243042; box-shadow:inset 2px 0 0 #5b9dff; }
 .tt-note { color:var(--muted); font-size:11px; margin-top:6px; }
+
+/* Tab 14 — «Симуляция в деньгах» step cards */
+.sim-steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:10px; margin:14px 0; }
+.sim-step { background:#10151c; border:1px solid #2a3340; border-radius:10px; padding:12px 14px; }
+.sim-step-h { font-size:13px; font-weight:600; color:#e6edf3; display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.sim-step-n { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
+              border-radius:50%; background:#1f6feb; color:#fff; font-size:12px; flex:0 0 auto; }
+.sim-step-b { font-size:12.5px; color:#b8c2cc; line-height:1.5; }
+#sim-verdict { font-size:13px; font-weight:600; white-space:pre-wrap; padding:12px 14px;
+               border:1px solid #2a3340; border-radius:10px; background:#10151c; margin-top:10px; }

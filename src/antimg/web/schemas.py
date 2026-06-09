@@ -315,6 +315,33 @@ class PureStraddleReq(BaseModel):
     slippage_pct: float = Field(0.0, ge=0, le=50)
 
 
+class PiSimReq(BaseModel):
+    """Tab 14 — «Симуляция в деньгах»: ONE ПИ construction held for ONE period on a real instrument
+    over a real past window, every number exposed (what to buy, straddle cost, grid prices, scalp $).
+    Works for ANY catalog instrument; for crypto the scalp is MEASURED on the free 1m feed, otherwise
+    it's the labelled daily-range capture SCENARIO. Premium = BS price off the vol surface."""
+    ticker: str = Field("ETH-USD", min_length=1, max_length=20)
+    start: str = "2025-08-01"                                # any past date with data
+    deposit: float = Field(10_000.0, gt=0)
+    dte_days: int = Field(30, ge=7, le=365)                  # period = straddle tenor (held to expiry)
+    risk_pct: float = Field(0.10, gt=0, le=1.0)              # % of deposit spent on premium (= max loss)
+    n_parts: int = Field(5, ge=1, le=20)                     # working scalp parts (modern universal = 5)
+    # first grid step = this × daily ATR. INTRADAY-scaled (≈0.03–0.08) so the 1m measurement gets the
+    # doctrine's ~200–250 round-trips/mo (INVARIANT #7); a wide ×0.5 daily-ATR grid barely trades on 1m.
+    grid_atr_frac: float = Field(0.05, gt=0, le=10)
+    grid_mult: float = Field(1.8, ge=1.0, le=5)              # exponential spacing between parts
+    intraday_frac: float = Field(0.333, gt=0, le=1.0)        # ⅓ rule: scalp limit as a frac of calls
+    capture: float = Field(0.20, ge=0, le=2.0)               # SCENARIO: frac of daily range booked (daily fallback)
+    use_1m: bool = True                                      # crypto: measure scalp on the real 1m feed
+    atr_period: int = Field(14, ge=2, le=200)
+    r: float = Field(0.045, ge=-0.05, le=0.5)
+    iv_window: int = Field(20, ge=2, le=500)
+    iv_source: str = Field("auto", pattern="^(auto|vix|index|realized|constant)$")
+    iv_const: float = Field(0.20, gt=0, le=3)
+    skew_beta: float | None = Field(None, ge=-2, le=2)
+    use_term_structure: bool = True
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

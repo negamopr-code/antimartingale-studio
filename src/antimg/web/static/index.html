@@ -26,6 +26,7 @@
       <button class="tab" data-tab="legs">11 · Call vs Put</button>
       <button class="tab" data-tab="amov">12 · ПИ × Antimartingale</button>
       <button class="tab" data-tab="picoin">13 · ПИ Coin estimator</button>
+      <button class="tab" data-tab="pisim">14 · 💵 Симуляция в деньгах</button>
     </nav>
   </header>
 
@@ -470,6 +471,44 @@
     <div class="tradetable" id="pc-table"></div>
   </section>
 
-  <script src="/app.js?v=90"></script>
+  <!-- TAB 14 -->
+  <section id="pisim" class="panel">
+    <p class="hint"><b>Симуляция в деньгах — ОДНА конструкция ПИ за ОДИН период, всё в долларах.</b>
+      Берём депозит, ЛЮБОЙ инструмент каталога и ЛЮБУЮ дату в прошлом и показываем по шагам:
+      <b>что конкретно купить</b> (синтетический стреддл 2 Колла − 1 Фьюч), <b>сколько стоит стреддл</b>
+      (премия = модель Блэка-Шоулза по реальной IV-поверхности), <b>экспоненциальную сетку в реальных
+      ценах</b>, и <b>сколько принёс скальпинг</b>.
+      <br>⚠ <b>Скальп честно:</b> для крипты (BTC/ETH/SOL) скальп <b>ИЗМЕРЯЕТСЯ</b> прогоном по
+      бесплатному <b>1-минутному</b> пути Binance (доктринальный идеал — крипта). Для остального дневные
+      бары НЕ содержат интрадей-кругов → скальп показан как <b>СЦЕНАРИЙ захвата</b>, не как факт
+      (INVARIANT #5). На сильном тренде контр-трендовый скальп <b>истекает</b> (залипшие части), а
+      зарабатывает гамма стреддла — это по доктрине, не баг. Убыток всегда ограничен премией.</p>
+    <form class="controls" id="form-pisim">
+      <label>Instrument <select name="ticker" class="instr"></select></label>
+      <label title="любая дата в прошлом с данными">Start (дата входа) <input name="start" value="2025-08-01"></label>
+      <label>Депозит $ <input name="deposit" type="number" step="any" value="10000"></label>
+      <label title="срок стреддла = период удержания до экспирации">Период DTE (дней) <input name="dte_days" type="number" value="30"></label>
+      <label title="% депозита на премию = МАКСИМАЛЬНЫЙ убыток за период. Доктрина: 10% обучение / 20% / до 50% агрессивно. Введи 0.10 = 10%.">Risk на премию (0.10=10%) <input name="risk_pct" type="number" step="any" value="0.10"></label>
+      <label title="рабочих частей сетки (современный универсал = 5)">Частей сетки <input name="n_parts" type="number" value="5" min="1" max="20"></label>
+      <label title="первый шаг сетки = это × дневной ATR. ИНТРАДЕЙ-масштаб (≈0.03–0.08) → доктринальные ~200–250 кругов/мес на 1-мин (INVARIANT #7); широкая ×0.5 почти не торгует на 1-мин.">Шаг сетки (×ATR) <input name="grid_atr_frac" type="number" step="any" value="0.05"></label>
+      <label title="экспоненциальное расширение между частями">Множитель сетки <input name="grid_mult" type="number" step="any" value="1.8"></label>
+      <label title="правило трёх третей: лимит на скальп как доля от коллов">Доля на интрадей (⅓) <input name="intraday_frac" type="number" step="any" value="0.333"></label>
+      <label title="ТОЛЬКО сценарий (не-крипта): доля дневного хода, которую ловит скальп. Доктрина-идеал >0.5. Результат линеен по этому.">Захват (сценарий) <input name="capture" type="number" step="any" value="0.20"></label>
+      <label title="крипта: мерить скальп по реальному 1-мин фиду Binance (медленнее — тянет 1-мин историю). off = сценарий захвата.">1-мин измерение <select name="use_1m"><option value="true">on (крипта: измерять по 1-мин)</option><option value="false">off (сценарий)</option></select></label>
+      <label title="источник IV для цены стреддла. auto = реальный вол-индекс по классу (для BTC/ETH — Deribit DVOL)">IV source <select name="iv_source"><option value="auto">auto (real vol-index)</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
+      <label>IV window <input name="iv_window" type="number" value="20"></label>
+      <label title="константа IV при iv_source=constant">IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
+      <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
+      <button type="submit">💵 Прогнать в деньгах</button>
+    </form>
+    <pre class="stats" id="sim-verdict"></pre>
+    <div id="sim-steps" class="sim-steps"></div>
+    <div class="results"><div class="plots"><div id="sim-chart"></div></div>
+      <pre class="stats" id="sim-stats"></pre></div>
+    <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🧮 Экспоненциальная сетка — рабочие части (реальные цены) ↓</h3>
+    <div class="tradetable" id="sim-grid"></div>
+  </section>
+
+  <script src="/app.js?v=91"></script>
 </body>
 </html>

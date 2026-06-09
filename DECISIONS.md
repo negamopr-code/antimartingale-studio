@@ -1011,3 +1011,26 @@ Not implemented; documented as a rejected tactic.
   cache). Hardened `fetch()` to ALWAYS download deep history (dl_start=1990) regardless of requested
   `start`; `_slice` serves the window. Cleared the container cache volume on deploy so poisoned entries
   rebuild deep. 134 tests (+1 dvol mapping). assets v90.
+
+## D86 — Tab 14 «Симуляция в деньгах»: one ПИ construction, one period, every figure in dollars (2026-06-09)
+- **Ask (user):** an interactive, real-life simulation of the ПИ strategy in CONCRETE money — take $10k,
+  show what to buy, what the straddle costs, what the scalp brings, run it over a real past window; not
+  just for ETH but for ANY instrument, going forward.
+- **Built:** `pi_sim.py` (`simulate`) + `/api/pi-sim` + Tab 14 frontend. ONE synthetic straddle (2C−1F)
+  held ONE period, every number exposed: entry snapshot (spot, ATM K, BS call/put off the REAL vol
+  surface — DVOL for BTC/ETH), sizing (premium budget = risk%·deposit = max loss; M units → 2M calls /
+  M short futures), three-thirds scalp limit, the EXPONENTIAL grid in real prices, straddle-core P&L
+  (M·|S_T−S0| − premium), and the scalp.
+- **Scalp honesty (the crux):** crypto (BTC/ETH/SOL) → scalp is MEASURED by walking the FREE Binance 1m
+  path (`measure_scalp_1m`, mirrors the Tab-8 grid: response orders, carry stuck parts, Bollinger
+  flat-gate «don't fade a galloping market»). Non-crypto → labelled capture SCENARIO (daily bars can't
+  see intraday round-trips, INVARIANT #5). Grid sized INTRADAY (`grid_atr_frac≈0.05`) so 1m hits doctrine
+  cadence (INVARIANT #7) — a wide ×0.5 daily-ATR grid barely trades on 1m (2 RTs vs ~100).
+- **Accounting fix (caught mid-build):** total_net = straddle_net + scalp_realized + scalp_open_mtm. In a
+  TREND the counter-trend scalp's stuck legs mark NEGATIVE (INVARIANT #3 — scalp bleeds, gamma wins);
+  excluding that overstated the result. The flat-gate cut ETH-Aug-2025 stuck bleed −$1011→−$792.
+- **The reveal (ETH Aug 2025, $10k, 10% risk):** spot $3.5k→$4.4k (+26%) BUT IV was 70% → breakeven ±16%,
+  so the costly straddle netted only +$588; counter-trend scalp booked +$163 (16% of theta) yet stuck
+  shorts gave back −$792 → total ≈ −$41 (≈flat). Honest lesson: a strong one-way TREND is NOT the scalp's
+  friend; ПИ pays in a FLAT (scalp covers theta) or on a move bigger than the (expensive) breakeven.
+- 140 tests (+6: OU-reversion scalp>0, loss-cap, sizing identities, exponential grid, trend bleed). v91.

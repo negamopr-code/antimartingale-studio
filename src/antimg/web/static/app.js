@@ -1766,6 +1766,86 @@ $("#picoin-rate-all").onclick = (e) => withBusy(e.target, async () => {
   renderPiCoin(await post("/api/pi-coin", o));
 });
 
+// ---- Tab 14: «Симуляция в деньгах» — one ПИ construction, one period, every figure in dollars
+async function renderPiSim(d) {
+  const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
+  const asset = (d.ticker || "").split("-")[0] || d.ticker;
+  // verdict banner
+  $("#sim-verdict").textContent = d.verdict;
+  $("#sim-verdict").style.color = d.total_net >= 0 ? "#3fb950" : "#f85149";
+
+  // step cards
+  $("#sim-steps").innerHTML = (d.steps || []).map((s) =>
+    `<div class="sim-step"><div class="sim-step-h"><span class="sim-step-n">${s.n}</span>${s.title}</div>`
+    + `<div class="sim-step-b">${s.body}</div></div>`).join("");
+
+  // price chart with entry/expiry markers + the 5 working-part grid levels
+  const tl = d.timeline || { dates: [], close: [] };
+  const traces = [{
+    x: tl.dates, y: tl.close, type: "scatter", mode: "lines", name: `${asset} цена`,
+    line: { color: "#58a6ff", width: 2 },
+  }];
+  const shapes = [], anns = [];
+  const x0 = tl.dates[0], x1 = tl.dates[tl.dates.length - 1];
+  shapes.push({ type: "line", x0, x1, y0: d.S0, y1: d.S0, line: { color: "#8b949e", width: 1, dash: "dot" } });
+  (d.grid || []).forEach((g) => {
+    shapes.push({ type: "line", x0, x1, y0: g.sell, y1: g.sell, line: { color: "#f85149", width: 0.7, dash: "dot" } });
+    shapes.push({ type: "line", x0, x1, y0: g.buy, y1: g.buy, line: { color: "#3fb950", width: 0.7, dash: "dot" } });
+  });
+  traces.push({ x: [x0], y: [d.S0], type: "scatter", mode: "markers", name: "вход", marker: { color: "#e6edf3", size: 9, symbol: "circle" } });
+  traces.push({ x: [x1], y: [d.S_T], type: "scatter", mode: "markers", name: "экспирация", marker: { color: d.S_T >= d.S0 ? "#3fb950" : "#f85149", size: 11, symbol: "diamond" } });
+  await plot("sim-chart", traces, layout(
+    `${d.ticker}: ${d.entry_date} ($${Math.round(d.S0).toLocaleString()}) → ${d.expiry_date} ($${Math.round(d.S_T).toLocaleString()}, ${d.move_pct >= 0 ? "+" : ""}${d.move_pct.toFixed(1)}%) · красным=продажи, зелёным=покупки сетки`,
+    { shapes, annotations: anns, height: 380 }));
+
+  // money breakdown
+  const cov = (d.coverage * 100).toFixed(0);
+  const src = d.scalp_source === "1m-measured"
+    ? `измерено по 1-мин пути (${d.scalp_round_trips} кругов)`
+    : `СЦЕНАРИЙ захвата ${(d.scalp_capture * 100).toFixed(0)}% (не измерение)`;
+  let scalpLine = `скальп (вклад)     : ${money(d.scalp_income)}   [${src}]`;
+  if (d.scalp_source === "1m-measured") {
+    scalpLine = `скальп booked      : ${money(d.scalp_realized)}  (= ${cov}% теты, закрытые круги)\n`
+      + `скальп залипшие    : ${money(d.scalp_open_mtm)}  (контр-тренд части по рынку; на тренде в минус)\n`
+      + `скальп ИТОГО       : ${money(d.scalp_income)}`;
+  }
+  $("#sim-stats").textContent =
+    `═══ ВХОД (${d.entry_date}) ═══\n`
+    + `${asset} спот        : $${d.S0.toLocaleString(undefined, { maximumFractionDigits: 2 })}   ATM-страйк K = $${d.K.toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`
+    + `IV (реальная)      : ${(d.iv * 100).toFixed(1)}%   ·   Колл = $${d.call_price.toFixed(2)}   Пут = $${d.put_price.toFixed(2)}\n`
+    + `1 ед. стреддла 2C−1F = $${d.straddle_unit_cost.toFixed(2)}   ·   безубыток движения = ±${d.breakeven_pct.toFixed(1)}%\n`
+    + `\n═══ ЧТО КУПИТЬ (бюджет = ${(d.risk_pct * 100).toFixed(0)}% от $${d.deposit.toLocaleString()} = $${d.premium_budget.toLocaleString()}) ═══\n`
+    + `КУПИТЬ Коллов      : ${d.n_calls.toFixed(3)} ${asset}\n`
+    + `ПРОДАТЬ Фьючерсов  : ${d.n_futures.toFixed(3)} ${asset}  (дельта-нейтральная база)\n`
+    + `Премия (= МАКС риск): $${d.premium_budget.toLocaleString()}\n`
+    + `\n═══ ТРИ ТРЕТИ → СКАЛЬП ═══\n`
+    + `лимит на интрадей  : ${d.intraday_limit_lots.toFixed(3)} ${asset}  (⅓ коллов), ${d.n_parts} частей × ${d.part_lots.toFixed(3)}\n`
+    + `первый шаг сетки   : $${d.first_step.toFixed(2)}  (×${d.grid_mult} экспон.)   ·   дневной ATR = $${d.daily_atr.toFixed(2)}\n`
+    + `\n═══ ИТОГ ЗА ${d.n_days} ДН ═══\n`
+    + `стреддл-ядро       : ${money(d.straddle_net)}  (${d.straddle_units.toFixed(2)} ед × $${Math.round(d.move_abs).toLocaleString()} интринсик − $${d.premium_budget.toLocaleString()} премии)\n`
+    + scalpLine + `\n`
+    + `───────────────────────────────\n`
+    + `ИТОГО              : ${money(d.total_net)}   (${d.total_pct >= 0 ? "+" : ""}${d.total_pct.toFixed(1)}% депозита)\n`
+    + (d.scalp_source === "scenario"
+      ? `\n⚠ скальп — СЦЕНАРИЙ (дневные бары). Для измерения возьми крипту (BTC/ETH/SOL) с «1-мин измерение = on».`
+      : `\n✓ скальп ИЗМЕРЕН по реальному 1-мин пути Binance. Залипшие части на тренде — по доктрине (гамма их кроет).`);
+
+  // grid table (real prices)
+  renderTable("sim-grid", (d.grid || []).map((g) => ({
+    "часть": g.part, "оффсет $": g.offset,
+    "ПРОДАТЬ на $": g.sell, "КУПИТЬ на $": g.buy, "лотов": g.lots,
+  })));
+}
+$("#form-pisim").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () => {
+    const o = formData(e.target);
+    if (o.use_1m === "true" && isCryptoTicker(o.ticker))
+      toast("Меряю скальп по реальному 1-мин пути Binance (первый прогон тянет историю)…", true);
+    renderPiSim(await post("/api/pi-sim", o));
+  });
+};
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")

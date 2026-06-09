@@ -23,6 +23,7 @@ from .. import pi_coin as picoin
 from .. import data as datamod
 from .. import hedged_intraday as hi
 from .. import pi_model as pim
+from .. import pi_sim as pisim
 from .. import pure_straddle as ps
 from .. import vol as volmod
 from .. import instruments, scenarios, signals, tradingview
@@ -31,7 +32,7 @@ from . import serialization as ser
 from .config import settings
 from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
-                      PiCoinReq, PureStraddleReq, ScanReq)
+                      PiCoinReq, PiSimReq, PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1345,6 +1346,49 @@ def leg_analysis(req: PureStraddleReq):
             out[leg] = _ps_payload(res, ticker=req.ticker, vol_model=vm.label, leg=leg)
     return {"params": req.model_dump(), "mode": req.resolution, "ticker": req.ticker,
             "vol_model": vm.label, **out}
+
+
+@app.post("/api/pi-sim")
+def pi_sim(req: PiSimReq):
+    """Tab 14 — «Симуляция в деньгах»: ONE ПИ construction on a real instrument over a real past
+    window, every figure exposed in dollars (what to buy, straddle cost, exponential grid prices,
+    scalp income, theta, net). Works for ANY catalog instrument. For crypto (BTC/ETH/SOL) the scalp
+    is MEASURED by walking the FREE 1-minute Binance path; otherwise it's the labelled daily-range
+    capture SCENARIO (daily bars cannot see intraday round-trips — skill INVARIANT #5)."""
+    try:
+        daily = datamod.fetch(req.ticker, start=req.start, end=None)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
+    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
+    if daily.empty or len(daily) < req.atr_period + 2:
+        raise HTTPException(status_code=422, detail="not enough data at/after this start date")
+    realized = datamod.realized_vol(daily["Close"], req.iv_window)
+    vm = volmod.build(req.ticker, req.start, iv_source=req.iv_source, skew_beta=req.skew_beta,
+                      realized=realized, iv_const=req.iv_const)
+    if not req.use_term_structure and len(vm._T) > 1:
+        target = req.dte_days / 365.0
+        keep = min(vm._T, key=lambda t: abs(t - target))
+        vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
+    # crypto: pull the free 1m feed so the scalp is MEASURED, not assumed (the doctrine's ideal asset)
+    intraday = None
+    if req.use_1m:
+        try:
+            end1m = (pd.Timestamp(req.start) + pd.Timedelta(days=req.dte_days + 3)).date().isoformat()
+            intraday = datamod.fetch_intraday_crypto(req.ticker, interval="1m", start=req.start, end=end1m)
+        except Exception:
+            intraday = None                                 # non-crypto / network → daily scenario
+    try:
+        res = pisim.simulate(daily, vm, ticker=req.ticker, deposit=req.deposit, start=req.start,
+                             dte_days=req.dte_days, risk_pct=req.risk_pct, n_parts=req.n_parts,
+                             grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
+                             intraday_frac=req.intraday_frac, capture=req.capture, r=req.r,
+                             atr_period=req.atr_period, intraday=intraday, vol_label=vm.label)
+    except ValueError as ex:
+        raise HTTPException(status_code=422, detail=str(ex))
+    payload = {k: v for k, v in vars(res).items()}
+    payload["vol_class"] = volmod.classify(req.ticker)
+    payload["scalp_measurable"] = intraday is not None and not intraday.empty
+    return {"params": req.model_dump(), **payload}
 
 
 # ----------------------------------------------------------------- TradingView ingest
