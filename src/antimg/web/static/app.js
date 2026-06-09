@@ -1766,6 +1766,67 @@ $("#picoin-rate-all").onclick = (e) => withBusy(e.target, async () => {
   renderPiCoin(await post("/api/pi-coin", o));
 });
 
+// ---- Tab 14 scan: edge across ALL instruments + the pooled straddle-core distribution
+async function renderPiSimScan(d) {
+  const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
+  const a = d.aggregate;
+  $("#sim-scan").hidden = false;
+  $("#sim-verdict").textContent = ""; $("#sim-steps").innerHTML = "";
+  $("#sim-stats").textContent = ""; $("#sim-grid").innerHTML = "";
+  Plotly.purge("sim-chart"); Plotly.purge("sim-payoff");
+
+  // verdict text — lead with the ROBUST median + the real-IV subset
+  $("#sim-scan-stats").textContent =
+    `🏆 EDGE по каталогу — НЕпересекающиеся месяцы с ${a.scan_start}, депозит $${a.deposit.toLocaleString()}, риск ${(a.risk_pct*100).toFixed(0)}% (тета≈$${(a.risk_pct*a.deposit).toLocaleString()}/мес)\n`
+    + `Инструментов надёжных: ${a.n}  (из них с РЕАЛЬНОЙ IV — SPY/QQQ/BTC/ETH: ${a.n_real_iv})  ·  IV-артефактов исключено: ${a.n_artifact}\n`
+    + `\n── СТРЕДДЛ-ЯДРО (реально, без допущений: цены + IV) ──\n`
+    + `Медиана ядра: ${money(a.median_core_mean)}/мес (по надёжным)  ·  только real-IV: ${money(a.median_core_real_iv)}/мес\n`
+    + `Месяцев с RV>IV (edge БЕЗ скальпа): ${a.n_core_edge}/${a.n}  ·  пул месяцев: медиана ${money(a.pooled_core_median)}, среднее ${money(a.pooled_core_mean)}, выигрышных ${a.pooled_core_win_pct}%\n`
+    + `  ⇒ ЧИСТО длинный стреддл в МЕДИАНЕ ${a.median_core_mean < 0 ? "КРОВОТОЧИТ (VRP: IV≥RV)" : "в плюсе"}; среднее тянет вверх редкий выпуклый хвост (см. гистограмму).\n`
+    + `\n── + СКАЛЬП-ЯКОРЬ ${(a.coverage_anchor*100).toFixed(0)}% теты ──\n`
+    + `Медиана total: ${money(a.median_total_mean)}/мес  ·  только real-IV: ${money(a.median_total_real_iv)}/мес\n`
+    + `Инструментов +EV при якоре ${(a.coverage_anchor*100).toFixed(0)}%: ${a.n_total_edge}/${a.n}  ·  с edge при РЕАЛИСТИЧНОМ скальпе (c*≤20%): ${a.n_realistic}/${a.n}\n`
+    + `\n💡 ВЫВОД: длинный стреддл сам по себе edge НЕ даёт (медиана кровоточит — премия за риск воли). Edge есть там, где (а) RV>IV `
+    + `(крипта ETH/BTC) ИЛИ (б) скальп реально кроет тету (c* мал). Скальп честно измерим только на крипте (1-мин) — на остальном это допущение.`;
+
+  // BAR: per-instrument core $/mo (real edge) — reliable only, diverging colours
+  const rel = d.rows.filter((r) => r.reliable).slice().sort((x, y) => x.core_mean - y.core_mean);
+  await plot("sim-scan-bar", [{
+    x: rel.map((r) => r.core_mean), y: rel.map((r) => r.ticker), type: "bar", orientation: "h",
+    marker: { color: rel.map((r) => r.core_mean >= 0 ? "#3fb950" : "#f85149") },
+    text: rel.map((r) => r.iv_is_real ? "●" : ""), textposition: "outside",
+    hovertext: rel.map((r) => `${r.ticker} ${r.label}: ядро ${money(r.core_mean)}/мес, total ${money(r.total_mean)}, c*=${r.c_star}, ${r.verdict}`),
+    hoverinfo: "text",
+  }], layout("Стреддл-ЯДРО по инструментам, $/мес (РЕАЛЬНЫЙ edge; ● = настоящая IV)", {
+    height: Math.max(380, rel.length * 16), margin: { l: 76, t: 36, r: 30, b: 36 },
+    yaxis: { gridcolor: "#2a3340", automargin: true, tickfont: { size: 9 } },
+    xaxis: { gridcolor: "#2a3340", title: "$/мес (>0 = ядро бьёт тету)", zeroline: true, zerolinecolor: "#8b949e" },
+  }));
+
+  // HIST: pooled monthly straddle-core P&L — the "average straddle" shape (asymmetric bleed + convex tail)
+  const pc = (d.pooled_core || []).filter((x) => x > -1e6 && x < 1e6);
+  await plot("sim-scan-hist", [{
+    x: pc, type: "histogram", nbinsx: 60, marker: { color: "#58a6ff" }, name: "месяцы",
+  }], layout("Распределение МЕСЯЧНОГО P&L стреддла-ядра (все надёжные месяцы)", {
+    height: 380, shapes: [
+      { type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#8b949e", width: 1, dash: "dot" } },
+      { type: "line", x0: a.pooled_core_median, x1: a.pooled_core_median, y0: 0, y1: 1, yref: "paper", line: { color: "#d29922", width: 1.5 } },
+    ],
+    annotations: [{ x: a.pooled_core_median, y: 1, yref: "paper", text: `медиана ${money(a.pooled_core_median)}`, showarrow: false, font: { size: 10, color: "#d29922" }, yanchor: "bottom" }],
+    xaxis: { gridcolor: "#2a3340", title: "P&L стреддла за месяц, $ (премия = −потолок убытка)" }, yaxis: { gridcolor: "#2a3340", title: "месяцев" },
+  }));
+
+  // TABLE: full ranking
+  renderTable("sim-scan-table", d.rows.map((r) => ({
+    "инстр": r.ticker, "группа": (r.group || "").slice(0, 16), "мес": r.n_months,
+    "ядро $/мес": Math.round(r.core_mean), "ядро win%": Math.round(r.core_win_pct),
+    "скальп $/мес": Math.round(r.scalp_mean), "total $/мес": Math.round(r.total_mean),
+    "total win%": Math.round(r.total_win_pct), "c*": r.c_star, "RV/IV": r.rv_over_iv,
+    "годовых%": Math.round(r.ann_return_pct), "real-IV": r.iv_is_real ? "✓" : "",
+    "вердикт": r.reliable ? r.verdict : "⚠ IV-артефакт (исключён)",
+  })));
+}
+
 // payoff-at-expiry: the clean straddle V vs the scalp-futures-TILTED («перекошенный») V
 async function renderSimPayoff(d, asset) {
   const p = d.payoff; if (!p || !p.S) return;
@@ -1885,11 +1946,18 @@ $("#form-pisim").onsubmit = (e) => {
   e.preventDefault();
   withBusy(e.submitter, async () => {
     const o = formData(e.target);
+    $("#sim-scan").hidden = true;                            // single run → hide the scan block
     if (o.use_1m === "true" && isCryptoTicker(o.ticker))
       toast("Меряю скальп по реальному 1-мин пути Binance (первый прогон тянет историю)…", true);
     renderPiSim(await post("/api/pi-sim", o));
   });
 };
+// one-click: edge across the WHOLE catalog (rolling months, real core + anchor scalp)
+$("#pisim-scan-all").onclick = (e) => withBusy(e.target, async () => {
+  toast("Скан каталога: катаю месяцы по всем инструментам (первый прогон ~1–2 мин)…", true);
+  const o = formData($("#form-pisim")); o.scan = "true";
+  renderPiSimScan(await post("/api/pi-sim/scan", o));
+});
 
 loadInstruments();
 window.addEventListener("load", () => {

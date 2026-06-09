@@ -295,6 +295,94 @@ def _payoff_curves(r: PiSimResult, n: int = 81) -> dict:
     return out
 
 
+@dataclass
+class RollingEdge:
+    """Aggregate ПИ economics over many NON-overlapping monthly windows — the 'is there an edge' view.
+    The straddle CORE (gamma − theta) is REAL (prices + IV, no assumption); the scalp is the flat anchor
+    coverage×theta, so `total` adds one knob. `c_star` = coverage that breaks the core even."""
+    ticker: str = ""
+    label: str = ""
+    group: str = ""
+    n_months: int = 0
+    deposit: float = 0.0
+    premium: float = 0.0                 # per-month premium (= theta = risk·deposit)
+    core_mean: float = 0.0               # mean monthly straddle-core P&L ($) — the REAL edge
+    core_win_pct: float = 0.0
+    core_net: float = 0.0
+    scalp_mean: float = 0.0              # = coverage_anchor·premium (flat)
+    total_mean: float = 0.0              # core_mean + scalp_mean
+    total_win_pct: float = 0.0
+    total_net: float = 0.0
+    best: float = 0.0
+    worst: float = 0.0
+    ann_return_pct: float = 0.0          # total_net annualised over the span, % of deposit
+    c_star: float = 0.0                  # coverage to break the CORE even (−core_mean/premium)
+    rv_over_iv: float = 0.0              # mean realized/implied (the long-vol edge primitive)
+    verdict: str = ""
+    core_samples: list = field(default_factory=list)   # monthly core P&L (for the histogram)
+
+
+def rolling_edge(daily: pd.DataFrame, vol_model, *, ticker: str, label: str = "", group: str = "",
+                 deposit: float, dte_days: int, risk_pct: float, coverage_anchor: float,
+                 r: float, start: str, end: str | None = None) -> RollingEdge:
+    """Run NON-overlapping `dte_days` windows from `start` and aggregate the per-month ПИ economics.
+    Straddle core = M·|S_T−S0| − premium (real prices + real IV); scalp = coverage_anchor·premium."""
+    df = daily.loc[daily.index >= pd.Timestamp(start)]
+    if end:
+        df = df.loc[df.index <= pd.Timestamp(end)]
+    e = RollingEdge(ticker=ticker, label=label, group=group, deposit=deposit,
+                    premium=risk_pct * deposit)
+    if df.empty or len(df) < 30:
+        return e
+    T = dte_days / 365.0
+    cores, totals, rvs = [], [], []
+    cur = df.index[0]
+    last = df.index[-1]
+    while cur + pd.Timedelta(days=dte_days) <= last:
+        win = df.loc[(df.index >= cur) & (df.index <= cur + pd.Timedelta(days=dte_days))]
+        if len(win) < 2:
+            break
+        S0 = float(win["Close"].iloc[0]); S_T = float(win["Close"].iloc[-1])
+        iv = float(vol_model.sigma(cur, T, S0, S0)) if vol_model is not None else 0.20
+        c0 = float(opt.call_price(S0, S0, T, r, iv))
+        unit = 2.0 * c0
+        if unit <= 0:
+            cur = cur + pd.Timedelta(days=dte_days); continue
+        M = e.premium / unit
+        core = M * abs(S_T - S0) - e.premium
+        cores.append(core); totals.append(core + coverage_anchor * e.premium)
+        # realized vol over the window (annualised) vs the IV paid → the long-vol edge primitive
+        lr = np.diff(np.log(win["Close"].to_numpy(float)))
+        if len(lr) > 1 and np.std(lr) > 0:
+            rvs.append(float(np.std(lr) * np.sqrt(252)) / max(iv, 1e-9))
+        cur = cur + pd.Timedelta(days=dte_days)
+    if not cores:
+        return e
+    n = len(cores)
+    e.n_months = n
+    e.core_samples = [round(x, 1) for x in cores]
+    e.core_mean = float(np.mean(cores)); e.core_net = float(np.sum(cores))
+    e.core_win_pct = 100.0 * sum(1 for x in cores if x > 0) / n
+    e.scalp_mean = coverage_anchor * e.premium
+    e.total_mean = float(np.mean(totals)); e.total_net = float(np.sum(totals))
+    e.total_win_pct = 100.0 * sum(1 for x in totals if x > 0) / n
+    e.best = float(np.max(totals)); e.worst = float(np.min(totals))
+    span_years = max((df.index[-1] - df.index[0]).days / 365.0, 1e-6)
+    e.ann_return_pct = 100.0 * e.total_net / deposit / span_years
+    e.c_star = (-e.core_mean / e.premium) if e.premium > 0 else 0.0
+    e.rv_over_iv = float(np.mean(rvs)) if rvs else 0.0
+    cs = e.c_star
+    if cs <= 0:
+        e.verdict = "EDGE даже без скальпа (RV>IV)"
+    elif cs <= 0.20:
+        e.verdict = "edge при реалистичном скальпе"
+    elif cs <= 0.50:
+        e.verdict = "нужен сильный скальп"
+    else:
+        e.verdict = "нет edge (тету не отбить)"
+    return e
+
+
 def _atr(daily: pd.DataFrame, period: int, asof) -> float:
     """Plain Wilder-ish ATR (mean true range) over `period` bars ending at/just before `asof`."""
     d = daily.loc[daily.index <= asof]

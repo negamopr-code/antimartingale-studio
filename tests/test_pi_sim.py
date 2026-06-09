@@ -131,6 +131,24 @@ def test_payoff_tilt_envelope_skews_the_v():
     assert p["tilt_long"][iU] > p["straddle"][iU]
 
 
+def test_rolling_edge_aggregates_and_c_star():
+    """rolling_edge rolls non-overlapping windows; a flat market → core bleeds (every month −premium),
+    c_star = coverage needed to break the core even = mean(−core)/premium."""
+    daily = _daily([100.0] * 400)                          # dead flat → every straddle loses its premium
+    e = pisim.rolling_edge(daily, _const_vol(), ticker="FLAT", deposit=10_000, dte_days=30,
+                           risk_pct=0.10, coverage_anchor=0.15, r=0.045, start="2015-01-01")
+    assert e.n_months >= 8
+    assert e.core_mean == pytest.approx(-e.premium, rel=1e-6)   # flat → full premium lost each month
+    assert e.core_win_pct == 0.0
+    assert e.c_star == pytest.approx(1.0, rel=1e-6)            # need 100% coverage to break a dead market even
+    assert e.verdict.startswith("нет edge")
+    # a strong trender (every 30d window moves far past the ~11% breakeven) → core wins, c_star ≤ 0
+    big = _daily([100.0 * (1.02 ** i) for i in range(400)])
+    e2 = pisim.rolling_edge(big, _const_vol(), ticker="MOVE", deposit=10_000, dte_days=30,
+                            risk_pct=0.10, coverage_anchor=0.15, r=0.045, start="2015-01-01")
+    assert e2.core_mean > 0 and e2.c_star <= 0
+
+
 def test_uptrend_straddle_wins_scalp_bleeds():
     """INVARIANT #3 on the measured path: a strong one-way trend → straddle gamma wins, the
     counter-trend scalp's stuck legs bleed (open_mtm < 0)."""

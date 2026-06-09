@@ -501,7 +501,15 @@
       <label title="константа IV при iv_source=constant">IV const <input name="iv_const" type="number" step="any" value="0.20"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
       <button type="submit">💵 Прогнать в деньгах</button>
+      <button type="button" id="pisim-scan-all" title="ОДНОЙ КНОПКОЙ: прогнать ПИ по НЕпересекающимся месяцам за период (scan_start) для ВСЕХ инструментов каталога и ранжировать по edge. Стреддл-ядро РЕАЛЬНОЕ (цены+IV); скальп = якорь покрытия (1-мин в скане не гоняется). Первый прогон ~1–2 мин.">🏆 Есть ли edge? (ВСЕ инструменты)</button>
+      <label title="скан: с какой даты катать месяцы (длиннее = надёжнее)">Скан с даты <input name="scan_start" value="2019-01-01"></label>
     </form>
+    <div id="sim-scan" hidden>
+      <pre class="stats" id="sim-scan-stats"></pre>
+      <div class="results"><div class="plots"><div id="sim-scan-bar"></div><div id="sim-scan-hist"></div></div></div>
+      <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">🏆 Рейтинг инструментов по edge ($/мес) — ядро РЕАЛЬНОЕ, total с якорем скальпа ↓ <span style="color:#6e7681">(надёжные сверху, IV-артефакты помечены и снизу)</span></h3>
+      <div class="tradetable" id="sim-scan-table"></div>
+    </div>
     <pre class="stats" id="sim-verdict"></pre>
     <div id="sim-steps" class="sim-steps"></div>
     <div class="results"><div class="plots"><div id="sim-chart"></div><div id="sim-payoff"></div></div>
@@ -510,6 +518,6 @@
     <div class="tradetable" id="sim-grid"></div>
   </section>
 
-  <script src="/app.js?v=92"></script>
+  <script src="/app.js?v=93"></script>
 </body>
 </html>

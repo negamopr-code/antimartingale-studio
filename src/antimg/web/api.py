@@ -1405,6 +1405,79 @@ def pi_sim(req: PiSimReq):
     return {"params": req.model_dump(), **payload}
 
 
+@app.post("/api/pi-sim/scan")
+def pi_sim_scan(req: PiSimReq):
+    """Tab 14 scan: roll NON-overlapping monthly windows for EVERY catalog instrument over
+    [scan_start, scan_end] and rank by edge. The straddle CORE (gamma − theta) is REAL (real prices +
+    real IV — no assumption); the scalp is the flat anchor coverage×theta, so `total` adds one knob.
+    `c_star` = the coverage that would break the core even. Answers «is there an edge, and where»."""
+    rows, pooled = [], []
+    for ticker, label, group in instruments.flat_with_group():
+        try:
+            warmup = (pd.Timestamp(req.scan_start) - pd.Timedelta(days=max(req.atr_period, req.iv_window) * 2 + 90)).date().isoformat()
+            daily = datamod.fetch(ticker, start=warmup, end=None)
+            if daily.empty or (daily.index >= pd.Timestamp(req.scan_start)).sum() < 30:
+                continue
+            realized = datamod.realized_vol(daily["Close"], req.iv_window)
+            vm = volmod.build(ticker, req.scan_start, iv_source=req.iv_source, skew_beta=req.skew_beta,
+                              realized=realized, iv_const=req.iv_const)
+            if not req.use_term_structure and len(vm._T) > 1:
+                target = req.dte_days / 365.0
+                keep = min(vm._T, key=lambda t: abs(t - target))
+                vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
+            e = pisim.rolling_edge(daily, vm, ticker=ticker, label=label, group=group,
+                                   deposit=req.deposit, dte_days=req.dte_days, risk_pct=req.risk_pct,
+                                   coverage_anchor=req.coverage_anchor, r=req.r,
+                                   start=req.scan_start, end=req.scan_end)
+            if e.n_months < 6:
+                continue
+            d = vars(e).copy()
+            samples = [s for s in d.pop("core_samples") if np.isfinite(s)]
+            d = {k: (round(float(v), 3) if isinstance(v, float) and np.isfinite(v)
+                     else (0.0 if isinstance(v, float) else v)) for k, v in d.items()}
+            d["iv_is_real"] = bool(getattr(vm, "label", "").startswith("index") or "dvol" in getattr(vm, "label", "").lower())
+            # RELIABILITY gate: a proxied-IV instrument whose realized vol dwarfs the proxy (rv/iv≫1) or
+            # whose core is implausibly large (> the whole deposit/mo) is an IV-PROXY ARTIFACT (new-listing
+            # pumps priced off a tiny trailing-vol proxy), NOT an edge. Flag it; keep it OUT of the ranking
+            # and the pooled histogram so it can't headline a fake "$374k/mo edge".
+            d["reliable"] = bool(d["iv_is_real"] or (d["rv_over_iv"] <= 3.0 and abs(d["core_mean"]) <= req.deposit))
+            if d["reliable"]:
+                pooled.extend(samples)
+            rows.append(d)
+        except Exception:
+            continue
+    if not rows:
+        raise HTTPException(status_code=422, detail="no instrument produced enough months (longer scan window?)")
+    rel = [r for r in rows if r["reliable"]]
+    rel.sort(key=lambda r: r["total_mean"], reverse=True)
+    art = sorted([r for r in rows if not r["reliable"]], key=lambda r: r["total_mean"], reverse=True)
+    rows = rel + art                                          # reliable first, artifacts flagged at the end
+    n = len(rel)                                             # edge stats computed over RELIABLE only
+    realiv = [r for r in rel if r["iv_is_real"]]             # SPY/QQQ (VIX) + BTC/ETH (DVOL): no proxy
+    med = lambda xs, k: round(sorted(x[k] for x in xs)[len(xs) // 2], 1) if xs else 0.0
+    agg = {
+        "n": n, "n_artifact": len(art), "n_real_iv": len(realiv),
+        "coverage_anchor": req.coverage_anchor, "risk_pct": req.risk_pct,
+        "dte_days": req.dte_days, "deposit": req.deposit, "scan_start": req.scan_start,
+        "n_core_edge": sum(1 for r in rel if r["c_star"] <= 0),               # RV>IV without scalp
+        "n_total_edge": sum(1 for r in rel if r["total_mean"] > 0),           # +EV at the anchor
+        "n_realistic": sum(1 for r in rel if 0 < r["c_star"] <= 0.20),        # edge at realistic scalp
+        "median_core_mean": med(rel, "core_mean"),                           # the ROBUST central edge
+        "median_total_mean": med(rel, "total_mean"),
+        "median_core_real_iv": med(realiv, "core_mean"),                     # honest: real-IV only
+        "median_total_real_iv": med(realiv, "total_mean"),
+        "pooled_core_mean": round(sum(pooled) / len(pooled), 1) if pooled else 0.0,
+        "pooled_core_median": round(sorted(pooled)[len(pooled) // 2], 1) if pooled else 0.0,
+        "pooled_core_win_pct": round(100.0 * sum(1 for x in pooled if x > 0) / len(pooled), 1) if pooled else 0.0,
+        "pooled_n": len(pooled),
+    }
+    # cap the pooled histogram payload
+    if len(pooled) > 4000:
+        pooled = pooled[::len(pooled) // 4000 + 1]
+    return {"params": req.model_dump(), "scan": True, "rows": rows, "aggregate": agg,
+            "pooled_core": pooled}
+
+
 # ----------------------------------------------------------------- TradingView ingest
 @app.post("/api/webhook/tradingview")
 async def tv_webhook(request: Request, x_webhook_secret: str | None = Header(default=None)):

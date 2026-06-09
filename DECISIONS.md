@@ -1055,3 +1055,20 @@ Not implemented; documented as a rejected tactic.
   FUTURE period (QQQ ATR $11.97 → $5.87 trailing). Now fetches with warm-up history; ATR/realized-vol use
   only prior bars.
 - 142 tests (+2: anchor headline, payoff envelope skew). assets v92.
+
+## D88 — Tab 14 «есть ли edge?»: scan ALL instruments, rolling months, real-core distribution (2026-06-09)
+- **Ask (user):** add a button to run it on ALL instruments + an average straddle graph → is there an edge?
+- **Built:** `pi_sim.rolling_edge()` (non-overlapping monthly windows, aggregates straddle CORE = M·|move|
+  − premium [REAL: prices + IV] and total = core + anchor·premium; `c_star` = coverage to break core even)
+  + `/api/pi-sim/scan` (whole catalog) + Tab 14 scan button, edge BAR chart (core $/mo per instrument),
+  pooled straddle-core HISTOGRAM (the «average straddle» shape), ranking table.
+- **Reliability gate (caught a fake result):** new-listing crypto (OP/ARB, rv/iv=111×) priced off a tiny
+  trailing-vol proxy gave absurd "$374k/mo edge". Flag `reliable = iv_is_real or (rv/iv≤3 and |core|≤deposit)`;
+  artifacts excluded from ranking + pooled, kept (flagged) at the table bottom. Lead with the MEDIAN, not the
+  outlier-dominated mean.
+- **The verdict (real-IV instruments, 2019–2025):** long straddle alone BLEEDS in the median (VRP, IV≥RV):
+  SPY core −$277/mo (c*≈0.28), gold −$210 (0.21), QQQ −$204 (0.20), oil −$112…−$185 (0.11–0.18), indices
+  worse. ONLY ETH/BTC show core>0 (RV>IV — crypto's real movement). Pooled core: median negative, mean pulled
+  up by a thin convex right tail (asymmetric payoff). ⇒ NO edge from long-vol per se; edge needs RV>IV (crypto)
+  OR the scalp to actually cover theta — and the scalp is honestly measurable only on crypto 1m. Matches Tab 13.
+- 143 tests (+1 rolling_edge: flat→c*=1.0 & «нет edge», trender→core>0 & c*≤0). assets v93.

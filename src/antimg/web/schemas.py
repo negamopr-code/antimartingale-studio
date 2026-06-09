@@ -337,6 +337,11 @@ class PiSimReq(BaseModel):
     # уверенный флэт can reach ~1.0. The non-crypto headline uses coverage_anchor × theta.
     coverage_anchor: float = Field(0.15, ge=0, le=2.0)
     use_1m: bool = True                                      # crypto: measure scalp on the real 1m feed
+    # scan mode: roll NON-overlapping windows over [scan_start, scan_end] for the WHOLE catalog and rank
+    # by edge (straddle core is real; scalp = anchor). 1m is NOT used in scan (too slow) — anchor only.
+    scan: bool = False
+    scan_start: str = "2019-01-01"
+    scan_end: str | None = None
     atr_period: int = Field(14, ge=2, le=200)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     iv_window: int = Field(20, ge=2, le=500)
