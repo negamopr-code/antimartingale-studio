@@ -1034,3 +1034,24 @@ Not implemented; documented as a rejected tactic.
   shorts gave back −$792 → total ≈ −$41 (≈flat). Honest lesson: a strong one-way TREND is NOT the scalp's
   friend; ПИ pays in a FLAT (scalp covers theta) or on a move bigger than the (expensive) breakeven.
 - 140 tests (+6: OU-reversion scalp>0, loss-cap, sizing identities, exponential grid, trend bleed). v91.
+
+## D87 — Tab 14 honesty pass: scalp BAND (not one number) + payoff-tilt graph + look-ahead fix (2026-06-09)
+- **Ask (user):** is the QQQ scalp (+$573, 57% theta) conservative/realistic? detail how it's estimated;
+  and add a graph showing the straddle «перекошен» by the scalp futures.
+- **Judged it — it was OPTIMISTIC, not conservative.** Decomposition: scenario = capture×Σ(daily range)×
+  limit applies the FULL 5-part limit to EVERY day's range with ZERO losing days. Proof: measuring the
+  SAME grid on real 60m bars gave $35 (3% theta, 14 RTs — hourly undercounts the fine grid); our one hard
+  1m calibration (ETH) booked ~16%; Korovin's own figure is 10–15% of premium/mo. So +$573 (57%) is ~3×
+  hot.
+- **Fix — scalp as a BAND, conservative headline:** `scalp_floor` (measured on real bars: 1m crypto = REAL
+  & the headline; 60m else = undercounting floor), `scalp_realistic` = coverage_anchor×theta (the
+  vol-invariant primitive, INV #7; default 0.15 from ETH-1m+guru) = the NON-crypto headline, `scalp_scenario`
+  = optimistic ceiling. QQQ now reads $35 floor → $150 realistic (headline) → $573 ceiling, total −$287 (was
+  the rosy +$136).
+- **Payoff-tilt graph (`_payoff_curves`):** terminal P&L vs S_T — the symmetric straddle V (M·|S−S0|−prem)
+  vs the scalp-futures-TILTED V (+q·(S−S0)). Measured runs draw the ACTUAL net stuck lots (ETH: net −1.17,
+  bearish tilt); unmeasured draw the ±limit ENVELOPE. `measure_scalp_1m` now also returns signed net_lots.
+- **Look-ahead bug fixed:** endpoint fetched daily from `start`, so entry-day ATR fell back to the whole
+  FUTURE period (QQQ ATR $11.97 → $5.87 trailing). Now fetches with warm-up history; ATR/realized-vol use
+  only prior bars.
+- 142 tests (+2: anchor headline, payoff envelope skew). assets v92.

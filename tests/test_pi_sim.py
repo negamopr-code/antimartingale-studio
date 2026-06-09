@@ -50,11 +50,12 @@ def test_ou_meanreverter_scalp_is_positive():
     net-positive realized round-trips before costs (it's the definition of harvesting reversion)."""
     intr = _ou_intraday(center=100.0, days=15)
     grid = pisim._build_grid(100.0, first_step=0.8, grid_mult=1.6, n_parts=5, part_lots=1.0)
-    realized, open_mtm, rts = pisim.measure_scalp_1m(intr, 100.0, grid, n_parts=5)
+    realized, open_mtm, rts, net_lots = pisim.measure_scalp_1m(intr, 100.0, grid, n_parts=5)
     assert rts > 20, f"expected many round-trips on an oscillating path, got {rts}"
     assert realized > 0, f"counter-trend scalp must be net-positive on an OU mean-reverter, got {realized:.2f}"
     # stuck legs of a centred mean-reverter mark near flat (it returns to centre)
     assert abs(open_mtm) < realized * 3
+    assert abs(net_lots) <= 5 * 1.0 + 1e-9                  # net stuck position bounded by the 5 parts
 
 
 # ---- INVARIANT #2: loss is capped at the premium paid -----------------------------------------
@@ -99,6 +100,35 @@ def test_grid_is_exponential_and_symmetric():
     assert offs == pytest.approx([1.0, 3.0, 7.0, 15.0])               # cumulative 1+2+4+8
     for g in grid:
         assert g["sell"] - 100.0 == pytest.approx(100.0 - g["buy"])   # symmetric around centre
+
+
+def test_scalp_band_and_conservative_anchor_headline():
+    """No intraday feed → headline scalp = the realistic ANCHOR (coverage × theta), not the optimistic
+    scenario; the band exposes both, anchor ≤ ceiling here."""
+    daily = _daily(np.linspace(100, 112, 90))
+    res = pisim.simulate(daily, _const_vol(), ticker="T", deposit=10_000, start="2015-01-01",
+                         dte_days=30, risk_pct=0.10, capture=0.20, coverage_anchor=0.15)
+    assert res.scalp_source == "anchor"
+    assert res.scalp_realistic == pytest.approx(0.15 * res.theta_cost)
+    assert res.scalp_income == pytest.approx(res.scalp_realistic)      # conservative headline
+    assert res.coverage == pytest.approx(0.15, abs=1e-9)
+    assert res.scalp_scenario >= 0
+
+
+def test_payoff_tilt_envelope_skews_the_v():
+    """The scalp's net futures TILT the symmetric straddle V: a net-short overlay lowers the up-wing and
+    raises the down-wing; net-long does the opposite (envelope mode when unmeasured)."""
+    daily = _daily(np.linspace(100, 100, 90))
+    res = pisim.simulate(daily, _const_vol(), ticker="T", deposit=10_000, start="2015-01-01",
+                         dte_days=30, risk_pct=0.10, capture=0.0, coverage_anchor=0.15)
+    p = res.payoff
+    assert p["mode"] == "envelope" and len(p["S"]) == len(p["straddle"])
+    iU = max(range(len(p["S"])), key=lambda i: p["S"][i])              # far up
+    iD = min(range(len(p["S"])), key=lambda i: p["S"][i])              # far down
+    # net-short overlay: worse than the plain straddle on the up move, better on the down move
+    assert p["tilt_short"][iU] < p["straddle"][iU]
+    assert p["tilt_short"][iD] > p["straddle"][iD]
+    assert p["tilt_long"][iU] > p["straddle"][iU]
 
 
 def test_uptrend_straddle_wins_scalp_bleeds():

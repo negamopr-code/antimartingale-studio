@@ -331,7 +331,11 @@ class PiSimReq(BaseModel):
     grid_atr_frac: float = Field(0.05, gt=0, le=10)
     grid_mult: float = Field(1.8, ge=1.0, le=5)              # exponential spacing between parts
     intraday_frac: float = Field(0.333, gt=0, le=1.0)        # ⅓ rule: scalp limit as a frac of calls
-    capture: float = Field(0.20, ge=0, le=2.0)               # SCENARIO: frac of daily range booked (daily fallback)
+    capture: float = Field(0.20, ge=0, le=2.0)               # OPTIMISTIC ceiling: frac of daily range booked
+    # REALISTIC anchor — coverage (scalp ÷ theta) is the vol-invariant profitability primitive (INV #7).
+    # Default 0.15 = the conservative calibration (ETH-1m booked ~0.16 + guru's 10–15%-of-premium/mo);
+    # уверенный флэт can reach ~1.0. The non-crypto headline uses coverage_anchor × theta.
+    coverage_anchor: float = Field(0.15, ge=0, le=2.0)
     use_1m: bool = True                                      # crypto: measure scalp on the real 1m feed
     atr_period: int = Field(14, ge=2, le=200)
     r: float = Field(0.045, ge=-0.05, le=0.5)

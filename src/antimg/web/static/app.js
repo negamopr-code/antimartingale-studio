@@ -1766,6 +1766,41 @@ $("#picoin-rate-all").onclick = (e) => withBusy(e.target, async () => {
   renderPiCoin(await post("/api/pi-coin", o));
 });
 
+// payoff-at-expiry: the clean straddle V vs the scalp-futures-TILTED («перекошенный») V
+async function renderSimPayoff(d, asset) {
+  const p = d.payoff; if (!p || !p.S) return;
+  const zero = p.S.map(() => 0);
+  const traces = [
+    { x: p.S, y: zero, type: "scatter", mode: "lines", name: "0", line: { color: "#3a4452", width: 1, dash: "dot" }, hoverinfo: "skip" },
+    { x: p.S, y: p.straddle, type: "scatter", mode: "lines", name: "чистый стреддл (2C−1F, симметрично)",
+      line: { color: "#58a6ff", width: 2.4 } },
+  ];
+  if (p.mode === "actual") {
+    const dir = p.q < 0 ? `нетто ШОРТ ${Math.abs(p.q).toFixed(2)} ${asset}` : (p.q > 0 ? `нетто ЛОНГ ${p.q.toFixed(2)} ${asset}` : "нейтрально");
+    traces.push({ x: p.S, y: p.tilted, type: "scatter", mode: "lines",
+      name: `+ скальп-фьючи (${dir}) → перекос`, line: { color: "#d29922", width: 2.4 } });
+  } else {
+    traces.push({ x: p.S, y: p.tilt_short, type: "scatter", mode: "lines", name: "перекос если скальп нетто-ШОРТ (полный лимит)",
+      line: { color: "#f85149", width: 1.6, dash: "dash" } });
+    traces.push({ x: p.S, y: p.tilt_long, type: "scatter", mode: "lines", name: "перекос если скальп нетто-ЛОНГ (полный лимит)",
+      line: { color: "#3fb950", width: 1.6, dash: "dash" } });
+  }
+  const ymin = Math.min(...p.straddle, ...(p.tilt_short || p.tilted || [0]));
+  const ymax = Math.max(...p.straddle, ...(p.tilt_long || p.tilted || [0]));
+  const shapes = [
+    { type: "line", x0: p.S0, x1: p.S0, y0: ymin, y1: ymax, line: { color: "#8b949e", width: 1, dash: "dot" } },
+    { type: "line", x0: p.S_T, x1: p.S_T, y0: ymin, y1: ymax, line: { color: d.S_T >= d.S0 ? "#3fb950" : "#f85149", width: 1.2 } },
+  ];
+  const anns = [
+    { x: p.S0, y: ymax, text: "K (вход)", showarrow: false, font: { size: 10, color: "#8b949e" }, yanchor: "bottom" },
+    { x: p.S_T, y: ymax, text: "S_T", showarrow: false, font: { size: 10, color: d.S_T >= d.S0 ? "#3fb950" : "#f85149" }, yanchor: "bottom" },
+  ];
+  await plot("sim-payoff", traces, layout(
+    "Выплата на экспирации: V стреддла «перекошен» скальп-фьючерсами (по горизонтали — цена, по вертикали — $)",
+    { shapes, annotations: anns, height: 380, xaxis: { gridcolor: "#2a3340", title: `${asset} на экспирации, $` },
+      yaxis: { gridcolor: "#2a3340", title: "P&L, $" } }));
+}
+
 // ---- Tab 14: «Симуляция в деньгах» — one ПИ construction, one period, every figure in dollars
 async function renderPiSim(d) {
   const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
@@ -1798,16 +1833,25 @@ async function renderPiSim(d) {
     `${d.ticker}: ${d.entry_date} ($${Math.round(d.S0).toLocaleString()}) → ${d.expiry_date} ($${Math.round(d.S_T).toLocaleString()}, ${d.move_pct >= 0 ? "+" : ""}${d.move_pct.toFixed(1)}%) · красным=продажи, зелёным=покупки сетки`,
     { shapes, annotations: anns, height: 380 }));
 
+  // payoff diagram — the scalp-futures TILT on the symmetric straddle V
+  await renderSimPayoff(d, asset);
+
   // money breakdown
   const cov = (d.coverage * 100).toFixed(0);
-  const src = d.scalp_source === "1m-measured"
-    ? `измерено по 1-мин пути (${d.scalp_round_trips} кругов)`
-    : `СЦЕНАРИЙ захвата ${(d.scalp_capture * 100).toFixed(0)}% (не измерение)`;
-  let scalpLine = `скальп (вклад)     : ${money(d.scalp_income)}   [${src}]`;
+  let scalpLine;
   if (d.scalp_source === "1m-measured") {
-    scalpLine = `скальп booked      : ${money(d.scalp_realized)}  (= ${cov}% теты, закрытые круги)\n`
-      + `скальп залипшие    : ${money(d.scalp_open_mtm)}  (контр-тренд части по рынку; на тренде в минус)\n`
-      + `скальп ИТОГО       : ${money(d.scalp_income)}`;
+    const bcov = (Math.max(d.scalp_realized, 0) / d.theta_cost * 100).toFixed(0);
+    scalpLine = `скальп booked 1м   : ${money(d.scalp_realized)}  (= ${bcov}% теты, ${d.scalp_round_trips} закрытых кругов — РЕАЛЬНЫЙ замер)\n`
+      + `скальп залипшие    : ${money(d.scalp_open_mtm)}  (контр-тренд части по рынку; на тренде в минус, гамма их кроет)\n`
+      + `скальп ИТОГО (вклад): ${money(d.scalp_income)}`;
+  } else {
+    const floorLine = (d.scalp_floor != null)
+      ? `  ├ пол (замер 60-мин, недооценка): ${money(d.scalp_floor)}\n` : "";
+    scalpLine = `скальп — ОЦЕНКА ПОЛОСОЙ (нет free 1-мин фида ⇒ не измеряется честно):\n`
+      + floorLine
+      + `  ├ РЕАЛИСТИЧНО (якорь ${(d.coverage_anchor * 100).toFixed(0)}% теты): ${money(d.scalp_realistic)}   ← в итог\n`
+      + `  └ потолок (оптимизм, захват ${(d.scalp_capture * 100).toFixed(0)}% дн.хода): ${money(d.scalp_scenario)}\n`
+      + `скальп (вклад в итог): ${money(d.scalp_income)}  = ${cov}% теты`;
   }
   $("#sim-stats").textContent =
     `═══ ВХОД (${d.entry_date}) ═══\n`
@@ -1826,9 +1870,10 @@ async function renderPiSim(d) {
     + scalpLine + `\n`
     + `───────────────────────────────\n`
     + `ИТОГО              : ${money(d.total_net)}   (${d.total_pct >= 0 ? "+" : ""}${d.total_pct.toFixed(1)}% депозита)\n`
-    + (d.scalp_source === "scenario"
-      ? `\n⚠ скальп — СЦЕНАРИЙ (дневные бары). Для измерения возьми крипту (BTC/ETH/SOL) с «1-мин измерение = on».`
-      : `\n✓ скальп ИЗМЕРЕН по реальному 1-мин пути Binance. Залипшие части на тренде — по доктрине (гамма их кроет).`);
+    + (d.scalp_source === "1m-measured"
+      ? `\n✓ скальп ИЗМЕРЕН по реальному 1-мин пути Binance (крипта). Залипшие части на тренде — по доктрине (гамма их кроет).`
+      : `\n⚠ скальп НЕ измеряется без free 1-мин фида: показан полосой, в итог взят РЕАЛИСТИЧНЫЙ якорь (консервативно). `
+        + `Для реального замера возьми крипту (BTC/ETH/SOL). Покрытие — vol-инвариант (INV #7): круги/мес × захват, не воля.`);
 
   // grid table (real prices)
   renderTable("sim-grid", (d.grid || []).map((g) => ({

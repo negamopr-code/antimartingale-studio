@@ -1355,12 +1355,14 @@ def pi_sim(req: PiSimReq):
     scalp income, theta, net). Works for ANY catalog instrument. For crypto (BTC/ETH/SOL) the scalp
     is MEASURED by walking the FREE 1-minute Binance path; otherwise it's the labelled daily-range
     capture SCENARIO (daily bars cannot see intraday round-trips — skill INVARIANT #5)."""
+    # fetch WITH warm-up history before `start` (no look-ahead): the entry-day ATR & realized vol use
+    # only PRIOR bars. `simulate` slices the period itself from `start`.
+    warmup = (pd.Timestamp(req.start) - pd.Timedelta(days=max(req.atr_period, req.iv_window) * 2 + 90)).date().isoformat()
     try:
-        daily = datamod.fetch(req.ticker, start=req.start, end=None)
+        daily = datamod.fetch(req.ticker, start=warmup, end=None)
     except Exception as ex:
         raise HTTPException(status_code=502, detail=f"data fetch failed: {ex}")
-    daily = daily.loc[daily.index >= pd.Timestamp(req.start)]
-    if daily.empty or len(daily) < req.atr_period + 2:
+    if daily.empty or (daily.index >= pd.Timestamp(req.start)).sum() < 2:
         raise HTTPException(status_code=422, detail="not enough data at/after this start date")
     realized = datamod.realized_vol(daily["Close"], req.iv_window)
     vm = volmod.build(req.ticker, req.start, iv_source=req.iv_source, skew_beta=req.skew_beta,
@@ -1369,25 +1371,37 @@ def pi_sim(req: PiSimReq):
         target = req.dte_days / 365.0
         keep = min(vm._T, key=lambda t: abs(t - target))
         vm = volmod.VolModel({keep: vm._series[keep]}, vm.skew_beta, label=vm.label + "+flatT")
-    # crypto: pull the free 1m feed so the scalp is MEASURED, not assumed (the doctrine's ideal asset)
-    intraday = None
+    # MEASURE the scalp on a real path: crypto → FREE deep 1m (Binance, the doctrine's ideal asset);
+    # else → 60m bars (yfinance ~730d) as a FLOOR (hourly undercounts the fine grid). 'end' padded.
+    intraday, intraday_label = None, "1m"
+    end1m = (pd.Timestamp(req.start) + pd.Timedelta(days=req.dte_days + 4)).date().isoformat()
     if req.use_1m:
         try:
-            end1m = (pd.Timestamp(req.start) + pd.Timedelta(days=req.dte_days + 3)).date().isoformat()
             intraday = datamod.fetch_intraday_crypto(req.ticker, interval="1m", start=req.start, end=end1m)
+            intraday_label = "1m"
         except Exception:
-            intraday = None                                 # non-crypto / network → daily scenario
+            intraday = None
+    if intraday is None:                                    # non-crypto (or 1m off) → real 60m floor
+        try:
+            h = datamod.fetch_intraday(req.ticker, interval="60m",
+                                       start=(pd.Timestamp(req.start) - pd.Timedelta(days=6)).date().isoformat(),
+                                       end=end1m)
+            if h is not None and not h.empty:
+                intraday, intraday_label = h, "60m"
+        except Exception:
+            intraday = None                                 # no intraday at all → anchor-only band
     try:
         res = pisim.simulate(daily, vm, ticker=req.ticker, deposit=req.deposit, start=req.start,
                              dte_days=req.dte_days, risk_pct=req.risk_pct, n_parts=req.n_parts,
                              grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
-                             intraday_frac=req.intraday_frac, capture=req.capture, r=req.r,
-                             atr_period=req.atr_period, intraday=intraday, vol_label=vm.label)
+                             intraday_frac=req.intraday_frac, capture=req.capture,
+                             coverage_anchor=req.coverage_anchor, r=req.r, atr_period=req.atr_period,
+                             intraday=intraday, intraday_label=intraday_label, vol_label=vm.label)
     except ValueError as ex:
         raise HTTPException(status_code=422, detail=str(ex))
     payload = {k: v for k, v in vars(res).items()}
     payload["vol_class"] = volmod.classify(req.ticker)
-    payload["scalp_measurable"] = intraday is not None and not intraday.empty
+    payload["scalp_measurable"] = res.scalp_source == "1m-measured"   # only crypto 1m is a real measure
     return {"params": req.model_dump(), **payload}
 
 

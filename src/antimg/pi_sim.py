@@ -74,16 +74,22 @@ class PiSimResult:
     straddle_gross: float = 0.0          # M·|S_T−S0| (intrinsic at expiry)
     theta_cost: float = 0.0              # = premium_budget (the rent, max loss)
     straddle_net: float = 0.0            # gross − premium
-    # scalp
+    # scalp — presented as a BAND (floor → realistic → optimistic), not a single confident number
     scalp_capture: float = 0.0
+    coverage_anchor: float = 0.0         # calibrated realistic coverage (ETH-1m + guru 10–15%/mo)
     sum_daily_range: float = 0.0
-    scalp_scenario: float = 0.0          # capture × Σ range × limit (daily, labelled scenario)
-    scalp_realized: float | None = None  # closed round-trips on the real 1m path (the "flat income")
+    scalp_scenario: float = 0.0          # OPTIMISTIC ceiling: capture × Σ range × limit (no losers)
+    scalp_realistic: float = 0.0         # REALISTIC anchor: coverage_anchor × theta (vol-invariant)
+    scalp_floor: float | None = None     # MEASURED on real bars (1m crypto = real; 60m else = undercounts)
+    scalp_floor_label: str = ""          # "1m" | "60m"
+    scalp_realized: float | None = None  # closed round-trips on the measured path (the "flat income")
     scalp_open_mtm: float | None = None  # stuck counter-trend legs marked at S_T (≤0 in a trend)
+    scalp_net_lots: float = 0.0          # signed net stuck futures at S_T (+long / −short) — tilts the V
     scalp_round_trips: int = 0
-    scalp_source: str = "scenario"       # "1m-measured" | "scenario"
-    scalp_income: float = 0.0            # TRUE scalp contribution to the account (realized + stuck mtm)
-    coverage: float = 0.0                # scalp_realized / theta_cost  (≥1 = flat self-pays the rent)
+    scalp_source: str = "anchor"         # "1m-measured" (crypto, real) | "anchor" (else, calibrated)
+    scalp_income: float = 0.0            # headline contribution used in totals (conservative)
+    coverage: float = 0.0                # scalp_income / theta_cost  (≥1 = flat self-pays the rent)
+    payoff: dict = field(default_factory=dict)   # terminal payoff curves (straddle vs scalp-tilted V)
     # --- 4. verdict + presentation -----------------------------------------------------
     total_net: float = 0.0               # straddle_net + scalp_income
     total_pct: float = 0.0               # of deposit
@@ -105,7 +111,7 @@ def _build_grid(center: float, first_step: float, grid_mult: float, n_parts: int
 
 
 def measure_scalp_1m(intraday: pd.DataFrame, center: float, grid: list[dict], n_parts: int,
-                     *, fee: float = 0.0, bb_window: int = 120, bb_k: float = 2.0) -> tuple[float, float, int]:
+                     *, fee: float = 0.0, bb_window: int = 120, bb_k: float = 2.0) -> tuple[float, float, int, float]:
     """Walk the real 1-minute path with the counter-trend exponential grid (mirrors the Tab-8 engine).
 
     Response orders: short at each sell-level crossed up, target = the next inner level; long at each
@@ -113,10 +119,10 @@ def measure_scalp_1m(intraday: pd.DataFrame, center: float, grid: list[dict], n_
     they're marked-to-market at the final price (INVARIANT #1). A Bollinger FLAT-GATE (doctrine: «don't
     fade a galloping market») suspends NEW counter-trend entries on a breakout — no new short above the
     upper band / no new long below the lower band; EXITS are always allowed. Set bb_k=0 to disable.
-    Returns (realized, open_mtm, round_trips).
+    Returns (realized, open_mtm, round_trips, net_lots) — net_lots signed (+long / −short stuck legs).
     """
     if intraday is None or intraday.empty:
-        return 0.0, 0.0, 0
+        return 0.0, 0.0, 0, 0.0
     sell_lv = [g["sell"] for g in grid]
     buy_lv = [g["buy"] for g in grid]
     inner_up = [center] + sell_lv[:-1]   # buy-back target for a short opened at sell_lv[k]
@@ -169,19 +175,23 @@ def measure_scalp_1m(intraday: pd.DataFrame, center: float, grid: list[dict], n_
     S_T = float(C[-1])
     open_mtm = sum(((S_T - leg["entry"]) if leg["side"] == "L" else (leg["entry"] - S_T)) * leg["lots"]
                    for leg in legs)
-    return realized, open_mtm, rts
+    net_lots = sum((leg["lots"] if leg["side"] == "L" else -leg["lots"]) for leg in legs)
+    return realized, open_mtm, rts, net_lots
 
 
 def simulate(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, start: str,
              dte_days: int, risk_pct: float, n_parts: int = 5, grid_atr_frac: float = 0.5,
              grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0, capture: float = 0.20,
-             r: float = 0.045, atr_period: int = 14, intraday: pd.DataFrame | None = None,
+             coverage_anchor: float = 0.15, r: float = 0.045, atr_period: int = 14,
+             intraday: pd.DataFrame | None = None, intraday_label: str = "1m",
              vol_label: str = "") -> PiSimResult:
-    """Run ONE ПИ period: entry → grid → outcome, every figure exposed. `intraday` (optional 1m OHLC)
-    enables the MEASURED scalp; otherwise the scalp is the daily-range capture SCENARIO."""
+    """Run ONE ПИ period: entry → grid → outcome, every figure exposed. `intraday` (optional 1m/60m
+    OHLC) MEASURES the scalp on a real path; the scalp is also reported as a BAND: a realistic anchor
+    (coverage_anchor × theta — the vol-invariant primitive, calibrated to the ETH-1m + guru 10–15%/mo)
+    and an OPTIMISTIC ceiling (capture × Σ daily-range × limit, no losing days)."""
     res = PiSimResult(ticker=ticker, vol_model=vol_label, deposit=deposit, risk_pct=risk_pct,
                       dte_days=dte_days, intraday_frac=intraday_frac, n_parts=n_parts,
-                      grid_mult=grid_mult, scalp_capture=capture, r=r)
+                      grid_mult=grid_mult, scalp_capture=capture, coverage_anchor=coverage_anchor, r=r)
     df = daily.loc[daily.index >= pd.Timestamp(start)]
     if df.empty or len(df) < 2:
         raise ValueError("no data at/after the start date")
@@ -224,24 +234,33 @@ def simulate(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, sta
     res.theta_cost = budget                                # premium paid = the rent = max loss
     res.straddle_net = res.straddle_gross - budget
 
-    # --- 3b. scalp: scenario (daily) + measured (1m, crypto) ---------------------------
+    # --- 3b. scalp BAND: realistic anchor · optimistic ceiling · measured floor --------
     rng = (period["High"] - period["Low"]).clip(lower=0).sum()
     res.sum_daily_range = float(rng)
-    res.scalp_scenario = float(capture * rng * limit)      # capture × Σ range × scalp lots
+    # OPTIMISTIC ceiling — books `capture` of EVERY day's full range on the WHOLE limit, no losers.
+    res.scalp_scenario = float(capture * rng * limit)
+    # REALISTIC anchor — coverage is the vol-invariant profitability primitive (INVARIANT #7); anchor it
+    # to the one hard 1m calibration (ETH ~0.16 booked) + guru's 10–15%-of-premium/mo. So scalp ≈ c·theta.
+    res.scalp_realistic = float(coverage_anchor * res.theta_cost)
     if intraday is not None and not intraday.empty:
         islice = intraday.loc[(intraday.index >= entry) & (intraday.index <= period.index[-1] + pd.Timedelta(days=1))]
-        realized, open_mtm, rts = measure_scalp_1m(islice, S0, res.grid, n_parts)
+        realized, open_mtm, rts, net_lots = measure_scalp_1m(islice, S0, res.grid, n_parts)
         res.scalp_realized = round(realized, 2); res.scalp_open_mtm = round(open_mtm, 2)
-        res.scalp_round_trips = rts; res.scalp_source = "1m-measured"
-        # TRUE scalp contribution = booked round-trips + the mark of stuck counter-trend legs (≤0 in a
-        # trend; INVARIANT #3 — the scalp bleeds in a trend while the straddle gamma wins). Coverage —
-        # "does the FLAT income pay the rent" — uses the booked round-trips only.
-        res.scalp_income = realized + open_mtm
+        res.scalp_round_trips = rts; res.scalp_net_lots = round(net_lots, 4)
+        res.scalp_floor = round(realized + open_mtm, 2); res.scalp_floor_label = intraday_label
+        if intraday_label == "1m":                         # crypto: the 1m walk is a REAL measurement
+            res.scalp_source = "1m-measured"
+            res.scalp_income = realized + open_mtm          # booked round-trips + stuck-leg mark (real)
+        else:                                              # 60m undercounts the fine grid → only a floor
+            res.scalp_source = "anchor"
+            res.scalp_income = res.scalp_realistic
     else:
-        res.scalp_source = "scenario"
-        res.scalp_realized = round(res.scalp_scenario, 2)
-        res.scalp_income = res.scalp_scenario
-    res.coverage = (max(res.scalp_realized or 0.0, 0.0) / res.theta_cost) if res.theta_cost > 0 else 0.0
+        res.scalp_source = "anchor"
+        res.scalp_income = res.scalp_realistic              # conservative headline (no free intraday feed)
+    res.coverage = (res.scalp_income / res.theta_cost) if res.theta_cost > 0 else 0.0
+
+    # --- 3c. terminal payoff: straddle V vs the scalp-futures-TILTED V ------------------
+    res.payoff = _payoff_curves(res)
 
     # --- 4. totals + verdict ------------------------------------------------------------
     res.total_net = res.straddle_net + res.scalp_income
@@ -251,6 +270,29 @@ def simulate(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, sta
     cl = period["Close"]
     res.timeline = {"dates": [d.date().isoformat() for d in cl.index], "close": [round(float(x), 2) for x in cl.values]}
     return res
+
+
+def _payoff_curves(r: PiSimResult, n: int = 81) -> dict:
+    """Terminal P&L (at expiry) vs underlying S_T for: (a) the clean synthetic straddle (symmetric V =
+    M·|S−S0| − premium); (b) the same straddle TILTED by the scalp's net futures position q·(S−S0) —
+    the «перекошенный» V. For a measured run q = the actual net stuck lots; otherwise we draw the ENVELOPE
+    (q = ±limit) — the band the V can tilt within as parts get stuck short (bearish tilt) or long."""
+    S0, M, prem = r.S0, r.straddle_units, r.premium_budget
+    span = max(0.30, 1.6 * r.breakeven_pct / 100.0 + abs(r.move_pct) / 100.0)
+    S = [S0 * (1.0 - span + 2.0 * span * i / (n - 1)) for i in range(n)]
+    straddle = [M * abs(s - S0) - prem for s in S]
+    limit = r.intraday_limit_lots
+    out = {"S": [round(s, 2) for s in S], "S0": S0, "S_T": r.S_T,
+           "straddle": [round(v, 1) for v in straddle], "limit": round(limit, 4)}
+    if r.scalp_source == "1m-measured":
+        q = r.scalp_net_lots                               # actual net stuck futures (signed)
+        out["tilted"] = [round(M * abs(s - S0) - prem + q * (s - S0), 1) for s in S]
+        out["q"] = round(q, 4); out["mode"] = "actual"
+    else:                                                  # envelope: ±full limit short/long
+        out["tilt_short"] = [round(M * abs(s - S0) - prem - limit * (s - S0), 1) for s in S]
+        out["tilt_long"] = [round(M * abs(s - S0) - prem + limit * (s - S0), 1) for s in S]
+        out["mode"] = "envelope"
+    return out
 
 
 def _atr(daily: pd.DataFrame, period: int, asof) -> float:
@@ -274,17 +316,21 @@ def _verdict(r: PiSimResult) -> str:
                 f"гамма-ядро {'+' if r.straddle_net>=0 else ''}${r.straddle_net:,.0f}.")
     if r.scalp_source == "1m-measured":
         stuck = r.scalp_open_mtm or 0.0
-        cov_txt = (f"Скальп по реальному 1-мин пути: {r.scalp_round_trips} закрытых кругов +${r.scalp_realized:,.0f} "
-                   f"= {cov*100:.0f}% теты (${r.theta_cost:,.0f})")
+        cov_txt = (f"Скальп ИЗМЕРЕН по реальному 1-мин пути: {r.scalp_round_trips} кругов +${r.scalp_realized:,.0f} "
+                   f"({(max(r.scalp_realized or 0,0))/r.theta_cost*100:.0f}% теты)")
         if stuck < -1.0:
             cov_txt += (f", НО залипшие контр-трендовые части −${abs(stuck):,.0f}: на тренде скальп истекает, "
-                        f"а зарабатывает гамма стреддла (это по доктрине, не баг). Итог скальпа ${r.scalp_income:,.0f}.")
+                        f"а зарабатывает гамма стреддла (доктрина, не баг). Итог скальпа ${r.scalp_income:,.0f}.")
         else:
-            cov_txt += (". Флет — скальп почти без залипания: "
+            cov_txt += (". Флет — почти без залипания: "
                         + ("сам окупает тету (≥100%)." if cov >= 1.0 else "часть теты добивает гамма."))
     else:
-        cov_txt = (f"Скальп — СЦЕНАРИЙ захвата {r.scalp_capture*100:.0f}% дневного хода (дневные бары НЕ содержат "
-                   f"интрадей-кругов): ${r.scalp_scenario:,.0f} ≈ {cov*100:.0f}% теты. Для измерения нужен 1-мин фид (крипта).")
+        floor_txt = (f" Замер на 60-мин барах (грубо недооценивает мелкую сетку) даёт пол ≈${r.scalp_floor:,.0f}."
+                     if r.scalp_floor is not None else "")
+        cov_txt = (f"Скальп — БЕЗ free 1-мин фида НЕ измеряется. Беру РЕАЛИСТИЧНЫЙ якорь: покрытие "
+                   f"{r.coverage_anchor*100:.0f}% теты = ${r.scalp_realistic:,.0f} (калибровка по ETH-1м + гуру 10–15%/мес). "
+                   f"Оптимистичный потолок (захват {r.scalp_capture*100:.0f}% дневн.хода на всём лимите, без минусовых дней) "
+                   f"= ${r.scalp_scenario:,.0f}.{floor_txt} Беру консервативно якорь.")
     return f"{head} {move_txt} {cov_txt} Макс. риск всё время ограничен премией ${r.theta_cost:,.0f}."
 
 
@@ -313,20 +359,23 @@ def _narrate(r: PiSimResult) -> list[dict]:
                   f"Стреддл-ядро на экспирации: {r.straddle_units:.2f}×${r.move_abs:,.0f} интринсика "
                   f"− ${r.theta_cost:,.0f} премии = {'+' if r.straddle_net>=0 else ''}${r.straddle_net:,.0f}.")},
         {"n": 6, "title": ("Скальпинг — ИЗМЕРЕНО по реальному 1-мин пути" if r.scalp_source == "1m-measured"
-                           else "Скальпинг — СЦЕНАРИЙ (дневные бары не видят интрадей)"),
+                           else "Скальпинг — ОЦЕНКА (полосой: пол → реалистично → потолок)"),
          "body": (
              (f"Прогнали сетку по реальному 1-минутному пути ({r.scalp_round_trips} закрытых кругов): "
-              f"booked +${r.scalp_realized:,.0f} = {r.coverage*100:.0f}% теты. "
-              + (f"Залипшие контр-трендовые части по рынку на экспирации: ${r.scalp_open_mtm:,.0f} "
-                 f"(на тренде скальп в минусе — отрабатывает гамма; по доктрине части НЕ закрывают силой). "
+              f"booked +${r.scalp_realized:,.0f} = {(max(r.scalp_realized or 0,0))/r.theta_cost*100:.0f}% теты. "
+              + (f"Залипшие контр-трендовые части по рынку: ${r.scalp_open_mtm:,.0f} "
+                 f"(на тренде скальп в минусе — отрабатывает гамма; части НЕ закрывают силой). "
                  if (r.scalp_open_mtm or 0.0) < -1.0 else
                  f"Залипания почти нет (${r.scalp_open_mtm:,.0f}) — это флет. ")
               + f"Итоговый вклад скальпа: ${r.scalp_income:,.0f}.")
              if r.scalp_source == "1m-measured" else
-             (f"Захват {r.scalp_capture*100:.0f}% дневного хода (Σ диапазонов ${r.sum_daily_range:,.0f}) на "
-              f"{r.intraday_limit_lots:.2f} лотах = +${r.scalp_scenario:,.0f} ≈ {r.coverage*100:.0f}% теты. "
-              f"⚠ это СЦЕНАРИЙ при заданном захвате, а НЕ измерение — дневные бары не содержат интрадей-кругов. "
-              f"Реальное измерение скальпа возможно только на 1-мин фиде (крипта). Это верхняя планка для флета."))},
+             (f"Без free 1-мин фида скальп НЕ измеряется честно, поэтому даю ПОЛОСУ:\n"
+              + (f"• ПОЛ (замер на 60-мин барах, грубо недооценивает мелкую сетку): ${r.scalp_floor:,.0f}\n" if r.scalp_floor is not None else "")
+              + f"• РЕАЛИСТИЧНО (якорь покрытия {r.coverage_anchor*100:.0f}% теты — калибровка по ETH-1м + гуру 10–15%/мес): "
+              f"${r.scalp_realistic:,.0f}  ← беру это в итог\n"
+              f"• ПОТОЛОК (оптимизм: захват {r.scalp_capture*100:.0f}% дневн.хода на ВСЁМ лимите, без минусовых дней): "
+              f"${r.scalp_scenario:,.0f}\n"
+              f"⚠ покрытие — vol-инвариантный примитив (INV #7): зависит от кругов/мес × доли захвата, не от воли инструмента.")) },
         {"n": 7, "title": "Итог в деньгах",
          "body": (f"Ядро {'+' if r.straddle_net>=0 else ''}${r.straddle_net:,.0f} + скальп "
                   f"{'+' if r.scalp_income>=0 else ''}${r.scalp_income:,.0f} = "
