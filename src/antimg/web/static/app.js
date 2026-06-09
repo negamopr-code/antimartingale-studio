@@ -1848,16 +1848,39 @@ async function renderSimPayoff(d, asset) {
   }
   const ymin = Math.min(...p.straddle, ...(p.tilt_short || p.tilted || [0]));
   const ymax = Math.max(...p.straddle, ...(p.tilt_long || p.tilted || [0]));
+  const xmin = p.S[0], xmax = p.S[p.S.length - 1];
+  // breakevens: the straddle ALONE breaks even at S0 ± premium/M; WITH the scalp income the V shifts up,
+  // so the loss zone NARROWS to S0 ± (premium − scalp)/M (scalp ≥ premium ⇒ always green).
+  const beStr = d.breakeven_move;                                   // = premium/M (straddle alone)
+  const beNet = Math.max(0, (d.premium_budget - d.scalp_income) / d.straddle_units);
+  const zoneEdge = beNet;                                           // shade by the FULL position (with scalp)
+  const lossLo = p.S0 - zoneEdge, lossHi = p.S0 + zoneEdge;
+  const band = (x0, x1, color) => ({ type: "rect", xref: "x", yref: "paper", x0, x1, y0: 0, y1: 1,
+    fillcolor: color, line: { width: 0 }, layer: "below" });
   const shapes = [
+    band(xmin, lossLo, "rgba(63,185,80,0.10)"),                     // left wing = profit
+    band(lossHi, xmax, "rgba(63,185,80,0.10)"),                     // right wing = profit
+    band(lossLo, lossHi, "rgba(248,81,73,0.12)"),                   // middle = loss
+    { type: "line", x0: lossLo, x1: lossLo, y0: ymin, y1: ymax, line: { color: "#3fb950", width: 1.2, dash: "dash" } },
+    { type: "line", x0: lossHi, x1: lossHi, y0: ymin, y1: ymax, line: { color: "#3fb950", width: 1.2, dash: "dash" } },
     { type: "line", x0: p.S0, x1: p.S0, y0: ymin, y1: ymax, line: { color: "#8b949e", width: 1, dash: "dot" } },
-    { type: "line", x0: p.S_T, x1: p.S_T, y0: ymin, y1: ymax, line: { color: d.S_T >= d.S0 ? "#3fb950" : "#f85149", width: 1.2 } },
+    { type: "line", x0: p.S_T, x1: p.S_T, y0: ymin, y1: ymax, line: { color: d.S_T >= d.S0 ? "#3fb950" : "#f85149", width: 1.6 } },
   ];
+  // straddle-alone breakevens (lighter) — so you see how much the scalp narrowed the loss zone
+  if (Math.abs(beStr - beNet) > 1e-6) {
+    shapes.push({ type: "line", x0: p.S0 - beStr, x1: p.S0 - beStr, y0: ymin, y1: ymax, line: { color: "#8b949e", width: 0.8, dash: "dot" } });
+    shapes.push({ type: "line", x0: p.S0 + beStr, x1: p.S0 + beStr, y0: ymin, y1: ymax, line: { color: "#8b949e", width: 0.8, dash: "dot" } });
+  }
+  const beNetPct = (zoneEdge / p.S0 * 100);
   const anns = [
     { x: p.S0, y: ymax, text: "K (вход)", showarrow: false, font: { size: 10, color: "#8b949e" }, yanchor: "bottom" },
-    { x: p.S_T, y: ymax, text: "S_T", showarrow: false, font: { size: 10, color: d.S_T >= d.S0 ? "#3fb950" : "#f85149" }, yanchor: "bottom" },
+    { x: p.S_T, y: ymax, text: `S_T (${d.move_pct >= 0 ? "+" : ""}${d.move_pct.toFixed(1)}%)`, showarrow: false, font: { size: 10, color: d.S_T >= d.S0 ? "#3fb950" : "#f85149" }, yanchor: "bottom" },
+    { x: (xmin + lossLo) / 2, y: 0.96, yref: "paper", text: "🟢 ПРИБЫЛЬ", showarrow: false, font: { size: 11, color: "#3fb950" } },
+    { x: (lossHi + xmax) / 2, y: 0.96, yref: "paper", text: "🟢 ПРИБЫЛЬ", showarrow: false, font: { size: 11, color: "#3fb950" } },
+    { x: p.S0, y: 0.06, yref: "paper", text: `🔴 УБЫТОК (б/у ±${beNetPct.toFixed(1)}% с учётом скальпа)`, showarrow: false, font: { size: 10, color: "#f85149" } },
   ];
   await plot("sim-payoff", traces, layout(
-    "Выплата на экспирации: V стреддла «перекошен» скальп-фьючерсами (по горизонтали — цена, по вертикали — $)",
+    "Выплата на экспирации: 🟢 прибыль на крыльях / 🔴 убыток в центре (зелёные пунктиры = безубыток с учётом скальпа; серые точки = безубыток стреддла без скальпа)",
     { shapes, annotations: anns, height: 380, xaxis: { gridcolor: "#2a3340", title: `${asset} на экспирации, $` },
       yaxis: { gridcolor: "#2a3340", title: "P&L, $" } }));
 }
