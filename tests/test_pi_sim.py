@@ -102,16 +102,17 @@ def test_grid_is_exponential_and_symmetric():
         assert g["sell"] - 100.0 == pytest.approx(100.0 - g["buy"])   # symmetric around centre
 
 
-def test_scalp_band_and_conservative_anchor_headline():
-    """No intraday feed → headline scalp = the realistic ANCHOR (coverage × theta), not the optimistic
-    scenario; the band exposes both, anchor ≤ ceiling here."""
+def test_scalp_band_and_chop_headline():
+    """No 1m feed → headline scalp = the adaptive CHOP MODEL (grounded, vol-invariant), exposed as a band
+    alongside the optimistic ceiling."""
     daily = _daily(np.linspace(100, 112, 90))
     res = pisim.simulate(daily, _const_vol(), ticker="T", deposit=10_000, start="2015-01-01",
-                         dte_days=30, risk_pct=0.10, capture=0.20, coverage_anchor=0.15)
+                         dte_days=30, risk_pct=0.10, capture=0.20, flat_frac=0.25)
     assert res.scalp_source == "anchor"
-    assert res.scalp_realistic == pytest.approx(0.15 * res.theta_cost)
-    assert res.scalp_income == pytest.approx(res.scalp_realistic)      # conservative headline
-    assert res.coverage == pytest.approx(0.15, abs=1e-9)
+    assert res.chop["income"] > 0
+    assert res.scalp_realistic == pytest.approx(res.chop["income"])     # chop model is the headline
+    assert res.scalp_income == pytest.approx(res.scalp_realistic)
+    assert res.coverage == pytest.approx(res.chop["coverage"], abs=1e-6)
     assert res.scalp_scenario >= 0
 
 
@@ -129,6 +130,35 @@ def test_payoff_tilt_envelope_skews_the_v():
     assert p["tilt_short"][iU] < p["straddle"][iU]
     assert p["tilt_short"][iD] > p["straddle"][iD]
     assert p["tilt_long"][iU] > p["straddle"][iU]
+
+
+def test_chop_model_arithmetic_and_vol_invariance():
+    """The adaptive chop model: income = n_days·f_chop·trades·(eff·flat_frac·range)·part_lots; and
+    coverage is vol-invariant — scaling range up while part_lots scales down (fixed premium) is flat."""
+    m = pisim.chop_coverage_model(daily_range=5.0, part_lots=4.2, theta=1000.0, n_days=21,
+                                  f_chop=2 / 3, trades_per_day=10, eff=0.5, flat_frac=0.25)
+    exp = 21 * (2 / 3) * 10 * (0.5 * 0.25 * 5.0) * 4.2
+    assert m["income"] == pytest.approx(exp, rel=1e-6)
+    assert m["coverage"] == pytest.approx(exp / 1000.0, rel=1e-6)
+    assert m["path_needed_per_day"] == pytest.approx(10 * (0.5 * 0.25 * 5.0) * 2.0, rel=1e-6)
+    # vol-invariance: 10× range, 1/10× part_lots (premium/theta fixed) → identical coverage
+    m2 = pisim.chop_coverage_model(daily_range=50.0, part_lots=0.42, theta=1000.0, n_days=21,
+                                   f_chop=2 / 3, trades_per_day=10, eff=0.5, flat_frac=0.25)
+    assert m2["coverage"] == pytest.approx(m["coverage"], rel=1e-9)
+    # monotonic in the trader-skill levers
+    hi = pisim.chop_coverage_model(daily_range=5.0, part_lots=4.2, theta=1000.0, n_days=21, flat_frac=0.40)
+    assert hi["coverage"] > m["coverage"]
+
+
+def test_chop_diag_classifies_chop_vs_trend():
+    """measure_chop_diag: an oscillating intraday path reads as mostly chop (low ER); a one-way ramp reads
+    as trend (high ER)."""
+    osc = _bars_from_points(100.0 + 2.0 * np.sin(np.linspace(0, 200 * np.pi, 5 * 24 * 60)))
+    d_chop = pisim.measure_chop_diag(osc, is_daily=False)
+    assert d_chop["chop_frac"] >= 0.8 and d_chop["path_over_range"] > 2.0
+    ramp = _bars_from_points(100.0 + np.linspace(0, 60, 5 * 24 * 60))   # pure monotonic trend
+    d_tr = pisim.measure_chop_diag(ramp, is_daily=False)
+    assert d_tr["chop_frac"] <= 0.5
 
 
 def test_rolling_edge_aggregates_and_c_star():

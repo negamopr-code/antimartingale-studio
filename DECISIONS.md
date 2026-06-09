@@ -1072,3 +1072,24 @@ Not implemented; documented as a rejected tactic.
   up by a thin convex right tail (asymmetric payoff). ⇒ NO edge from long-vol per se; edge needs RV>IV (crypto)
   OR the scalp to actually cover theta — and the scalp is honestly measurable only on crypto 1m. Matches Tab 13.
 - 143 tests (+1 rolling_edge: flat→c*=1.0 & «нет edge», trender→core>0 & c*≤0). assets v93.
+
+## D89 — Tab 14 ADAPTIVE CHOP-SCALP model (the trader's manual-range know-how) (2026-06-09)
+- **Ask (user):** the sharp-move (gamma) part is clear; model the CHOP part. In chop (~⅔ of time) the trader
+  READS the realized flat and re-sizes the grid — takes ~50% of each swing (0.05 of a 0.10 band), ~10 trades/
+  day, re-adjusting as the band widens (0.10→0.30 → next working part, TP 0.15). Build a conservative,
+  mathematically-correct model conditional on that manual adjustment.
+- **Built `pi_sim.chop_coverage_model`:** `scalp = n_days·f_chop·trades_per_day·(eff·flat_frac·daily_range)·
+  part_lots`, coverage = scalp/theta. VOL-INVARIANT (INV #7): flat_width ∝ σS, part_lots ∝ premium/σS ⇒
+  product ∝ premium ⇒ coverage = f(trades/day × eff × flat_frac × f_chop), not the instrument's vol. Defaults
+  f_chop=0.667, trades=10/day, eff=0.5, flat_frac=0.25 → ~37–56% coverage; flat_frac 0.4 → ~60%; 0.5+ →
+  self-pays. This REPLACES the flat 15% anchor as the realistic headline.
+- **Grounded in real data (`measure_chop_diag`):** per-day range / intraday PATH (Σ|Δ|) / efficiency-ratio
+  chop classifier + a FEASIBILITY check (real path ≥ path the cadence needs) — trusted only on true 1m (60m
+  undercounts the path). ETH-Aug-2025: chop 100% of days, path ×16.5 range, 10 trades/day feasible ×8.76.
+- **The reveal (answers «is chop plausible»):** for ETH the FIXED 1m grid bled −$759 (stuck on the trend),
+  but the ADAPTIVE chop model = +$1094 (109% theta) and the real path VALIDATES it → the $1,853 gap is the
+  value of manual re-centering vs «поставил-и-забыл». So YES: in chop, 10 trades/day at 50%-of-a-local-flat
+  plausibly covers — even exceeds — the theta, and it's vol-invariant so it transfers across instruments.
+- UI: 4 chop knobs (f_chop, trades/day, eff, flat_frac) replace coverage_anchor; band leads with the chop
+  model + measured chop-fraction + feasibility; crypto shows fixed-vs-adaptive side by side. 145 tests (+2).
+  assets v94.

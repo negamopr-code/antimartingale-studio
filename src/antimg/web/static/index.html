@@ -493,8 +493,11 @@
       <label title="первый шаг сетки = это × дневной ATR. ИНТРАДЕЙ-масштаб (≈0.03–0.08) → доктринальные ~200–250 кругов/мес на 1-мин (INVARIANT #7); широкая ×0.5 почти не торгует на 1-мин.">Шаг сетки (×ATR) <input name="grid_atr_frac" type="number" step="any" value="0.05"></label>
       <label title="экспоненциальное расширение между частями">Множитель сетки <input name="grid_mult" type="number" step="any" value="1.8"></label>
       <label title="правило трёх третей: лимит на скальп как доля от коллов">Доля на интрадей (⅓) <input name="intraday_frac" type="number" step="any" value="0.333"></label>
-      <label title="РЕАЛИСТИЧНЫЙ якорь: покрытие скальпом теты (scalp ÷ theta) — vol-инвариантный примитив (INV #7). 0.15 = консервативно (калибровка ETH-1м booked ~0.16 + гуру 10–15%/мес); уверенный флэт до ~1.0. Идёт в ИТОГ для не-крипты.">Покрытие (реалистично) <input name="coverage_anchor" type="number" step="any" value="0.15"></label>
-      <label title="ОПТИМИСТИЧНЫЙ потолок (не итог): доля дневного хода, ловимая скальпом на ВСЁМ лимите без минусовых дней. Доктрина-идеал >0.5 — но это потолок, не реализм.">Захват (потолок) <input name="capture" type="number" step="any" value="0.20"></label>
+      <label title="🌊 ЧОП-МОДЕЛЬ (реалистичный итог): доля времени в боковике/чопе. Статистически ~⅔. Скальп работает ТОЛЬКО в чопе.">Время в чопе f_chop <input name="f_chop" type="number" step="any" value="0.667"></label>
+      <label title="🌊 ЧОП-МОДЕЛЬ: целевое число кругов в день в чопе (Коровин: 200–250/мес ≈ 10/день).">Сделок/день <input name="trades_per_day" type="number" step="any" value="10"></label>
+      <label title="🌊 ЧОП-МОДЕЛЬ: какую долю КАЖДОГО колебания берём (твой пример: 0.05 из 0.10 = 0.5). Это know-how трейдера.">Доля хода (eff) <input name="scalp_eff" type="number" step="any" value="0.5"></label>
+      <label title="🌊 ЧОП-МОДЕЛЬ: локальный флет, который трейдер скальпит = эта доля дневного диапазона. АДАПТИВНО (когда диапазон 0.10→0.30, берётся следующая часть). 0.25 консервативно.">Флет (×дн.диапазон) <input name="flat_frac" type="number" step="any" value="0.25"></label>
+      <label title="ОПТИМИСТИЧНЫЙ потолок (не итог): доля дневного хода на ВСЁМ лимите без минусовых дней.">Захват (потолок) <input name="capture" type="number" step="any" value="0.20"></label>
       <label title="крипта: мерить скальп по реальному 1-мин фиду Binance (медленнее — тянет 1-мин историю). off = сценарий захвата.">1-мин измерение <select name="use_1m"><option value="true">on (крипта: измерять по 1-мин)</option><option value="false">off (сценарий)</option></select></label>
       <label title="источник IV для цены стреддла. auto = реальный вол-индекс по классу (для BTC/ETH — Deribit DVOL)">IV source <select name="iv_source"><option value="auto">auto (real vol-index)</option><option value="realized">realized vol</option><option value="constant">constant</option></select></label>
       <label>IV window <input name="iv_window" type="number" value="20"></label>
@@ -518,6 +521,6 @@
     <div class="tradetable" id="sim-grid"></div>
   </section>
 
-  <script src="/app.js?v=93"></script>
+  <script src="/app.js?v=94"></script>
 </body>
 </html>

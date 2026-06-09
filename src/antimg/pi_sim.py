@@ -89,6 +89,8 @@ class PiSimResult:
     scalp_source: str = "anchor"         # "1m-measured" (crypto, real) | "anchor" (else, calibrated)
     scalp_income: float = 0.0            # headline contribution used in totals (conservative)
     coverage: float = 0.0                # scalp_income / theta_cost  (≥1 = flat self-pays the rent)
+    chop: dict = field(default_factory=dict)        # adaptive chop-scalp model (the trader's know-how)
+    chop_diag: dict = field(default_factory=dict)   # MEASURED chop fraction / path (grounds the model)
     payoff: dict = field(default_factory=dict)   # terminal payoff curves (straddle vs scalp-tilted V)
     # --- 4. verdict + presentation -----------------------------------------------------
     total_net: float = 0.0               # straddle_net + scalp_income
@@ -184,7 +186,8 @@ def simulate(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, sta
              grid_mult: float = 2.0, intraday_frac: float = 1.0 / 3.0, capture: float = 0.20,
              coverage_anchor: float = 0.15, r: float = 0.045, atr_period: int = 14,
              intraday: pd.DataFrame | None = None, intraday_label: str = "1m",
-             vol_label: str = "") -> PiSimResult:
+             f_chop: float = 2.0 / 3.0, trades_per_day: float = 10.0, scalp_eff: float = 0.5,
+             flat_frac: float = 0.25, vol_label: str = "") -> PiSimResult:
     """Run ONE ПИ period: entry → grid → outcome, every figure exposed. `intraday` (optional 1m/60m
     OHLC) MEASURES the scalp on a real path; the scalp is also reported as a BAND: a realistic anchor
     (coverage_anchor × theta — the vol-invariant primitive, calibrated to the ETH-1m + guru 10–15%/mo)
@@ -239,9 +242,23 @@ def simulate(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, sta
     res.sum_daily_range = float(rng)
     # OPTIMISTIC ceiling — books `capture` of EVERY day's full range on the WHOLE limit, no losers.
     res.scalp_scenario = float(capture * rng * limit)
-    # REALISTIC anchor — coverage is the vol-invariant profitability primitive (INVARIANT #7); anchor it
-    # to the one hard 1m calibration (ETH ~0.16 booked) + guru's 10–15%-of-premium/mo. So scalp ≈ c·theta.
-    res.scalp_realistic = float(coverage_anchor * res.theta_cost)
+    # ADAPTIVE CHOP model (the trader's know-how): ~`trades_per_day` round-trips booking `scalp_eff` of a
+    # local flat (`flat_frac` of the daily range) on ONE working part, only while chopping (`f_chop`).
+    res.chop = chop_coverage_model(daily_range=atr, part_lots=part_lots, theta=res.theta_cost,
+                                   n_days=len(period), f_chop=f_chop, trades_per_day=trades_per_day,
+                                   eff=scalp_eff, flat_frac=flat_frac)
+    res.chop_diag = measure_chop_diag(
+        intraday if (intraday is not None and not intraday.empty) else period,
+        is_daily=(intraday is None or intraday.empty))
+    # REALISTIC anchor — now the CHOP MODEL (grounded, adaptive, vol-invariant) instead of a flat fraction.
+    res.scalp_realistic = float(res.chop["income"])
+    # FEASIBILITY: does the real intraday path supply the motion the assumed cadence needs? Only TRUST
+    # this on true 1-min bars — 60m bars (≈7/day) badly undercount the path, so the check is unreliable.
+    avg_path = res.chop_diag.get("avg_path")
+    if avg_path is not None and intraday_label == "1m":
+        res.chop["feasible"] = bool(avg_path >= res.chop["path_needed_per_day"])
+        res.chop["path_headroom"] = round(avg_path / max(res.chop["path_needed_per_day"], 1e-9), 2)
+    res.chop["measured_chop_frac"] = res.chop_diag.get("chop_frac")
     if intraday is not None and not intraday.empty:
         islice = intraday.loc[(intraday.index >= entry) & (intraday.index <= period.index[-1] + pd.Timedelta(days=1))]
         realized, open_mtm, rts, net_lots = measure_scalp_1m(islice, S0, res.grid, n_parts)
@@ -383,6 +400,70 @@ def rolling_edge(daily: pd.DataFrame, vol_model, *, ticker: str, label: str = ""
     return e
 
 
+def chop_coverage_model(*, daily_range: float, part_lots: float, theta: float, n_days: int,
+                        f_chop: float = 2.0 / 3.0, trades_per_day: float = 10.0, eff: float = 0.5,
+                        flat_frac: float = 0.25) -> dict:
+    """ADAPTIVE CHOP-SCALP model (the trader's know-how, made conservative & vol-invariant).
+
+    Premise: in a chop phase the trader READS the current realized flat and re-sizes the grid to it —
+    booking `eff` (≈50%) of each swing on ONE working part, ~`trades_per_day` times, only while chopping
+    (`f_chop` of the time, statistically ~⅔). The local flat the trader scalps is `flat_frac` of the
+    instrument's daily range (it ADAPTS per instrument & per regime — when the range widens 0.10→0.30 the
+    next working part takes over with a wider TP). So:
+
+        flat_width = flat_frac · daily_range           # the consolidation the trader works (adapts)
+        tp         = eff · flat_width                  # take-profit per trade (½ of the swing)
+        $/chop-day = trades_per_day · tp · part_lots
+        $/period   = n_days · f_chop · $/chop-day
+        coverage   = $/period ÷ theta                  # does the flat pay the rent?
+
+    Vol-invariant (INVARIANT #7): flat_width ∝ σ·S and part_lots ∝ premium/(σ·S), so the product ∝
+    premium ⇒ coverage depends on trades/day × eff × flat_frac × f_chop, NOT on the instrument's vol.
+    Conservative levers: eff (skill), flat_frac (how much of the range is a clean flat), f_chop. The
+    `path_needed_per_day = trades_per_day·tp·2` is the FEASIBILITY check — the real intraday path must
+    supply at least this much motion (validated against the measured 1m/60m path)."""
+    flat_width = flat_frac * max(daily_range, 0.0)
+    tp = eff * flat_width
+    per_chop_day = trades_per_day * tp * max(part_lots, 0.0)
+    income = n_days * f_chop * per_chop_day
+    return {
+        "flat_frac": flat_frac, "f_chop": f_chop, "trades_per_day": trades_per_day, "eff": eff,
+        "flat_width": round(flat_width, 4), "tp": round(tp, 4),
+        "per_chop_day": round(per_chop_day, 2), "income": round(income, 2),
+        "coverage": round(income / theta, 4) if theta > 0 else 0.0,
+        "path_needed_per_day": round(trades_per_day * tp * 2.0, 4),
+    }
+
+
+def measure_chop_diag(bars: pd.DataFrame, *, is_daily: bool, chop_er: float = 0.5) -> dict:
+    """Ground the chop model in REAL data: per calendar day compute range (H−L), intraday PATH (Σ|Δclose|,
+    only meaningful for intraday bars), and the efficiency ratio ER=|C−O|/path (low ER = oscillation =
+    chop). Returns the measured chop-day fraction, avg range, avg path, and path/range — so the user can
+    check whether their `f_chop`, `flat_frac` and `trades_per_day` assumptions are realistic here."""
+    if bars is None or bars.empty:
+        return {}
+    g = bars.groupby(bars.index.normalize())
+    n = 0; chop = 0; sum_rng = 0.0; sum_path = 0.0; sum_er = 0.0
+    for _, day in g:
+        H = float(day["High"].max()); L = float(day["Low"].min()); W = H - L
+        c = day["Close"].to_numpy(float); o = float(day["Open"].iloc[0])
+        if is_daily or len(c) < 3:
+            path = W                                          # daily bar: path unknown → use the range
+            er = abs(c[-1] - o) / max(W, 1e-9)
+        else:
+            path = float(np.abs(np.diff(c)).sum())
+            er = abs(c[-1] - o) / max(path, 1e-9)
+        n += 1; sum_rng += W; sum_path += path; sum_er += er
+        if er < chop_er:
+            chop += 1
+    if n == 0:
+        return {}
+    return {"n_days": n, "chop_days": chop, "chop_frac": round(chop / n, 3),
+            "avg_range": round(sum_rng / n, 4), "avg_path": round(sum_path / n, 4),
+            "path_over_range": round((sum_path / n) / max(sum_rng / n, 1e-9), 2),
+            "avg_er": round(sum_er / n, 3), "is_daily": is_daily}
+
+
 def _atr(daily: pd.DataFrame, period: int, asof) -> float:
     """Plain Wilder-ish ATR (mean true range) over `period` bars ending at/just before `asof`."""
     d = daily.loc[daily.index <= asof]
@@ -407,18 +488,25 @@ def _verdict(r: PiSimResult) -> str:
         cov_txt = (f"Скальп ИЗМЕРЕН по реальному 1-мин пути: {r.scalp_round_trips} кругов +${r.scalp_realized:,.0f} "
                    f"({(max(r.scalp_realized or 0,0))/r.theta_cost*100:.0f}% теты)")
         if stuck < -1.0:
-            cov_txt += (f", НО залипшие контр-трендовые части −${abs(stuck):,.0f}: на тренде скальп истекает, "
-                        f"а зарабатывает гамма стреддла (доктрина, не баг). Итог скальпа ${r.scalp_income:,.0f}.")
+            cov_txt += (f", НО залипшие контр-трендовые части −${abs(stuck):,.0f}: на тренде ФИКСИРОВАННАЯ сетка "
+                        f"истекает, а зарабатывает гамма (доктрина). Итог фикс-скальпа ${r.scalp_income:,.0f}.")
         else:
             cov_txt += (". Флет — почти без залипания: "
                         + ("сам окупает тету (≥100%)." if cov >= 1.0 else "часть теты добивает гамма."))
+        cm = r.chop
+        cov_txt += (f" ⟶ АДАПТИВНО (если ре-центрировать сетку по чопу — know-how трейдера): "
+                    f"${cm.get('income',0):,.0f} = {cm.get('coverage',0)*100:.0f}% теты"
+                    + (f", и реальный путь это ТЯНЕТ (×{cm.get('path_headroom')} запас, {cm.get('trades_per_day',10):.0f} сделок/день достижимо)"
+                       if cm.get('feasible') else "")
+                    + f". Разница ${cm.get('income',0)-r.scalp_income:,.0f} = цена ручной подстройки vs «поставил и забыл».")
     else:
-        floor_txt = (f" Замер на 60-мин барах (грубо недооценивает мелкую сетку) даёт пол ≈${r.scalp_floor:,.0f}."
-                     if r.scalp_floor is not None else "")
-        cov_txt = (f"Скальп — БЕЗ free 1-мин фида НЕ измеряется. Беру РЕАЛИСТИЧНЫЙ якорь: покрытие "
-                   f"{r.coverage_anchor*100:.0f}% теты = ${r.scalp_realistic:,.0f} (калибровка по ETH-1м + гуру 10–15%/мес). "
-                   f"Оптимистичный потолок (захват {r.scalp_capture*100:.0f}% дневн.хода на всём лимите, без минусовых дней) "
-                   f"= ${r.scalp_scenario:,.0f}.{floor_txt} Беру консервативно якорь.")
+        feas = (" ✅ путь реальных баров это подтверждает" if r.chop.get("feasible")
+                else (" ⚠ путь дневных баров достижимость не проверяет" if r.chop_diag.get("is_daily", True) else " ⚠ реальный путь маловат для такой частоты"))
+        cov_txt = (f"Скальп — АДАПТИВНАЯ ЧОП-МОДЕЛЬ (know-how трейдера): {r.chop.get('trades_per_day',10):.0f} сделок/день × "
+                   f"{r.chop.get('eff',0.5)*100:.0f}% локального флета × {r.chop.get('f_chop',0)*100:.0f}% времени в чопе "
+                   f"= ${r.scalp_realistic:,.0f} = {r.coverage*100:.0f}% теты.{feas}. "
+                   f"(Замер: чоп {(r.chop_diag.get('measured_chop_frac') or r.chop_diag.get('chop_frac') or 0)*100:.0f}% дней.) "
+                   f"Потолок (оптимизм) ${r.scalp_scenario:,.0f}.")
     return f"{head} {move_txt} {cov_txt} Макс. риск всё время ограничен премией ${r.theta_cost:,.0f}."
 
 
@@ -459,11 +547,24 @@ def _narrate(r: PiSimResult) -> list[dict]:
              if r.scalp_source == "1m-measured" else
              (f"Без free 1-мин фида скальп НЕ измеряется честно, поэтому даю ПОЛОСУ:\n"
               + (f"• ПОЛ (замер на 60-мин барах, грубо недооценивает мелкую сетку): ${r.scalp_floor:,.0f}\n" if r.scalp_floor is not None else "")
-              + f"• РЕАЛИСТИЧНО (якорь покрытия {r.coverage_anchor*100:.0f}% теты — калибровка по ETH-1м + гуру 10–15%/мес): "
-              f"${r.scalp_realistic:,.0f}  ← беру это в итог\n"
-              f"• ПОТОЛОК (оптимизм: захват {r.scalp_capture*100:.0f}% дневн.хода на ВСЁМ лимите, без минусовых дней): "
-              f"${r.scalp_scenario:,.0f}\n"
-              f"⚠ покрытие — vol-инвариантный примитив (INV #7): зависит от кругов/мес × доли захвата, не от воли инструмента.")) },
+              + f"• РЕАЛИСТИЧНО — АДАПТИВНАЯ ЧОП-МОДЕЛЬ: ${r.scalp_realistic:,.0f} ({r.coverage*100:.0f}% теты)  ← в итог. "
+              f"{r.chop.get('trades_per_day',10):.0f} сделок/день × {r.chop.get('eff',0.5)*100:.0f}% от локального флета "
+              f"(TP ${r.chop.get('tp',0):,.2f} = {r.chop.get('flat_frac',0)*100:.0f}% дневн.хода) × {r.chop.get('f_chop',0)*100:.0f}% времени в чопе.\n"
+              f"• ПОТОЛОК (захват {r.scalp_capture*100:.0f}% дневн.хода на ВСЁМ лимите, без минусовых дней): ${r.scalp_scenario:,.0f}\n"
+              f"⚠ покрытие — vol-инвариант (INV #7): {r.chop.get('trades_per_day',10):.0f}×{r.chop.get('eff',0.5)*100:.0f}%×{r.chop.get('flat_frac',0)*100:.0f}%×{r.chop.get('f_chop',0)*100:.0f}%, не воля инструмента.")) },
+        {"n": 6.5, "title": "🌊 Чоп-модель — проверка реальными данными",
+         "body": (
+             f"Замер по {'1-мин' if not r.chop_diag.get('is_daily') else 'дневным'} барам: "
+             f"в чопе {(r.chop_diag.get('chop_frac') or 0)*100:.0f}% дней (ER<0.5 = колебания > хода); "
+             f"средний дневной диапазон ${r.chop_diag.get('avg_range',0):,.2f}"
+             + (f", реальный путь/день ${r.chop_diag.get('avg_path',0):,.2f} = ×{r.chop_diag.get('path_over_range',0):.1f} от диапазона. "
+                f"Нужно для {r.chop.get('trades_per_day',10):.0f} сделок: ${r.chop.get('path_needed_per_day',0):,.2f}/день → "
+                + ("✅ ДОСТИЖИМО" if r.chop.get('feasible') else "⚠ путь маловат")
+                + f" (запас ×{r.chop.get('path_headroom','—')})."
+                if not r.chop_diag.get('is_daily') else
+                ". Путь внутри дня дневные бары не видят — достижимость 10 сделок/день НЕ проверена (нужна крипта 1-мин).")
+             + f" Вывод: чоп-модель {'подтверждается' if r.chop.get('feasible') else 'правдоподобна, но не подтверждена'} — "
+             f"покрытие {r.coverage*100:.0f}% теты при ЭТИХ допущениях трейдера.")},
         {"n": 7, "title": "Итог в деньгах",
          "body": (f"Ядро {'+' if r.straddle_net>=0 else ''}${r.straddle_net:,.0f} + скальп "
                   f"{'+' if r.scalp_income>=0 else ''}${r.scalp_income:,.0f} = "

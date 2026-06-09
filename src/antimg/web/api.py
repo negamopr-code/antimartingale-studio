@@ -1396,7 +1396,9 @@ def pi_sim(req: PiSimReq):
                              grid_atr_frac=req.grid_atr_frac, grid_mult=req.grid_mult,
                              intraday_frac=req.intraday_frac, capture=req.capture,
                              coverage_anchor=req.coverage_anchor, r=req.r, atr_period=req.atr_period,
-                             intraday=intraday, intraday_label=intraday_label, vol_label=vm.label)
+                             intraday=intraday, intraday_label=intraday_label,
+                             f_chop=req.f_chop, trades_per_day=req.trades_per_day,
+                             scalp_eff=req.scalp_eff, flat_frac=req.flat_frac, vol_label=vm.label)
     except ValueError as ex:
         raise HTTPException(status_code=422, detail=str(ex))
     payload = {k: v for k, v in vars(res).items()}

@@ -336,6 +336,12 @@ class PiSimReq(BaseModel):
     # Default 0.15 = the conservative calibration (ETH-1m booked ~0.16 + guru's 10–15%-of-premium/mo);
     # уверенный флэт can reach ~1.0. The non-crypto headline uses coverage_anchor × theta.
     coverage_anchor: float = Field(0.15, ge=0, le=2.0)
+    # ADAPTIVE CHOP-SCALP model (the trader's manual range-adjustment know-how) — the realistic headline.
+    # scalp ≈ n_days·f_chop·trades_per_day·(scalp_eff·flat_frac·daily_range)·part_lots ; vol-invariant.
+    f_chop: float = Field(0.667, ge=0, le=1.0)               # fraction of time in chop (stat. ~⅔)
+    trades_per_day: float = Field(10.0, ge=0, le=200)        # target round-trips/day in chop
+    scalp_eff: float = Field(0.5, ge=0, le=1.0)              # fraction of each swing booked (trader skill)
+    flat_frac: float = Field(0.25, ge=0, le=2.0)             # local flat = this × daily range (adapts)
     use_1m: bool = True                                      # crypto: measure scalp on the real 1m feed
     # scan mode: roll NON-overlapping windows over [scan_start, scan_end] for the WHOLE catalog and rank
     # by edge (straddle core is real; scalp = anchor). 1m is NOT used in scan (too slow) — anchor only.

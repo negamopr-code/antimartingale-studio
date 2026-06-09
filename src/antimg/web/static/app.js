@@ -1900,18 +1900,29 @@ async function renderPiSim(d) {
   // money breakdown
   const cov = (d.coverage * 100).toFixed(0);
   let scalpLine;
+  const ch = d.chop || {}, dg = d.chop_diag || {};
+  const chopLine = `  🌊 АДАПТИВНАЯ ЧОП-МОДЕЛЬ: ${money(ch.income)} = ${(ch.coverage * 100).toFixed(0)}% теты\n`
+    + `     ${(ch.trades_per_day || 10)} сделок/день × ${((ch.eff || 0.5) * 100).toFixed(0)}% хода (TP $${(ch.tp || 0).toFixed(2)} = ${((ch.flat_frac || 0) * 100).toFixed(0)}% дн.диапазона) × ${((ch.f_chop || 0) * 100).toFixed(0)}% времени в чопе\n`
+    + `     замер: чоп ${((dg.chop_frac ?? 0) * 100).toFixed(0)}% дней`
+    + (dg.path_over_range != null ? `, реальный путь ×${dg.path_over_range} диапазона; нужно $${(ch.path_needed_per_day || 0).toFixed(1)}/день → ${ch.feasible ? `✅ ДОСТИЖИМО (запас ×${ch.path_headroom})` : (dg.is_daily ? "не проверить без 1-мин" : "путь маловат")}` : ` (1-мин нет — достижимость не проверена)`)
+    + `\n`;
   if (d.scalp_source === "1m-measured") {
     const bcov = (Math.max(d.scalp_realized, 0) / d.theta_cost * 100).toFixed(0);
-    scalpLine = `скальп booked 1м   : ${money(d.scalp_realized)}  (= ${bcov}% теты, ${d.scalp_round_trips} закрытых кругов — РЕАЛЬНЫЙ замер)\n`
-      + `скальп залипшие    : ${money(d.scalp_open_mtm)}  (контр-тренд части по рынку; на тренде в минус, гамма их кроет)\n`
-      + `скальп ИТОГО (вклад): ${money(d.scalp_income)}`;
+    const gap = (ch.income || 0) - d.scalp_income;
+    scalpLine = `── ФИКСИРОВАННАЯ сетка (РЕАЛЬНЫЙ 1-мин замер этого месяца) ──\n`
+      + `скальп booked 1м   : ${money(d.scalp_realized)}  (= ${bcov}% теты, ${d.scalp_round_trips} закрытых кругов)\n`
+      + `скальп залипшие    : ${money(d.scalp_open_mtm)}  (контр-тренд части; на тренде в минус, гамма кроет)\n`
+      + `фикс-скальп ИТОГО  : ${money(d.scalp_income)}   ← в общий ИТОГ (что реально сделала «поставил-и-забыл» сетка)\n`
+      + `── vs АДАПТИВНО (ре-центрируем по чопу — know-how трейдера) ──\n`
+      + chopLine
+      + `     ⟶ разница ${money(gap)} = цена ручной подстройки (адаптивный не залипает на тренде)`;
   } else {
     const floorLine = (d.scalp_floor != null)
-      ? `  ├ пол (замер 60-мин, недооценка): ${money(d.scalp_floor)}\n` : "";
-    scalpLine = `скальп — ОЦЕНКА ПОЛОСОЙ (нет free 1-мин фида ⇒ не измеряется честно):\n`
+      ? `  ├ пол (замер 60-мин, недооценка мелкой сетки): ${money(d.scalp_floor)}\n` : "";
+    scalpLine = `скальп — ОЦЕНКА ПОЛОСОЙ (нет free 1-мин фида ⇒ не измеряется напрямую):\n`
       + floorLine
-      + `  ├ РЕАЛИСТИЧНО (якорь ${(d.coverage_anchor * 100).toFixed(0)}% теты): ${money(d.scalp_realistic)}   ← в итог\n`
-      + `  └ потолок (оптимизм, захват ${(d.scalp_capture * 100).toFixed(0)}% дн.хода): ${money(d.scalp_scenario)}\n`
+      + chopLine.replace("\n", "  ← в ИТОГ\n")
+      + `  └ потолок (оптимизм, захват ${(d.scalp_capture * 100).toFixed(0)}% дн.хода на всём лимите): ${money(d.scalp_scenario)}\n`
       + `скальп (вклад в итог): ${money(d.scalp_income)}  = ${cov}% теты`;
   }
   $("#sim-stats").textContent =
