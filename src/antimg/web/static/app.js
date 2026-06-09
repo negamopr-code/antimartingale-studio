@@ -1779,6 +1779,7 @@ async function renderPiSimPeriods(d) {
 
   $("#sim-periods-stats").textContent =
     `📋 ${a.ticker} — ${a.n} периодов по ${a.dte_days} дн (${a.start} → ${a.end}), депозит $${a.deposit.toLocaleString()}, премия $${Math.round(a.premium).toLocaleString()}/период\n`
+    + `ℹ️ Это СРЕДНЕЕ/сумма по ${a.n} периодам. Одиночный прогон («💵 Прогнать в деньгах») = ОДИН период (строка с той же датой входа — совпадает до доллара). Один период может быть в плюсе, а среднее — в минусе.\n`
     + `\n── СРЕДНЕЕ ЗА ПЕРИОД ──\n`
     + `стреддл-ядро : ${money(a.straddle_mean)}/период  (выигрышных ${a.straddle_win_pct}% — длинный стреддл сам по себе ${a.straddle_mean < 0 ? "кровоточит" : "в плюсе"})\n`
     + `скальп       : ${money(a.scalp_mean)}/период  (чоп-модель − залипшие части)\n`
@@ -2011,7 +2012,10 @@ async function renderPiSim(d) {
   const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
   const asset = (d.ticker || "").split("-")[0] || d.ticker;
   // verdict banner
-  $("#sim-verdict").textContent = d.verdict;
+  $("#sim-verdict").textContent = d.verdict
+    + `\n\nℹ️ Это ОДИН период (вход ${d.entry_date} → ${d.expiry_date}) — одна выборка из распределения, НЕ среднее. `
+    + `Кнопка «📋 Таблица по периодам» прогонит ВСЮ историю и покажет СРЕДНЕЕ; этот период = строка таблицы с датой входа ${d.entry_date} (совпадёт до доллара). `
+    + `«Start» здесь = дата ВХОДА; в таблице тот же «Start» = НАЧАЛО истории.`;
   $("#sim-verdict").style.color = d.total_net >= 0 ? "#3fb950" : "#f85149";
 
   // step cards
