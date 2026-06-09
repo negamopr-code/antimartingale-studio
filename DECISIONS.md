@@ -1093,3 +1093,17 @@ Not implemented; documented as a rejected tactic.
 - UI: 4 chop knobs (f_chop, trades/day, eff, flat_frac) replace coverage_anchor; band leads with the chop
   model + measured chop-fraction + feasibility; crypto shows fixed-vs-adaptive side by side. 145 tests (+2).
   assets v94.
+
+## D90 — Tab 14: NET of working parts + use MEASURED chop fraction (user caught the gap) (2026-06-09)
+- **User caught it:** on SPY +3.75% the chop model headlined +$387 but never netted the WORKING PARTS — the
+  grid sold at 622/622.5/623.3/624.8 and price ran to 645, so those parts are stranded short. Also «straddle
+  not in plus though price went 621.72→645.05» — correct: +3.75% < the 5.03% breakeven (premium=2·c0=$31 at
+  20% IV) ⇒ the straddle loses; a big-LOOKING move still isn't enough at 20% vol. Not a bug — explained.
+- **Fixes:** (1) chop income now uses the MEASURED chop-day fraction (`income_effective`), not assumed ⅔ —
+  trending months auto-deflate (SPY 44% → $258 vs $387). (2) NET the stranded parts: `scalp_realistic =
+  income_effective + min(0, stuck)`. `stuck` = the MEASURED open-leg mark (gate-managed, 1m/60m) when
+  available, else `_stuck_drag_fixed(grid,S0,S_T)` (fixed-grid upper bound). SPY: fixed grid would strand
+  −$448 (the user's worry, confirmed), but with the flat-gate the measured drag ≈ $0 → net scalp $258, total
+  ≈ flat (+$4, was +$133). The gate («don't fade the breakout») is exactly what saves the parts — both shown.
+- UI/verdict/narration show net-of-parts (oscillation − stuck = net) + fixed-vs-gate stuck. 146 tests (+1
+  _stuck_drag_fixed monotonic). assets v95.

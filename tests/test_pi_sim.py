@@ -110,10 +110,22 @@ def test_scalp_band_and_chop_headline():
                          dte_days=30, risk_pct=0.10, capture=0.20, flat_frac=0.25)
     assert res.scalp_source == "anchor"
     assert res.chop["income"] > 0
-    assert res.scalp_realistic == pytest.approx(res.chop["income"])     # chop model is the headline
+    assert res.scalp_realistic == pytest.approx(res.chop["net"])        # chop model NET of working parts
     assert res.scalp_income == pytest.approx(res.scalp_realistic)
-    assert res.coverage == pytest.approx(res.chop["coverage"], abs=1e-6)
     assert res.scalp_scenario >= 0
+    # net = oscillation harvest (effective) + the stuck-parts drag (≤0)
+    assert res.chop["net"] == pytest.approx(res.chop["income_effective"] + min(0.0, res.chop["stuck_used"]), abs=0.02)
+
+
+def test_stuck_drag_strands_working_parts_on_a_trend():
+    """«Net of working parts»: a one-way move strands the counter-trend grid — _stuck_drag_fixed ≤ 0 and
+    grows with the move; a flat (S_T=S0) strands nothing."""
+    grid = pisim._build_grid(100.0, first_step=0.5, grid_mult=1.8, n_parts=5, part_lots=1.0)
+    assert pisim._stuck_drag_fixed(grid, 100.0, 100.0) == 0.0           # no move → nothing stuck
+    d_small = pisim._stuck_drag_fixed(grid, 100.0, 103.0)
+    d_big = pisim._stuck_drag_fixed(grid, 100.0, 110.0)
+    assert d_big < d_small < 0                                          # bigger up-move → deeper stuck short
+    assert pisim._stuck_drag_fixed(grid, 100.0, 90.0) < 0               # down-move strands longs too
 
 
 def test_payoff_tilt_envelope_skews_the_v():

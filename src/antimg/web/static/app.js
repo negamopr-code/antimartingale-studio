@@ -1901,10 +1901,11 @@ async function renderPiSim(d) {
   const cov = (d.coverage * 100).toFixed(0);
   let scalpLine;
   const ch = d.chop || {}, dg = d.chop_diag || {};
-  const chopLine = `  🌊 АДАПТИВНАЯ ЧОП-МОДЕЛЬ: ${money(ch.income)} = ${(ch.coverage * 100).toFixed(0)}% теты\n`
-    + `     ${(ch.trades_per_day || 10)} сделок/день × ${((ch.eff || 0.5) * 100).toFixed(0)}% хода (TP $${(ch.tp || 0).toFixed(2)} = ${((ch.flat_frac || 0) * 100).toFixed(0)}% дн.диапазона) × ${((ch.f_chop || 0) * 100).toFixed(0)}% времени в чопе\n`
-    + `     замер: чоп ${((dg.chop_frac ?? 0) * 100).toFixed(0)}% дней`
-    + (dg.path_over_range != null ? `, реальный путь ×${dg.path_over_range} диапазона; нужно $${(ch.path_needed_per_day || 0).toFixed(1)}/день → ${ch.feasible ? `✅ ДОСТИЖИМО (запас ×${ch.path_headroom})` : (dg.is_daily ? "не проверить без 1-мин" : "путь маловат")}` : ` (1-мин нет — достижимость не проверена)`)
+  const chopLine = `  🌊 АДАПТИВНАЯ ЧОП-МОДЕЛЬ (net рабочих частей):\n`
+    + `     осцилляция в чопе: ${money(ch.income_effective)}  (${(ch.trades_per_day || 10)} сд/день × ${((ch.eff || 0.5) * 100).toFixed(0)}% хода, TP $${(ch.tp || 0).toFixed(2)} = ${((ch.flat_frac || 0) * 100).toFixed(0)}% диапазона, ИЗМЕРЕНО чоп ${((dg.chop_frac ?? 0) * 100).toFixed(0)}% дней)\n`
+    + `     − залипшие рабочие части: ${money(ch.stuck_used)}  ${(ch.stuck_used >= -1) ? "(flat-гейт сдержал — не фейдим пробой)" : "(стянуты трендом)"}  [фикс-сетка без гейта была бы ${money(ch.stuck_fixed)}]\n`
+    + `     = НЕТТО скальп: ${money(ch.net)} = ${(d.coverage * 100).toFixed(0)}% теты`
+    + (dg.path_over_range != null ? `;  путь ×${dg.path_over_range} диапазона, нужно $${(ch.path_needed_per_day || 0).toFixed(1)}/день → ${ch.feasible ? `✅ ${(ch.trades_per_day||10)} сд/день достижимо (×${ch.path_headroom})` : (dg.is_daily ? "достижимость без 1-мин не проверить" : "путь 60-мин груб")}` : ``)
     + `\n`;
   if (d.scalp_source === "1m-measured") {
     const bcov = (Math.max(d.scalp_realized, 0) / d.theta_cost * 100).toFixed(0);
