@@ -1846,8 +1846,19 @@ async function renderSimPayoff(d, asset) {
     traces.push({ x: p.S, y: p.tilt_long, type: "scatter", mode: "lines", name: "перекос если скальп нетто-ЛОНГ (полный лимит)",
       line: { color: "#3fb950", width: 1.6, dash: "dash" } });
   }
-  const ymin = Math.min(...p.straddle, ...(p.tilt_short || p.tilted || [0]));
-  const ymax = Math.max(...p.straddle, ...(p.tilt_long || p.tilted || [0]));
+  // ★ WHERE WE ENDED UP: the actual result point at (S_T, total P&L = straddle core + scalp)
+  const resColor = d.total_net >= 0 ? "#3fb950" : "#f85149";
+  traces.push({ x: [d.S_T], y: [d.total_net], type: "scatter", mode: "markers+text",
+    name: "★ ИТОГ (где мы оказались)", marker: { color: resColor, size: 17, symbol: "star", line: { color: "#0f1419", width: 1 } },
+    text: [`  ИТОГ ${d.total_net >= 0 ? "+$" : "−$"}${Math.abs(Math.round(d.total_net)).toLocaleString()} (${d.total_pct >= 0 ? "+" : ""}${d.total_pct.toFixed(1)}%)`],
+    textposition: "middle right", textfont: { size: 12, color: resColor },
+    hovertext: [`S_T=$${Math.round(d.S_T).toLocaleString()} · ядро ${d.straddle_net >= 0 ? "+" : "−"}$${Math.abs(Math.round(d.straddle_net))} + скальп ${d.scalp_income >= 0 ? "+" : "−"}$${Math.abs(Math.round(d.scalp_income))} = ${d.total_net >= 0 ? "+" : "−"}$${Math.abs(Math.round(d.total_net))}`], hoverinfo: "text" });
+  // a small hollow marker on the straddle curve itself = the gamma-core result (before scalp)
+  traces.push({ x: [d.S_T], y: [d.straddle_net], type: "scatter", mode: "markers", name: "стреддл-ядро в S_T",
+    marker: { color: "#58a6ff", size: 9, symbol: "circle-open", line: { width: 2 } },
+    hovertext: [`ядро (только гамма): ${d.straddle_net >= 0 ? "+" : "−"}$${Math.abs(Math.round(d.straddle_net))}`], hoverinfo: "text" });
+  const ymin = Math.min(...p.straddle, ...(p.tilt_short || p.tilted || [0]), d.total_net);
+  const ymax = Math.max(...p.straddle, ...(p.tilt_long || p.tilted || [0]), d.total_net);
   const xmin = p.S[0], xmax = p.S[p.S.length - 1];
   // breakevens: the straddle ALONE breaks even at S0 ± premium/M; WITH the scalp income the V shifts up,
   // so the loss zone NARROWS to S0 ± (premium − scalp)/M (scalp ≥ premium ⇒ always green).
