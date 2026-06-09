@@ -435,10 +435,11 @@ def _max_drawdown(equity: list) -> float:
 
 
 def recovery_antimartingale(totals: list, *, deposit: float, cap_mult: float = 8.0) -> dict:
-    """«Recovery» antimartingale: DOUBLE the risk after a positive period while equity is BELOW its peak
-    (climb out of the drawdown faster), RESET to base (×1) the moment equity makes a NEW maximum, and reset
-    on a losing period (a loss never compounds). Since every $ result scales linearly with risk, the
-    multiplier scales the period's P&L. Returns scaled series, both equity curves, multipliers, stats."""
+    """«Recovery» antimartingale (user's rule): DOUBLE the risk ONLY after a WINNING period (and only while
+    equity is below its peak), HOLD the current risk on a losing period (we do NOT double on a loss, and we
+    do NOT reset — the risk stays where it was), and RESET to base (×1) ONLY when equity makes a NEW maximum.
+    Since every $ result scales linearly with risk, the multiplier scales the period's P&L. Returns scaled
+    series, both equity curves, multipliers, stats."""
     m = 1.0; hwm = deposit; eq = deposit; flat = deposit
     mults, scaled, am_eq, flat_eq = [], [], [], []
     for t in totals:
@@ -449,10 +450,9 @@ def recovery_antimartingale(totals: list, *, deposit: float, cap_mult: float = 8
         am_eq.append(round(eq, 1)); flat_eq.append(round(flat, 1))
         if eq >= hwm:                      # new equity maximum → lock in, back to base 10%
             hwm = eq; m = 1.0
-        elif s > 0:                        # positive but still below the peak → pyramid the recovery
+        elif s > 0:                        # WON this period (still below peak) → double the risk
             m = min(m * 2.0, cap_mult)
-        else:                              # losing period → reset (a loss never compounds)
-            m = 1.0
+        # else: LOST this period → HOLD the current multiplier (no double, no reset)
     return {"cap_mult": cap_mult, "multipliers": mults, "scaled": scaled,
             "am_equity": am_eq, "flat_equity": flat_eq,
             "am_final": round(eq, 1), "flat_final": round(flat, 1),

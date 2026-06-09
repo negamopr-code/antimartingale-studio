@@ -1136,3 +1136,13 @@ Not implemented; documented as a rejected tactic.
 - **Finding (SPY 90-DTE, 2010-26):** payoff 2.2× (avg win $464 / avg loss −$209), PF 3.9. AM lifts 8.9%→9.4%/yr
   but deepens maxDD −$1563→−$1828 and worst period −$385→−$658 — it amplifies variance, doesn't create edge
   (the doctrine: only helps if wins cluster). 149 tests (+1). assets v99.
+
+## D95 — pure-straddle (no-scalp) table + D96 — AM correction: HOLD on loss, not reset (2026-06-09)
+- **D95:** added a 2nd table below the periods table = the PURE straddle (no scalp at all) with its own
+  risk/reward, equity, and AM. Lays the scalp's value bare: SPY 90-DTE pure straddle −14%/yr (payoff 0.43,
+  PF 0.14 — VRP bleed) vs +6–9%/yr with scalp; AM on the losing straddle deepens it to −20%/yr (maxDD −$23k)
+  — pyramiding negative edge is catastrophic. v100.
+- **D96 (user correction):** the antimartingale must double ONLY on a WIN; on a LOSS it HOLDS the current
+  multiplier (does NOT double AND does NOT reset); reset to base 10% happens ONLY at a new equity maximum.
+  Fixed `recovery_antimartingale` (removed the loss→reset branch). Effect on SPY 90-DTE: AM 9.4%→11.8%/yr
+  but maxDD −$1.8k→−$4.6k and hits the ×8 cap — more aggressive, deeper drawdowns. 149 tests. assets v101.

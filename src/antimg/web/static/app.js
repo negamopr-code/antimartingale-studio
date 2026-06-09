@@ -1791,7 +1791,7 @@ async function renderPiSimPeriods(d) {
     + `сумма ИТОГО  : ${money(a.total_sum)}  (стреддл ${money(a.straddle_sum)} + скальп ${money(a.scalp_sum)})\n`
     + `доходность   : ${a.ann_return_pct >= 0 ? "+" : ""}${a.ann_return_pct}%/год  ·  лучший ${money(a.best)}  ·  худший ${money(a.worst)}  ·  макс.просадка ${money(am.flat_max_dd)}\n`
     + `средний ход  : ${a.avg_move_pct >= 0 ? "+" : ""}${a.avg_move_pct}% (|${a.avg_abs_move_pct}%|)  ·  средний безубыток ±${a.avg_breakeven_pct}%  ·  средняя IV ${(a.avg_iv * 100).toFixed(0)}%`
-    + (amOn ? `\n\n── 🎲 АНТИМАРТИНГЕЙЛ (удвоение на просадке, сброс на новом максимуме · cap ×${am.cap_mult}) ──\n`
+    + (amOn ? `\n\n── 🎲 АНТИМАРТИНГЕЙЛ (удваиваем ТОЛЬКО на выигрыше · на проигрыше ДЕРЖИМ · сброс к 10% на новом максимуме эквити · cap ×${am.cap_mult}) ──\n`
       + `итог: ${money(am.am_final - a.deposit)} vs база ${money(am.flat_final - a.deposit)}  →  ${am.am_ann_return_pct}%/год vs ${am.flat_ann_return_pct}%/год  (Δ ${(am.am_ann_return_pct - am.flat_ann_return_pct).toFixed(1)} пп)\n`
       + `макс.просадка ${money(am.am_max_dd)} vs ${money(am.flat_max_dd)}  ·  макс.множитель ×${am.max_mult}  ·  макс.проигрыш ${money(am.am_rr.max_loss)} vs ${money(rr.max_loss)}\n`
       + `⚠ антимартингейл НЕ создаёт edge на ~честной последовательности — усиливает дисперсию (больше просадка/худший период). Помогает только если плюсы кластеризуются.` : "");
