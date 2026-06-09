@@ -348,6 +348,7 @@ class PiSimReq(BaseModel):
     scan: bool = False
     scan_start: str = "2019-01-01"
     scan_end: str | None = None
+    am_cap_mult: float = Field(8.0, ge=1.0, le=64.0)         # periods table: cap on the antimartingale risk-doubling
     atr_period: int = Field(14, ge=2, le=200)
     r: float = Field(0.045, ge=-0.05, le=0.5)
     iv_window: int = Field(20, ge=2, le=500)

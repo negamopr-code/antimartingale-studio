@@ -1122,3 +1122,17 @@ Not implemented; documented as a rejected tactic.
   5.9%-of-price ATR gave a 451% outlier, capped. **Finding:** SPY 90-DTE = +8.9%/yr (64% win) vs 30-DTE =
   −7.4%/yr (37%) — quarterly's slow theta lets the scalp cover; the table uses the no-gate stuck bound
   (conservative; single-run 1m/60m with gate+response-orders is better). 148 tests (+2). assets v98.
+
+## D94 — periods table: risk/reward stats + recovery-antimartingale overlay (2026-06-09)
+- **Ask:** add risk/reward (avg/max win & loss) to the periods graph + a toggle to apply an antimartingale
+  that DOUBLES risk after a positive period until a NEW equity maximum, then resets to base 10%.
+- **Built:** `_risk_reward` (avg/max win&loss, win-rate, payoff ratio, profit factor, expectancy) into the
+  aggregate; `recovery_antimartingale(totals, deposit, cap_mult)` — m starts ×1, doubles after a positive
+  period taken in drawdown, RESETS to ×1 the moment equity makes a new high (locks in the recovery) and on
+  any losing period (a loss never compounds); P&L scales linearly with risk so m scales the period result.
+  Returns scaled series + flat/AM equity + maxDD + the AM risk/reward. Wired into `/api/pi-sim/periods`
+  (am_cap_mult, default 8×). UI: risk/reward block, equity chart (flat vs AM), AM stats + per-row AM×/AM-total,
+  am_on toggle + cap input.
+- **Finding (SPY 90-DTE, 2010-26):** payoff 2.2× (avg win $464 / avg loss −$209), PF 3.9. AM lifts 8.9%→9.4%/yr
+  but deepens maxDD −$1563→−$1828 and worst period −$385→−$658 — it amplifies variance, doesn't create edge
+  (the doctrine: only helps if wins cluster). 149 tests (+1). assets v99.

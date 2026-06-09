@@ -507,10 +507,12 @@
       <button type="button" id="pisim-periods" title="ВСЯ история выбранного инструмента: каждая строка = один период DTE (напр. 90 дней) с результатом по стреддлу, скальпу и итогу. График выплат показывает СРЕДНИЙ период.">📋 Таблица по периодам (вся история)</button>
       <button type="button" id="pisim-scan-all" title="ОДНОЙ КНОПКОЙ: прогнать ПИ по НЕпересекающимся месяцам за период (scan_start) для ВСЕХ инструментов каталога и ранжировать по edge. Стреддл-ядро РЕАЛЬНОЕ (цены+IV); скальп = якорь покрытия (1-мин в скане не гоняется). Первый прогон ~1–2 мин.">🏆 Есть ли edge? (ВСЕ инструменты)</button>
       <label title="скан: с какой даты катать месяцы (длиннее = надёжнее)">Скан с даты <input name="scan_start" value="2019-01-01"></label>
+      <label title="📋 таблица: наложить антимартингейл — удваивать риск после ПЛЮСОВОГО периода, пока в просадке; на новом максимуме эквити вернуться к базовым 10%; убыток сбрасывает к базе.">Антимартингейл <select name="am_on"><option value="off">off</option><option value="on">on (удвоение на просадке)</option></select></label>
+      <label title="📋 макс. множитель риска в антимартингейле (8× = до 80% депозита под риском)">AM cap × <input name="am_cap_mult" type="number" step="any" value="8"></label>
     </form>
     <div id="sim-periods" hidden>
       <pre class="stats" id="sim-periods-stats"></pre>
-      <div class="results"><div class="plots"><div id="sim-periods-payoff"></div><div id="sim-periods-hist"></div></div></div>
+      <div class="results"><div class="plots"><div id="sim-periods-payoff"></div><div id="sim-periods-equity"></div><div id="sim-periods-hist"></div></div></div>
       <h3 style="margin:14px 0 4px;font-size:14px;color:#8b949e">📋 По периодам — каждая строка = один срок DTE (ядро РЕАЛЬНОЕ; скальп = чоп-модель − залипшие части, БЕЗ активного гейта = консервативно) ↓</h3>
       <div class="tradetable" id="sim-periods-table"></div>
     </div>
@@ -528,6 +530,6 @@
     <div class="tradetable" id="sim-grid"></div>
   </section>
 
-  <script src="/app.js?v=98"></script>
+  <script src="/app.js?v=99"></script>
 </body>
 </html>

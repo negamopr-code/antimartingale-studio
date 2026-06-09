@@ -413,10 +413,59 @@ def rolling_edge(daily: pd.DataFrame, vol_model, *, ticker: str, label: str = ""
     return e
 
 
+def _risk_reward(vals: list) -> dict:
+    """Risk/reward of a P&L series: avg/max win & loss, win-rate, expectancy, payoff ratio, profit factor."""
+    wins = [v for v in vals if v > 0]; losses = [v for v in vals if v < 0]
+    n = len(vals)
+    aw = sum(wins) / len(wins) if wins else 0.0
+    al = sum(losses) / len(losses) if losses else 0.0
+    return {"avg_win": round(aw, 1), "avg_loss": round(al, 1),
+            "max_win": round(max(vals), 1) if vals else 0.0, "max_loss": round(min(vals), 1) if vals else 0.0,
+            "win_rate": round(100.0 * len(wins) / n, 1) if n else 0.0,
+            "expectancy": round(sum(vals) / n, 1) if n else 0.0,
+            "payoff_ratio": round(aw / abs(al), 2) if al else None,
+            "profit_factor": round(sum(wins) / abs(sum(losses)), 2) if losses else None}
+
+
+def _max_drawdown(equity: list) -> float:
+    peak = equity[0] if equity else 0.0; mdd = 0.0
+    for e in equity:
+        peak = max(peak, e); mdd = min(mdd, e - peak)
+    return round(mdd, 1)
+
+
+def recovery_antimartingale(totals: list, *, deposit: float, cap_mult: float = 8.0) -> dict:
+    """«Recovery» antimartingale: DOUBLE the risk after a positive period while equity is BELOW its peak
+    (climb out of the drawdown faster), RESET to base (×1) the moment equity makes a NEW maximum, and reset
+    on a losing period (a loss never compounds). Since every $ result scales linearly with risk, the
+    multiplier scales the period's P&L. Returns scaled series, both equity curves, multipliers, stats."""
+    m = 1.0; hwm = deposit; eq = deposit; flat = deposit
+    mults, scaled, am_eq, flat_eq = [], [], [], []
+    for t in totals:
+        mults.append(m)
+        s = t * m
+        scaled.append(round(s, 1))
+        eq += s; flat += t
+        am_eq.append(round(eq, 1)); flat_eq.append(round(flat, 1))
+        if eq >= hwm:                      # new equity maximum → lock in, back to base 10%
+            hwm = eq; m = 1.0
+        elif s > 0:                        # positive but still below the peak → pyramid the recovery
+            m = min(m * 2.0, cap_mult)
+        else:                              # losing period → reset (a loss never compounds)
+            m = 1.0
+    return {"cap_mult": cap_mult, "multipliers": mults, "scaled": scaled,
+            "am_equity": am_eq, "flat_equity": flat_eq,
+            "am_final": round(eq, 1), "flat_final": round(flat, 1),
+            "am_max_dd": _max_drawdown(am_eq), "flat_max_dd": _max_drawdown(flat_eq),
+            "max_mult": max(mults) if mults else 1.0,
+            "am_rr": _risk_reward(scaled), "flat_rr": _risk_reward([round(t, 1) for t in totals])}
+
+
 def rolling_periods(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, dte_days: int,
                     risk_pct: float, r: float, atr_period: int, n_parts: int, grid_atr_frac: float,
                     grid_mult: float, intraday_frac: float, f_chop: float, trades_per_day: float,
-                    scalp_eff: float, flat_frac: float, start: str, end: str | None = None) -> dict:
+                    scalp_eff: float, flat_frac: float, start: str, end: str | None = None,
+                    am_cap_mult: float = 8.0) -> dict:
     """One instrument, the WHOLE history: every NON-overlapping `dte_days` window is one row with the
     straddle-core result (REAL: prices+IV), the scalp result (adaptive chop model net of fixed-grid stuck
     parts — closed-form, no intraday over 15y), and the total. Returns rows + an aggregate (means/sums/win
@@ -479,8 +528,17 @@ def rolling_periods(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: flo
         "avg_move_pct": round(mean("move_pct"), 2), "avg_abs_move_pct": round(sum(abs(x["move_pct"]) for x in rows) / n, 2),
         "avg_breakeven_pct": round(mean("breakeven_pct"), 2), "avg_iv": round(mean("iv"), 4),
         "ann_return_pct": round(100.0 * sum(x["total"] for x in rows) / deposit / span_years, 2),
+        "risk_reward": _risk_reward([x["total"] for x in rows]),       # avg/max win & loss, RR, PF
     }
-    return {"rows": rows, "aggregate": agg}
+    # recovery-antimartingale overlay (double on a win below the peak, reset at a new equity high)
+    am = recovery_antimartingale([x["total"] for x in rows], deposit=deposit, cap_mult=am_cap_mult)
+    am["dates"] = [x["close"] for x in rows]
+    span = max(span_years, 1e-6)
+    am["am_ann_return_pct"] = round(100.0 * (am["am_final"] - deposit) / deposit / span, 2)
+    am["flat_ann_return_pct"] = agg["ann_return_pct"]
+    for x, mlt, sc in zip(rows, am["multipliers"], am["scaled"]):       # per-row AM fields for the table
+        x["am_mult"] = round(mlt, 2); x["am_total"] = round(sc, 1)
+    return {"rows": rows, "aggregate": agg, "am": am}
 
 
 def _stuck_drag_fixed(grid: list[dict], S0: float, S_T: float) -> float:

@@ -1431,7 +1431,7 @@ def pi_sim_periods(req: PiSimReq):
         r=req.r, atr_period=req.atr_period, n_parts=req.n_parts, grid_atr_frac=req.grid_atr_frac,
         grid_mult=req.grid_mult, intraday_frac=req.intraday_frac, f_chop=req.f_chop,
         trades_per_day=req.trades_per_day, scalp_eff=req.scalp_eff, flat_frac=req.flat_frac,
-        start=req.start, end=req.scan_end)
+        start=req.start, end=req.scan_end, am_cap_mult=req.am_cap_mult)
     if not out["rows"]:
         raise HTTPException(status_code=422, detail="no DTE window resolved (longer history or shorter DTE)")
     out["params"] = req.model_dump(); out["vol_model"] = vm.label

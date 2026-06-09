@@ -1769,7 +1769,8 @@ $("#picoin-rate-all").onclick = (e) => withBusy(e.target, async () => {
 // ---- Tab 14 periods: one instrument's WHOLE history as a table + the AVERAGE-period payoff
 async function renderPiSimPeriods(d) {
   const money = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(Math.round(x)).toLocaleString();
-  const a = d.aggregate, rows = d.rows;
+  const a = d.aggregate, rows = d.rows, am = d.am, rr = a.risk_reward;
+  const amOn = ($("#form-pisim [name=am_on]") || {}).value === "on";
   $("#sim-periods").hidden = false; $("#sim-scan").hidden = true;
   $("#sim-verdict").textContent = ""; $("#sim-steps").innerHTML = "";
   $("#sim-stats").textContent = ""; $("#sim-grid").innerHTML = "";
@@ -1782,10 +1783,18 @@ async function renderPiSimPeriods(d) {
     + `стреддл-ядро : ${money(a.straddle_mean)}/период  (выигрышных ${a.straddle_win_pct}% — длинный стреддл сам по себе ${a.straddle_mean < 0 ? "кровоточит" : "в плюсе"})\n`
     + `скальп       : ${money(a.scalp_mean)}/период  (чоп-модель − залипшие части)\n`
     + `ИТОГО        : ${money(a.total_mean)}/период  (выигрышных ${a.total_win_pct}%)\n`
+    + `\n── 🎯 RISK / REWARD (база 10%) ──\n`
+    + `средний ВЫИГРЫШ : ${money(rr.avg_win)}   ·   средний ПРОИГРЫШ : ${money(rr.avg_loss)}\n`
+    + `макс. ВЫИГРЫШ   : ${money(rr.max_win)}   ·   макс. ПРОИГРЫШ   : ${money(rr.max_loss)}\n`
+    + `payoff (W/L) : ${rr.payoff_ratio ?? "—"}×   ·   profit factor : ${rr.profit_factor ?? "—"}   ·   ожидание : ${money(rr.expectancy)}/период\n`
     + `\n── ЗА ВСЮ ИСТОРИЮ ──\n`
     + `сумма ИТОГО  : ${money(a.total_sum)}  (стреддл ${money(a.straddle_sum)} + скальп ${money(a.scalp_sum)})\n`
-    + `доходность   : ${a.ann_return_pct >= 0 ? "+" : ""}${a.ann_return_pct}%/год  ·  лучший ${money(a.best)}  ·  худший ${money(a.worst)}\n`
-    + `средний ход  : ${a.avg_move_pct >= 0 ? "+" : ""}${a.avg_move_pct}% (|${a.avg_abs_move_pct}%|)  ·  средний безубыток ±${a.avg_breakeven_pct}%  ·  средняя IV ${(a.avg_iv * 100).toFixed(0)}%`;
+    + `доходность   : ${a.ann_return_pct >= 0 ? "+" : ""}${a.ann_return_pct}%/год  ·  лучший ${money(a.best)}  ·  худший ${money(a.worst)}  ·  макс.просадка ${money(am.flat_max_dd)}\n`
+    + `средний ход  : ${a.avg_move_pct >= 0 ? "+" : ""}${a.avg_move_pct}% (|${a.avg_abs_move_pct}%|)  ·  средний безубыток ±${a.avg_breakeven_pct}%  ·  средняя IV ${(a.avg_iv * 100).toFixed(0)}%`
+    + (amOn ? `\n\n── 🎲 АНТИМАРТИНГЕЙЛ (удвоение на просадке, сброс на новом максимуме · cap ×${am.cap_mult}) ──\n`
+      + `итог: ${money(am.am_final - a.deposit)} vs база ${money(am.flat_final - a.deposit)}  →  ${am.am_ann_return_pct}%/год vs ${am.flat_ann_return_pct}%/год  (Δ ${(am.am_ann_return_pct - am.flat_ann_return_pct).toFixed(1)} пп)\n`
+      + `макс.просадка ${money(am.am_max_dd)} vs ${money(am.flat_max_dd)}  ·  макс.множитель ×${am.max_mult}  ·  макс.проигрыш ${money(am.am_rr.max_loss)} vs ${money(rr.max_loss)}\n`
+      + `⚠ антимартингейл НЕ создаёт edge на ~честной последовательности — усиливает дисперсию (больше просадка/худший период). Помогает только если плюсы кластеризуются.` : "");
 
   // ── AVERAGE-period payoff (in move-% space, price-independent) ──
   const prem = a.premium, beFrac = a.avg_breakeven_pct / 100;
@@ -1819,17 +1828,29 @@ async function renderPiSimPeriods(d) {
     `Средний период (${a.n}×${a.dte_days}дн): 🟢 прибыль / 🔴 убыток · ★ = среднее ИТОГО`,
     { shapes, height: 360, xaxis: { gridcolor: "#2a3340", title: "ход за период, %", zeroline: true }, yaxis: { gridcolor: "#2a3340", title: "P&L, $" } }));
 
+  // equity curve: cumulative deposit + Σ results — flat (always 10%) vs antimartingale
+  const eqTraces = [{ x: am.dates, y: am.flat_equity, mode: "lines", name: "база 10% (эквити)", line: { color: "#58a6ff", width: 2 } }];
+  if (amOn) eqTraces.push({ x: am.dates, y: am.am_equity, mode: "lines", name: `антимартингейл (cap ×${am.cap_mult})`, line: { color: "#d29922", width: 2 } });
+  await plot("sim-periods-equity", eqTraces, layout(
+    amOn ? `Эквити: база vs антимартингейл (${am.flat_ann_return_pct}% vs ${am.am_ann_return_pct}%/год)` : `Эквити (база 10%) — ${am.flat_ann_return_pct}%/год`,
+    { height: 360, shapes: [{ type: "line", x0: am.dates[0], x1: am.dates[am.dates.length - 1], y0: a.deposit, y1: a.deposit, line: { color: "#8b949e", width: 1, dash: "dot" } }],
+      xaxis: { gridcolor: "#2a3340" }, yaxis: { gridcolor: "#2a3340", title: "эквити, $" } }));
+
   // distribution of per-period TOTAL
-  await plot("sim-periods-hist", [{ x: rows.map((r) => r.total), type: "histogram", nbinsx: 40, marker: { color: "#58a6ff" } }],
-    layout("Распределение ИТОГО по периодам, $", { height: 360, shapes: [{ type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#8b949e", width: 1, dash: "dot" } }],
+  await plot("sim-periods-hist", [{ x: rows.map((r) => amOn ? r.am_total : r.total), type: "histogram", nbinsx: 40, marker: { color: amOn ? "#d29922" : "#58a6ff" } }],
+    layout(amOn ? "Распределение ИТОГО по периодам (антимарт.), $" : "Распределение ИТОГО по периодам, $", { height: 360, shapes: [{ type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#8b949e", width: 1, dash: "dot" } }],
       xaxis: { gridcolor: "#2a3340", title: "ИТОГО за период, $" }, yaxis: { gridcolor: "#2a3340", title: "периодов" } }));
 
-  renderTable("sim-periods-table", rows.map((r) => ({
-    "#": r.i, "вход": r.open, "экспир": r.close, "S0": r.S0, "S_T": r.S_T, "ход %": r.move_pct,
-    "б/у %": r.breakeven_pct, "стреддл $": Math.round(r.straddle), "скальп-осц $": Math.round(r.scalp_osc),
-    "залип $": Math.round(r.stuck), "скальп $": Math.round(r.scalp), "ИТОГО $": Math.round(r.total),
-    outcome: r.outcome,
-  })));
+  renderTable("sim-periods-table", rows.map((r) => {
+    const row = {
+      "#": r.i, "вход": r.open, "экспир": r.close, "S0": r.S0, "S_T": r.S_T, "ход %": r.move_pct,
+      "б/у %": r.breakeven_pct, "стреддл $": Math.round(r.straddle), "скальп-осц $": Math.round(r.scalp_osc),
+      "залип $": Math.round(r.stuck), "скальп $": Math.round(r.scalp), "ИТОГО $": Math.round(r.total),
+    };
+    if (amOn) { row["AM ×"] = r.am_mult; row["AM ИТОГО $"] = Math.round(r.am_total); }
+    row.outcome = r.outcome;
+    return row;
+  }));
 }
 
 // ---- Tab 14 scan: edge across ALL instruments + the pooled straddle-core distribution

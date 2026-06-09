@@ -209,6 +209,26 @@ def test_rolling_periods_table_and_aggregate():
     assert a["worst"] <= a["best"]
 
 
+def test_recovery_antimartingale_overlay():
+    """Recovery AM: base ×1 at/above the peak; double on a win taken in drawdown; reset at a new equity max
+    and on a loss. A win that recovers a prior loss makes a new high → resets, never compounding past it."""
+    # +100 (new high, base) · −100 (drawdown) · +50 (PARTIAL recovery, still below peak → double NEXT) · +50
+    am = pisim.recovery_antimartingale([100, -100, 50, 50], deposit=1000, cap_mult=8)
+    assert am["multipliers"][0] == 1.0                       # start at base
+    assert am["multipliers"][1] == 1.0                       # after a new high → base
+    assert am["multipliers"][2] == 1.0                       # right after a loss → base
+    assert am["multipliers"][3] == 2.0                       # prior was a win still below peak → doubled
+    assert am["am_final"] > am["flat_final"]                 # the 2× recovery win adds alpha here
+    # loss never compounds: a losing period always resets the next multiplier to 1
+    am2 = pisim.recovery_antimartingale([-50, -50, -50], deposit=1000, cap_mult=8)
+    assert all(m == 1.0 for m in am2["multipliers"])
+    # cap respected
+    am3 = pisim.recovery_antimartingale([-500] + [50] * 20, deposit=1000, cap_mult=4)
+    assert am3["max_mult"] <= 4.0
+    # risk/reward keys present
+    assert set(["avg_win", "avg_loss", "max_win", "max_loss", "payoff_ratio"]).issubset(am["flat_rr"])
+
+
 def test_chop_cap_bounds_outliers():
     """The уверенный-флэт ceiling caps the raw harvest at cap_per_month×(n_days/21)×theta."""
     m = pisim.chop_coverage_model(daily_range=50.0, part_lots=50.0, theta=1000.0, n_days=21,
