@@ -330,7 +330,9 @@ class PiSimReq(BaseModel):
     # doctrine's ~200–250 round-trips/mo (INVARIANT #7); a wide ×0.5 daily-ATR grid barely trades on 1m.
     grid_atr_frac: float = Field(0.05, gt=0, le=10)
     grid_mult: float = Field(1.8, ge=1.0, le=5)              # exponential spacing between parts
-    intraday_frac: float = Field(0.333, gt=0, le=1.0)        # ⅓ rule: scalp limit as a frac of calls
+    # ⅓ rule: scalp limit = 2M·intraday_frac. Capped at 0.5 so total futures (base M + scalp limit) ≤ 2M
+    # calls — the doctrine «never sell more futures than calls», which is what GUARANTEES max loss = premium.
+    intraday_frac: float = Field(0.333, gt=0, le=0.5)
     capture: float = Field(0.20, ge=0, le=2.0)               # OPTIMISTIC ceiling: frac of daily range booked
     # REALISTIC anchor — coverage (scalp ÷ theta) is the vol-invariant profitability primitive (INV #7).
     # Default 0.15 = the conservative calibration (ETH-1m booked ~0.16 + guru's 10–15%-of-premium/mo);

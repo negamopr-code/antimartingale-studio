@@ -1146,3 +1146,19 @@ Not implemented; documented as a rejected tactic.
   multiplier (does NOT double AND does NOT reset); reset to base 10% happens ONLY at a new equity maximum.
   Fixed `recovery_antimartingale` (removed the loss→reset branch). Effect on SPY 90-DTE: AM 9.4%→11.8%/yr
   but maxDD −$1.8k→−$4.6k and hits the ×8 cap — more aggressive, deeper drawdowns. 149 tests. assets v101.
+
+## D97 — correctness review (user flagged): loss cap, AM risk-scaling, table↔single-run consistency (2026-06-09)
+- **User flagged:** AM column showed period losses (−1396, −3272, −3696) > the «defined $1000 risk», and
+  single-run ≠ table for the same period. Asked to review everything against the guru.
+- **GURU consult:** confirmed (1) max loss = premium STRICTLY — three-thirds keeps futures ≤ calls, so even
+  all stranded scalp parts are covered by the trend-reserve calls; (2) AM scaling is the doctrine's
+  «заслуженный риск»: 2× contracts → 2× premium → 2× max loss, proportionally (recompute 10% of the GROWN
+  capital). So −3696 at ×4 is CORRECT (a 4× position risks $4000) — my fault was not SHOWING it.
+- **Verified:** base loss cap holds (0 violations over the SPY history); the big numbers were all AM-scaled.
+  Tests added: full-total ≤ premium on strong up/down trends; AM period ≤ mult×premium. Clamped intraday_frac
+  ≤ 0.5 (schema) so limit ≤ M can never go naked (guarantees the cap).
+- **Reconciled single-run ↔ table:** both now use the IDENTICAL scalp headline = chop oscillation at the
+  f_chop KNOB (capped) + the FIXED-grid stuck — verified equal to the dollar (GLD 2022, SPY 2025). Measured
+  chop-fraction + gate-managed stuck demoted to CROSS-CHECKS. Narration/verdict/UI updated.
+- **AM risk made visible:** AM tables show an «AM риск $» column (= mult×premium); stats spell out «при ×N
+  макс. убыток = N×$1000 — заслуженный риск, риск НЕ остаётся $1000». 151 tests (+2). assets v102.

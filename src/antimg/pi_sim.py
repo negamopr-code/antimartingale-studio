@@ -266,26 +266,26 @@ def simulate(daily: pd.DataFrame, vol_model, *, ticker: str, deposit: float, sta
         res.scalp_realized = round(realized, 2); res.scalp_open_mtm = round(open_mtm, 2)
         res.scalp_round_trips = rts; res.scalp_net_lots = round(net_lots, 4)
         res.scalp_floor = round(realized + open_mtm, 2); res.scalp_floor_label = intraday_label
-    # NET OF WORKING PARTS: the chop OSCILLATION harvest (scaled to the MEASURED chop fraction, not the
-    # assumed f_chop) MINUS the trend-stranded working parts. Prefer the measured stuck mark (gate-managed);
-    # else the fixed-grid estimate (all parts the move passed — the «if you keep fading the breakout» case).
-    fc_eff = measured_chop if measured_chop is not None else f_chop
-    chop_eff = chop_coverage_model(daily_range=atr, part_lots=part_lots, theta=res.theta_cost,
-                                   n_days=len(period), f_chop=fc_eff, trades_per_day=trades_per_day,
-                                   eff=scalp_eff, flat_frac=flat_frac)["income"]
+    # NET OF WORKING PARTS — kept IDENTICAL to the periods table (`rolling_periods`) so the single-run and
+    # the table agree: chop OSCILLATION at the f_chop KNOB (capped) MINUS the fixed-grid stranded parts.
+    # The MEASURED chop fraction and the gate-managed (1m/60m) stuck are computed too, but only as
+    # cross-checks (shown, not headline) — so one consistent number drives both views.
     stuck_fixed = _stuck_drag_fixed(res.grid, S0, S_T)
     stuck_used = res.scalp_open_mtm if res.scalp_open_mtm is not None else stuck_fixed
-    chop_net = chop_eff + min(0.0, stuck_used)
-    res.chop["income_effective"] = round(chop_eff, 2)        # oscillation harvest at the MEASURED chop frac
-    res.chop["stuck_fixed"] = round(stuck_fixed, 2)          # fixed-grid stranded parts (no flat-gate)
-    res.chop["stuck_used"] = round(stuck_used, 2)            # the drag actually netted (measured if available)
-    res.chop["net"] = round(chop_net, 2)                     # oscillation − stuck = realistic net scalp
+    chop_net = res.chop["income"] + min(0.0, stuck_fixed)    # SAME formula as the table's per-row scalp
+    chop_eff_measured = chop_coverage_model(daily_range=atr, part_lots=part_lots, theta=res.theta_cost,
+                                            n_days=len(period), f_chop=(measured_chop if measured_chop is not None else f_chop),
+                                            trades_per_day=trades_per_day, eff=scalp_eff, flat_frac=flat_frac)["income"]
+    res.chop["income_effective"] = round(chop_eff_measured, 2)   # cross-check: oscillation at the MEASURED chop frac
+    res.chop["stuck_fixed"] = round(stuck_fixed, 2)          # fixed-grid stranded parts (no flat-gate) — the headline drag
+    res.chop["stuck_used"] = round(stuck_used, 2)            # cross-check: gate-managed (measured) drag, milder
+    res.chop["net"] = round(chop_net, 2)                     # oscillation − fixed stuck = realistic net scalp (= table)
     res.scalp_realistic = res.chop["net"]
     if intraday is not None and not intraday.empty and intraday_label == "1m":
-        res.scalp_source = "1m-measured"                    # crypto: the 1m walk IS the measurement
+        res.scalp_source = "1m-measured"                    # crypto: the 1m walk IS the measurement (table can't)
         res.scalp_income = res.scalp_realized + res.scalp_open_mtm
     else:
-        res.scalp_source = "anchor"                         # else: chop model NET of working parts
+        res.scalp_source = "anchor"                         # else: chop model NET of working parts (= table row)
         res.scalp_income = res.scalp_realistic
     res.coverage = (res.scalp_income / res.theta_cost) if res.theta_cost > 0 else 0.0
 
@@ -671,12 +671,11 @@ def _verdict(r: PiSimResult) -> str:
                     + f". Разница ${cm.get('income',0)-r.scalp_income:,.0f} = цена ручной подстройки vs «поставил и забыл».")
     else:
         cm = r.chop
-        cov_txt = (f"Скальп — АДАПТИВНАЯ ЧОП-МОДЕЛЬ, НЕТТО рабочих частей: осцилляция +${cm.get('income_effective',0):,.0f} "
-                   f"(при ИЗМЕРЕННЫХ {(cm.get('measured_chop_frac') or 0)*100:.0f}% чоп-дней) − залипшие части ${cm.get('stuck_used',0):,.0f} "
+        cov_txt = (f"Скальп — АДАПТИВНАЯ ЧОП-МОДЕЛЬ, НЕТТО рабочих частей (то же, что в «Таблице по периодам»): "
+                   f"осцилляция +${cm.get('income',0):,.0f} (f_chop {cm.get('f_chop',0)*100:.0f}%) − залипшие части ${cm.get('stuck_fixed',0):,.0f} "
                    f"= ${r.scalp_realistic:,.0f} = {r.coverage*100:.0f}% теты. "
-                   f"Если НЕ следовать flat-гейту (фейдить пробой), части стянуло бы на ${cm.get('stuck_fixed',0):,.0f} — "
-                   f"гейт «не фейдь разгон» именно это и спасает.")
-    return f"{head} {move_txt} {cov_txt} Макс. риск всё время ограничен премией ${r.theta_cost:,.0f}."
+                   f"(Кросс-чек по барам: чоп {(cm.get('measured_chop_frac') or 0)*100:.0f}% дней; с активным гейтом залипание мягче ${cm.get('stuck_used',0):,.0f}.)")
+    return f"{head} {move_txt} {cov_txt} Макс. убыток всё время ограничен премией ${r.theta_cost:,.0f} (правило трёх третей: фьючерсов не больше коллов)."
 
 
 def _narrate(r: PiSimResult) -> list[dict]:
@@ -714,14 +713,15 @@ def _narrate(r: PiSimResult) -> list[dict]:
                  f"Залипания почти нет (${r.scalp_open_mtm:,.0f}) — это флет. ")
               + f"Итоговый вклад скальпа: ${r.scalp_income:,.0f}.")
              if r.scalp_source == "1m-measured" else
-             (f"Без free 1-мин фида скальп НЕ измеряется напрямую — даю АДАПТИВНУЮ ЧОП-МОДЕЛЬ, НЕТТО рабочих частей:\n"
-              f"• осцилляция в чопе: +${r.chop.get('income_effective',0):,.0f} "
+             (f"Без free 1-мин фида скальп НЕ измеряется напрямую — даю АДАПТИВНУЮ ЧОП-МОДЕЛЬ, НЕТТО рабочих частей "
+              f"(ТА ЖЕ формула, что в «Таблице по периодам» → числа совпадают):\n"
+              f"• осцилляция в чопе: +${r.chop.get('income',0):,.0f} "
               f"({r.chop.get('trades_per_day',10):.0f} сд/день × {r.chop.get('eff',0.5)*100:.0f}% хода, TP ${r.chop.get('tp',0):,.2f} = "
-              f"{r.chop.get('flat_frac',0)*100:.0f}% диапазона; ИЗМЕРЕНО чоп {(r.chop.get('measured_chop_frac') or 0)*100:.0f}% дней — НЕ допущение ⅔)\n"
-              f"• − залипшие рабочие части: ${r.chop.get('stuck_used',0):,.0f} "
-              + ("(flat-гейт сдержал: не фейдим пробой)" if (r.chop.get('stuck_used',0) >= -1) else "(стянуты трендом)")
-              + f"  [фикс-сетка без гейта была бы ${r.chop.get('stuck_fixed',0):,.0f} — части на уровнях у входа vs ушедшая цена]\n"
+              f"{r.chop.get('flat_frac',0)*100:.0f}% диапазона; f_chop {r.chop.get('f_chop',0)*100:.0f}%)\n"
+              f"• − залипшие рабочие части (фикс-сетка): ${r.chop.get('stuck_fixed',0):,.0f}\n"
               f"• = НЕТТО скальп ${r.chop.get('net',0):,.0f} = {r.coverage*100:.0f}% теты  ← в итог\n"
+              f"• кросс-чек по барам: чоп {(r.chop.get('measured_chop_frac') or 0)*100:.0f}% дней (можешь подстроить f_chop); "
+              f"с активным гейтом залипание мягче ${r.chop.get('stuck_used',0):,.0f}\n"
               f"• потолок (оптимизм): ${r.scalp_scenario:,.0f}\n"
               f"⚠ покрытие vol-инвариантно (INV #7): сделки×eff×флет×чоп, не воля.")) },
         {"n": 6.5, "title": "🌊 Чоп-модель — проверка реальными данными",

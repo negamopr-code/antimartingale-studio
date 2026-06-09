@@ -80,6 +80,29 @@ def test_loss_cap_holds_on_random_paths():
 
 
 # ---- construction / sizing identities ---------------------------------------------------------
+def test_full_total_loss_capped_at_premium():
+    """INVARIANT #2 for the FULL ПИ position: even on a strong trend (big stranded scalp parts), the net
+    total can never lose more than the premium — the three-thirds rule keeps the construction covered."""
+    for path in (np.linspace(100, 185, 130), np.linspace(100, 55, 130)):   # strong up- and down-trend
+        res = pisim.simulate(_daily(path), _const_vol(0.40), ticker="T", deposit=10_000,
+                             start="2015-01-01", dte_days=30, risk_pct=0.10, intraday_frac=0.5)
+        assert res.total_net >= -res.premium_budget - 1.0, f"loss-cap breached: {res.total_net} < -{res.premium_budget}"
+        assert res.chop["net"] >= res.chop["stuck_fixed"] - 1.0          # net scalp ≥ the stuck drag alone
+
+
+def test_antimartingale_loss_bounded_by_mult_times_premium():
+    """Each AM period's loss is bounded by its multiplier × the base premium (you bought an `m×` position)."""
+    daily = _daily(100.0 * np.exp(np.cumsum(np.random.default_rng(7).standard_normal(900) * 0.013)))
+    out = pisim.rolling_periods(daily, _const_vol(0.30), ticker="T", deposit=10_000, dte_days=90,
+                                risk_pct=0.10, r=0.045, atr_period=14, n_parts=5, grid_atr_frac=0.05,
+                                grid_mult=1.8, intraday_frac=0.333, f_chop=0.667, trades_per_day=10,
+                                scalp_eff=0.5, flat_frac=0.25, start="2015-01-01", am_cap_mult=8)
+    premium = 0.10 * 10_000
+    for x in out["rows"]:
+        assert x["total"] >= -premium - 1.0                              # base period respects the cap
+        assert x["am_total"] >= -x["am_mult"] * premium - 1.0            # AM period ≤ mult × premium
+
+
 def test_synthetic_straddle_sizing_identities():
     daily = _daily(np.linspace(100, 130, 90))
     res = pisim.simulate(daily, _const_vol(), ticker="T", deposit=10_000, start="2015-01-01",
@@ -113,8 +136,10 @@ def test_scalp_band_and_chop_headline():
     assert res.scalp_realistic == pytest.approx(res.chop["net"])        # chop model NET of working parts
     assert res.scalp_income == pytest.approx(res.scalp_realistic)
     assert res.scalp_scenario >= 0
-    # net = oscillation harvest (effective) + the stuck-parts drag (≤0)
-    assert res.chop["net"] == pytest.approx(res.chop["income_effective"] + min(0.0, res.chop["stuck_used"]), abs=0.02)
+    # headline net = oscillation at the f_chop KNOB (capped) + the FIXED-grid stuck drag (≤0) — SAME as the
+    # periods table so single-run and table agree (measured chop/stuck are cross-checks only)
+    assert res.chop["net"] == pytest.approx(res.chop["income"] + min(0.0, res.chop["stuck_fixed"]), abs=0.02)
+    assert res.coverage == pytest.approx(res.scalp_income / res.theta_cost, abs=1e-6)
 
 
 def test_stuck_drag_strands_working_parts_on_a_trend():

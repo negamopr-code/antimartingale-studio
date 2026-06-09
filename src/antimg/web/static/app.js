@@ -1794,6 +1794,7 @@ async function renderPiSimPeriods(d) {
     + (amOn ? `\n\n── 🎲 АНТИМАРТИНГЕЙЛ (удваиваем ТОЛЬКО на выигрыше · на проигрыше ДЕРЖИМ · сброс к 10% на новом максимуме эквити · cap ×${am.cap_mult}) ──\n`
       + `итог: ${money(am.am_final - a.deposit)} vs база ${money(am.flat_final - a.deposit)}  →  ${am.am_ann_return_pct}%/год vs ${am.flat_ann_return_pct}%/год  (Δ ${(am.am_ann_return_pct - am.flat_ann_return_pct).toFixed(1)} пп)\n`
       + `макс.просадка ${money(am.am_max_dd)} vs ${money(am.flat_max_dd)}  ·  макс.множитель ×${am.max_mult}  ·  макс.проигрыш ${money(am.am_rr.max_loss)} vs ${money(rr.max_loss)}\n`
+      + `❗РИСК РАСТЁТ: при множителе ×N покупаешь N× позицию → премия (и МАКС.УБЫТОК периода) = N×$${Math.round(a.premium).toLocaleString()}. При ×${am.max_mult} это $${Math.round(am.max_mult * a.premium).toLocaleString()} под риском. Это корректно («заслуженный риск» Коровина), но риск НЕ остаётся $${Math.round(a.premium).toLocaleString()}.\n`
       + `⚠ антимартингейл НЕ создаёт edge на ~честной последовательности — усиливает дисперсию (больше просадка/худший период). Помогает только если плюсы кластеризуются.` : "");
 
   // ── AVERAGE-period payoff (in move-% space, price-independent) ──
@@ -1847,7 +1848,7 @@ async function renderPiSimPeriods(d) {
       "б/у %": r.breakeven_pct, "стреддл $": Math.round(r.straddle), "скальп-осц $": Math.round(r.scalp_osc),
       "залип $": Math.round(r.stuck), "скальп $": Math.round(r.scalp), "ИТОГО $": Math.round(r.total),
     };
-    if (amOn) { row["AM ×"] = r.am_mult; row["AM ИТОГО $"] = Math.round(r.am_total); }
+    if (amOn) { row["AM ×"] = r.am_mult; row["AM риск $"] = Math.round(r.am_mult * a.premium); row["AM ИТОГО $"] = Math.round(r.am_total); }
     row.outcome = r.outcome;
     return row;
   }));
@@ -1869,7 +1870,7 @@ async function renderPiSimPeriods(d) {
   renderTable("sim-straddle-table", rows.map((r) => {
     const row = { "#": r.i, "вход": r.open, "экспир": r.close, "S0": r.S0, "S_T": r.S_T, "ход %": r.move_pct,
       "б/у %": r.breakeven_pct, "СТРЕДДЛ $": Math.round(r.straddle) };
-    if (amOn) { row["AM ×"] = r.am_str_mult; row["AM стреддл $"] = Math.round(r.am_str_total); }
+    if (amOn) { row["AM ×"] = r.am_str_mult; row["AM риск $"] = Math.round(r.am_str_mult * a.premium); row["AM стреддл $"] = Math.round(r.am_str_total); }
     row.outcome = r.straddle > 0 ? "win" : "loss";
     return row;
   }));
@@ -2044,11 +2045,12 @@ async function renderPiSim(d) {
   const cov = (d.coverage * 100).toFixed(0);
   let scalpLine;
   const ch = d.chop || {}, dg = d.chop_diag || {};
-  const chopLine = `  🌊 АДАПТИВНАЯ ЧОП-МОДЕЛЬ (net рабочих частей):\n`
-    + `     осцилляция в чопе: ${money(ch.income_effective)}  (${(ch.trades_per_day || 10)} сд/день × ${((ch.eff || 0.5) * 100).toFixed(0)}% хода, TP $${(ch.tp || 0).toFixed(2)} = ${((ch.flat_frac || 0) * 100).toFixed(0)}% диапазона, ИЗМЕРЕНО чоп ${((dg.chop_frac ?? 0) * 100).toFixed(0)}% дней)\n`
-    + `     − залипшие рабочие части: ${money(ch.stuck_used)}  ${(ch.stuck_used >= -1) ? "(flat-гейт сдержал — не фейдим пробой)" : "(стянуты трендом)"}  [фикс-сетка без гейта была бы ${money(ch.stuck_fixed)}]\n`
-    + `     = НЕТТО скальп: ${money(ch.net)} = ${(d.coverage * 100).toFixed(0)}% теты`
-    + (dg.path_over_range != null ? `;  путь ×${dg.path_over_range} диапазона, нужно $${(ch.path_needed_per_day || 0).toFixed(1)}/день → ${ch.feasible ? `✅ ${(ch.trades_per_day||10)} сд/день достижимо (×${ch.path_headroom})` : (dg.is_daily ? "достижимость без 1-мин не проверить" : "путь 60-мин груб")}` : ``)
+  const chopLine = `  🌊 АДАПТИВНАЯ ЧОП-МОДЕЛЬ (net рабочих частей — ТА ЖЕ формула, что в «Таблице по периодам»):\n`
+    + `     осцилляция в чопе: ${money(ch.income)}  (${(ch.trades_per_day || 10)} сд/день × ${((ch.eff || 0.5) * 100).toFixed(0)}% хода, TP $${(ch.tp || 0).toFixed(2)} = ${((ch.flat_frac || 0) * 100).toFixed(0)}% диапазона, f_chop ${((ch.f_chop || 0) * 100).toFixed(0)}%)\n`
+    + `     − залипшие рабочие части (фикс-сетка): ${money(ch.stuck_fixed)}\n`
+    + `     = НЕТТО скальп: ${money(ch.net)} = ${(d.coverage * 100).toFixed(0)}% теты\n`
+    + `     кросс-чек по барам: чоп ${((dg.chop_frac ?? 0) * 100).toFixed(0)}% дней (подстрой f_chop); с активным гейтом залипание мягче ${money(ch.stuck_used)}`
+    + (dg.path_over_range != null ? `; путь ×${dg.path_over_range} диапазона → ${ch.feasible ? `✅ ${(ch.trades_per_day||10)} сд/день достижимо (×${ch.path_headroom})` : (dg.is_daily ? "без 1-мин не проверить" : "путь 60-мин груб")}` : ``)
     + `\n`;
   if (d.scalp_source === "1m-measured") {
     const bcov = (Math.max(d.scalp_realized, 0) / d.theta_cost * 100).toFixed(0);
