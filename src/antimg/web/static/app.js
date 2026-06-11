@@ -2159,24 +2159,36 @@ async function prLoadNotebooks(force = false) {
     }
     st.textContent = `${d.notebooks.length} ноутбуков — отметь нужные; Gemini отвечает по источникам `
       + `(0 токенов Claude)${prClaudeInfo.available ? ` · 🤖 ${prClaudeInfo.model} доступен` : ""}`;
+    box.onchange = prCtxHint;
+    prCtxHint();
   } catch (e) { st.textContent = "⚠ " + (e.message || e); }
 }
 $("#pr-nb-refresh").onclick = (e) => withBusy(e.target, () => prLoadNotebooks(true));
 
 const prHistory = [];   // compact chat history for the Claude context: {role: q|a|c, text, title?}
+const PR_PART_ICON = { doctrine: "📜", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖" };
 function prChatAdd(role, text, opts = {}) {
   const box = $("#pr-chat");
   const div = document.createElement("div");
   div.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3340;white-space:pre-wrap";
   const tag = role === "q" ? "🧑 Вопрос"
     : role === "a" ? `📖 ${opts.title || "Ноутбук"}`
-    : role === "c" ? `🤖 Claude${opts.model ? " · " + opts.model : ""}` : "⚠";
+    : role === "c" ? `🤖 Claude${opts.model ? " · " + opts.model : ""}`
+    : role === "s" ? "⚙ Система" : "⚠";
   const head = document.createElement("b");
   head.style.color = role === "q" ? "#58a6ff" : role === "a" ? "#3fb950"
-    : role === "c" ? "#d29922" : "#f85149";
-  head.textContent = tag + (opts.sources && opts.sources.length
-    ? ` (${opts.sources.length} источников)` : "");
+    : role === "c" ? "#d29922" : role === "s" ? "#8b949e" : "#f85149";
+  head.textContent = tag + (opts.sources && (opts.sources.length || +opts.sources > 0)
+    ? ` (${opts.sources.length ?? opts.sources} источников)` : "");
   div.appendChild(head);
+  if (opts.participants && opts.participants.length) {     // what fed this answer
+    const p = document.createElement("div");
+    p.style.cssText = "margin:3px 0 1px;font-size:11px;color:#8b949e";
+    p.textContent = "🧩 участвовали: " + opts.participants
+      .map((x) => `${PR_PART_ICON[x.kind] || "•"} ${x.name}${x.error ? " (⚠ " + x.error + ")" : ""}`)
+      .join("  ·  ");
+    div.appendChild(p);
+  }
   div.appendChild(document.createTextNode("\n" + text));
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
@@ -2184,6 +2196,20 @@ function prChatAdd(role, text, opts = {}) {
     prHistory.push({ role, text, ...(opts.title ? { title: opts.title } : {}) });
     if (prHistory.length > 40) prHistory.splice(0, prHistory.length - 40);
   }
+}
+
+// hint line: what WILL participate in the next 🤖 Claude answer (the "skills" list)
+function prCtxHint() {
+  const el = $("#pr-ctx");
+  if (!el) return;
+  const nbs = $$(".pr-nb-cb").filter((c) => c.checked)
+    .map((c) => c.closest("label").textContent.trim().replace(/\s*\(\d+ ист\.\)$/, ""));
+  const parts = ["📜 доктрина ПИ"];
+  if (nbs.length) parts.push(`📖 ноутбуки-источники: ${nbs.join(", ")} → 🤖 Claude компилирует`);
+  else parts.push("📖 ноутбуки не отмечены → Claude отвечает сам (по истории чата)");
+  if (prLastStats) parts.push("📐 текущая конструкция");
+  if (prHistory.length) parts.push(`🕘 история (${prHistory.length})`);
+  el.textContent = "🧩 В ответе Claude участвуют: " + parts.join("  ·  ");
 }
 
 function prTakeQuestion(form) {
@@ -2211,22 +2237,61 @@ $("#form-pr-ask").onsubmit = (e) => {        // 📖 fan the question across che
   });
 };
 
-$("#pr-ask-claude").onclick = (e) => {       // 🤖 direct Claude chat (history + construction ride along)
+// 🤖 Claude = the compiler: checked notebooks answer first (data sources), Claude then
+// builds the full picture across them + history + construction; participants are shown.
+$("#pr-ask-claude").onclick = (e) => {
   withBusy(e.target, async () => {
     if (!prClaudeInfo.available) { toast("Claude недоступен: " + (prClaudeInfo.error || "")); return; }
     const form = $("#form-pr-ask");
     const q = prTakeQuestion(form);
     if (!q) return;
+    const ids = $$(".pr-nb-cb").filter((c) => c.checked).map((c) => c.value);
     prChatAdd("q", q);
-    toast(`Спрашиваю ${prClaudeInfo.model}…`, true);
+    toast(ids.length
+      ? `${ids.length} ноутбук(а) отвечают, затем ${prClaudeInfo.model} компилирует (~1–2 мин на ноутбук)…`
+      : `Спрашиваю ${prClaudeInfo.model}…`, true);
     try {
       const d = await post("/api/practice/claude", {
         question: q, history: prHistory.slice(0, -1),   // current q goes as `question`, not history
-        construction: prLastStats,
+        construction: prLastStats, notebook_ids: ids,
       });
-      prChatAdd("c", d.answer, { model: d.model });
+      for (const r of d.notebook_results || [])         // raw per-notebook answers first (transparency)
+        if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
+        else prChatAdd("a", r.answer, { title: r.title, sources: r.sources_used });
+      prChatAdd("c", d.answer, { model: d.model, participants: d.participants });
       form.question.value = "";
+      prCtxHint();
     } catch (err) { prChatAdd("e", err.message || String(err)); throw err; }
+  });
+};
+
+// 📊 build the straddle graph from the REAL example in the last notebook answer:
+// haiku extracts {S0, strike, premium, legs, DTE…} → fill the form → compute → draw.
+$("#pr-graph-example").onclick = (e) => {
+  withBusy(e.target, async () => {
+    const last = [...prHistory].reverse().find((h) => h.role === "a");
+    if (!last) { toast("Сначала получи пример из ноутбука (📖) — график строится из его ответа"); return; }
+    toast("Извлекаю параметры конструкции из ответа ноутбука…", true);
+    const d = await post("/api/practice/extract", { text: last.text });
+    const p = d.params || {};
+    const form = $("#form-pr-payoff");
+    const setIf = (name, v) => { if (v != null && form[name]) form[name].value = v; };
+    setIf("s0", p.s0); setIf("strike", p.strike);
+    setIf("n_calls", p.n_calls); setIf("n_futs", p.n_futs);
+    setIf("premium", p.premium); setIf("iv", p.iv);
+    setIf("dte_days", p.dte_days); setIf("multiplier", p.multiplier);
+    prExampleSource = (p.instrument ? p.instrument + " — " : "") + (last.title || "пример из ноутбука");
+    prChatAdd("s", `Извлёк параметры из «${last.title || "ноутбука"}»: `
+      + JSON.stringify(p) + (d.comment ? "\n" + d.comment : ""));
+    const missing = ["s0", "strike"].filter((k) => p[k] == null);
+    if (p.premium == null && p.iv == null) missing.push("premium/iv");
+    if (missing.length) {
+      toast("В примере не хватает: " + missing.join(", ") + " — дополни форму и нажми «Рассчитать»");
+      return;
+    }
+    const o = formData(form);
+    renderPracticePayoff(await post("/api/practice/payoff", o), o);
+    toast("График построен по примеру из ноутбука", true);
   });
 };
 $("#pr-preset-example").onclick = () => {
@@ -2238,29 +2303,49 @@ $("#pr-preset-example").onclick = () => {
 };
 
 let prLastStats = null;
+let prExampleSource = null;   // "instrument — notebook title" when the graph came from a corpus example
 async function renderPracticePayoff(d, o) {
   prLastStats = { ...o, ...d.stats };
   const p = d.payoff, s = d.stats;
-  const traces = [{ x: p.S, y: p.expiry, mode: "lines", name: "P&L на экспирации",
-                    line: { width: 2.5, color: "#58a6ff" } }];
-  if (p.today)
-    traces.push({ x: p.S, y: p.today, mode: "lines", name: "P&L сегодня (BS)",
-                  line: { width: 1.5, color: "#d29922", dash: "dot" } });
-  const shapes = [
-    { type: "line", x0: p.S[0], x1: p.S[p.S.length - 1], y0: 0, y1: 0,
-      line: { color: "#8b949e", width: 1, dash: "dash" } },
-    { type: "line", x0: p.S0, x1: p.S0, yref: "paper", y0: 0, y1: 1,
-      line: { color: "#3fb950", width: 1, dash: "dot" } },
+  const xmin = p.S[0], xmax = p.S[p.S.length - 1];
+  const zero = p.S.map(() => 0);
+  const traces = [
+    { x: p.S, y: zero, mode: "lines", name: "0", line: { color: "#3a4452", width: 1, dash: "dot" }, hoverinfo: "skip" },
+    { x: p.S, y: p.expiry, mode: "lines", name: `стреддл на экспирации (${o.n_calls}C − ${o.n_futs}F)`,
+      line: { width: 2.4, color: "#58a6ff" } },
   ];
-  const ann = [{ x: p.S0, yref: "paper", y: 1.04, text: "S₀", showarrow: false, font: { color: "#3fb950" } }];
-  for (const [be, lbl] of [[s.breakeven_down, "BE↓"], [s.breakeven_up, "BE↑"]])
+  if (p.today)
+    traces.push({ x: p.S, y: p.today, mode: "lines", name: "P&L сегодня (BS, до распада теты)",
+                  line: { width: 1.6, color: "#d29922", dash: "dash" } });
+  // 🟢 profit wings / 🔴 loss zone between the breakevens — same look as Tab 14
+  const lossLo = s.breakeven_down ?? xmin, lossHi = s.breakeven_up ?? xmax;
+  const band = (x0, x1, color) => ({ type: "rect", xref: "x", yref: "paper", x0, x1, y0: 0, y1: 1,
+    fillcolor: color, line: { width: 0 }, layer: "below" });
+  const shapes = [
+    band(lossLo, lossHi, "rgba(248,81,73,0.12)"),
+    { type: "line", x0: p.S0, x1: p.S0, yref: "paper", y0: 0, y1: 1,
+      line: { color: "#8b949e", width: 1, dash: "dot" } },
+  ];
+  const ann = [
+    { x: p.S0, yref: "paper", y: 1.04, text: "S₀ (вход)", showarrow: false, font: { size: 10, color: "#8b949e" } },
+    { x: (lossLo + lossHi) / 2, y: 0.05, yref: "paper", showarrow: false, font: { size: 10, color: "#f85149" },
+      text: `🔴 УБЫТОК (макс ${(s.max_loss_usd ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}$ при S=${s.max_loss_at_S})` },
+  ];
+  for (const [be, lbl] of [[s.breakeven_down, "БУ↓"], [s.breakeven_up, "БУ↑"]])
     if (be != null) {
       shapes.push({ type: "line", x0: be, x1: be, yref: "paper", y0: 0, y1: 1,
-                    line: { color: "#f85149", width: 1, dash: "dot" } });
-      ann.push({ x: be, yref: "paper", y: 1.04, text: lbl, showarrow: false, font: { color: "#f85149" } });
+                    line: { color: "#3fb950", width: 1.2, dash: "dash" } });
+      ann.push({ x: be, yref: "paper", y: 1.04, text: lbl, showarrow: false, font: { size: 10, color: "#3fb950" } });
     }
+  if (s.breakeven_down != null)
+    shapes.push(band(xmin, lossLo, "rgba(63,185,80,0.10)")),
+    ann.push({ x: (xmin + lossLo) / 2, y: 0.96, yref: "paper", text: "🟢 ПРИБЫЛЬ", showarrow: false, font: { size: 11, color: "#3fb950" } });
+  if (s.breakeven_up != null)
+    shapes.push(band(lossHi, xmax, "rgba(63,185,80,0.10)")),
+    ann.push({ x: (lossHi + xmax) / 2, y: 0.96, yref: "paper", text: "🟢 ПРИБЫЛЬ", showarrow: false, font: { size: 11, color: "#3fb950" } });
   await plot("pr-payoff", traces,
-    layout(`Конструкция ${o.n_calls}C − ${o.n_futs}F · страйк ${o.strike}`,
+    layout(`Выплата: ${o.n_calls}C − ${o.n_futs}F · страйк ${o.strike}`
+           + (prExampleSource ? ` · 📖 пример: ${prExampleSource}` : ""),
            { height: 380, shapes, annotations: ann,
              xaxis: { gridcolor: "#2a3340", title: { text: "цена на экспирации S_T" } },
              yaxis: { gridcolor: "#2a3340", title: { text: "P&L, $" } } }));
@@ -2279,6 +2364,7 @@ async function renderPracticePayoff(d, o) {
   const notes = $("#pr-notes");
   notes.hidden = !(d.notes && d.notes.length);
   notes.textContent = (d.notes || []).map((n) => "ℹ " + n).join("\n");
+  prCtxHint();
 }
 $("#form-pr-payoff").onsubmit = (e) => {
   e.preventDefault();
@@ -2299,7 +2385,39 @@ $("#pr-ask-this").onclick = () => {
     `чтобы отбить тету, и что делать при сильном тренде?`;
   $("#form-pr-ask").question.scrollIntoView({ behavior: "smooth", block: "center" });
 };
+
+// restore the persisted tab state (answers log + last construction) — the log lives
+// SERVER-side in /data, so reloads/days later the user continues incrementally.
+async function prLoadState() {
+  try {
+    const st = await api("/api/practice/state");
+    for (const en of st.entries || [])
+      prChatAdd(en.role, en.text, { title: en.title, model: en.model,
+                                    participants: en.participants, sources: en.sources });
+    const c = st.construction;
+    if (c && c.request) {
+      const form = $("#form-pr-payoff");
+      for (const [k, v] of Object.entries(c.request))
+        if (form[k] != null) form[k].value = v;
+      await renderPracticePayoff({ payoff: c.payoff, stats: c.stats, notes: c.notes }, c.request);
+    }
+    prCtxHint();
+  } catch (e) { console.error("practice state restore:", e); }
+}
+$("#pr-clear-log").onclick = (e) => withBusy(e.target, async () => {
+  await post("/api/practice/state/clear", {});
+  $("#pr-chat").innerHTML = "";
+  prHistory.length = 0;
+  prCtxHint();
+  toast("Лог вкладки очищен", true);
+});
+// the restored graph may have been drawn while the tab was hidden (0-size) — fix on open
+$('[data-tab="practice"]').addEventListener("click", () => {
+  const el = document.getElementById("pr-payoff");
+  if (typeof Plotly !== "undefined" && el && el.data) Plotly.Plots.resize(el);
+});
 prLoadNotebooks();
+prLoadState();
 
 loadInstruments();
 window.addEventListener("load", () => {

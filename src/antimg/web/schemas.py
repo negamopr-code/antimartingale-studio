@@ -378,10 +378,20 @@ class PracticeChatTurn(BaseModel):
 class PracticeClaudeReq(BaseModel):
     """Tab 15 — chat with a Claude model directly (headless `claude -p`, no tools).
     Stateless: the client resends a compact history each turn; the current calculator
-    construction (if any) is attached as context for «further calculation»."""
+    construction (if any) is attached as context for «further calculation». When
+    `notebook_ids` are given, the question is FIRST fanned out to those notebooks and
+    Claude then COMPILES their answers into one full picture (NotebookLM = data source,
+    Claude = overview across sources)."""
     question: str = Field(..., min_length=1, max_length=8000)
     history: list[PracticeChatTurn] = Field(default_factory=list, max_length=40)
     construction: dict | None = None
+    notebook_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
+class PracticeExtractReq(BaseModel):
+    """Tab 15 — pull construction parameters (S0, strike, premium, legs, DTE…) out of a
+    notebook's textual example so the payoff graph can be built from the real-life case."""
+    text: str = Field(..., min_length=20, max_length=30_000)
 
 
 class PracticePayoffReq(BaseModel):

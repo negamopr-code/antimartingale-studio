@@ -19,6 +19,7 @@ import subprocess
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 CHAT_MODEL = os.environ.get("CLAUDE_CHAT_MODEL", "claude-sonnet-4-6")
+EXTRACT_MODEL = os.environ.get("CLAUDE_EXTRACT_MODEL", "claude-haiku-4-5")
 CHAT_TIMEOUT = float(os.environ.get("CLAUDE_CHAT_TIMEOUT", "240"))
 MAX_HISTORY = 24           # turns kept in the prompt
 MAX_TURN_CHARS = 4000      # each turn clipped (notebook answers can be long)
@@ -49,7 +50,8 @@ def available() -> tuple[bool, str]:
 
 
 def build_prompt(question: str, history: list[dict] | None = None,
-                 construction: dict | None = None) -> str:
+                 construction: dict | None = None,
+                 sources: list[dict] | None = None) -> str:
     parts = [_PREAMBLE]
     if construction:
         parts.append("ТЕКУЩАЯ КОНСТРУКЦИЯ (из калькулятора вкладки):\n"
@@ -62,19 +64,27 @@ def build_prompt(question: str, history: list[dict] | None = None,
             lines.append(f"{who}: {(h.get('text') or '')[:MAX_TURN_CHARS]}")
         parts.append("ИСТОРИЯ ДИАЛОГА (вопросы пользователя, ответы ноутбуков NotebookLM "
                      "и твои прошлые ответы):\n" + "\n\n".join(lines))
+    if sources:
+        blocks = "\n\n".join(
+            f"[Ноутбук «{s.get('title', '?')}»]\n{(s.get('answer') or '')[:MAX_TURN_CHARS]}"
+            for s in sources)
+        parts.append(
+            "ПЕРВОИСТОЧНИКИ — ответы РАЗНЫХ ноутбуков NotebookLM на ТЕКУЩИЙ вопрос (каждый "
+            "ноутбук видит только свой корпус материалов):\n" + blocks
+            + "\n\nТвоя задача — КОМПИЛЯЦИЯ: сведи первоисточники в одну полную картину; "
+            "объедини общее, явно отметь расхождения между ноутбуками и пробелы; при ключевых "
+            "утверждениях указывай, из какого ноутбука они пришли; добавляй собственные расчёты "
+            "где это помогает. Не выдумывай ничего сверх приведённого и истории диалога.")
     parts.append("ВОПРОС ПОЛЬЗОВАТЕЛЯ:\n" + question)
     return "\n\n---\n\n".join(parts)
 
 
-def chat(question: str, history: list[dict] | None = None,
-         construction: dict | None = None) -> dict:
-    """One stateless turn. Returns {answer, model} or {error}."""
+def _run_claude(prompt: str, model: str) -> dict:
     ok, why = available()
     if not ok:
         return {"error": why}
-    prompt = build_prompt(question, history, construction)
     try:
-        proc = subprocess.run([CLAUDE_BIN, "-p", "--model", CHAT_MODEL],
+        proc = subprocess.run([CLAUDE_BIN, "-p", "--model", model],
                               input=prompt, capture_output=True, text=True,
                               timeout=CHAT_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -84,4 +94,46 @@ def chat(question: str, history: list[dict] | None = None,
     answer = proc.stdout.strip()
     if not answer:
         return {"error": "empty answer from claude"}
-    return {"answer": answer, "model": CHAT_MODEL}
+    return {"answer": answer, "model": model}
+
+
+def chat(question: str, history: list[dict] | None = None,
+         construction: dict | None = None, sources: list[dict] | None = None) -> dict:
+    """One stateless turn (optionally compiling notebook sources). {answer, model} | {error}."""
+    return _run_claude(build_prompt(question, history, construction, sources), CHAT_MODEL)
+
+
+_EXTRACT_PROMPT = (
+    "Извлеки из текста ниже параметры опционной конструкции «Прикрытый Интрадей» "
+    "(синтетический стреддл: длинные коллы + короткие фьючерсы). Верни ТОЛЬКО JSON-объект "
+    "без какого-либо текста вокруг, с ключами:\n"
+    '{"instrument": str|null, "s0": number|null, "strike": number|null, '
+    '"n_calls": number|null, "n_futs": number|null, "premium": number|null, '
+    '"dte_days": number|null, "multiplier": number|null, "iv": number|null, '
+    '"comment": str}\n'
+    "Где: s0 = цена фьючерса/базового актива при входе; strike = страйк коллов; premium = "
+    "премия ОДНОГО колла в пунктах цены (не в деньгах, если мультипликатор ≠ 1 — пересчитай и "
+    "поясни в comment); n_calls/n_futs = число коллов (long) и фьючерсов (short); dte_days = "
+    "дней до экспирации; multiplier = $ за пункт; iv = подразумеваемая волатильность долей "
+    "(0.60 = 60%). null для всего, чего в тексте НЕТ — НЕ выдумывай. В comment одной-двумя "
+    "фразами: какой это пример и что пришлось додумать/пересчитать.\n\nТЕКСТ:\n"
+)
+
+
+def extract_construction(text: str) -> dict:
+    """Pull construction parameters out of a notebook's textual example.
+    Returns {params: {...}, comment} or {error}."""
+    res = _run_claude(_EXTRACT_PROMPT + text[:16_000], EXTRACT_MODEL)
+    if "error" in res:
+        return res
+    raw = res["answer"]
+    i = raw.find("{")
+    if i < 0:
+        return {"error": "extraction returned no JSON"}
+    try:
+        data = json.loads(raw[i:raw.rfind("}") + 1])
+    except Exception as exc:
+        return {"error": f"extraction JSON parse: {exc}"}
+    comment = str(data.pop("comment", "") or "")
+    params = {k: v for k, v in data.items() if v is not None}
+    return {"params": params, "comment": comment, "model": EXTRACT_MODEL}

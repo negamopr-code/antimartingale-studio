@@ -6,10 +6,16 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from antimg import claude_bridge, nlm_bridge, options as opt, practice
+from antimg import claude_bridge, nlm_bridge, options as opt, practice, practice_log
 from antimg.web.api import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_practice_log(tmp_path, monkeypatch):
+    """Every test gets its own persisted-state file (endpoints append to it)."""
+    monkeypatch.setattr(practice_log, "LOG_PATH", str(tmp_path / "practice_log.json"))
 
 
 # ------------------------------------------------------------------ practice.build math
@@ -226,3 +232,100 @@ def test_notebooks_endpoint_reports_claude_availability(monkeypatch):
     monkeypatch.setattr(claude_bridge, "available", lambda: (True, ""))
     d = client.get("/api/practice/notebooks").json()
     assert d["claude_available"] is True and d["claude_model"] == claude_bridge.CHAT_MODEL
+
+
+# ------------------------------------------------------------------ Claude as compiler
+def test_claude_compiles_notebook_sources_with_participants(monkeypatch):
+    """notebook_ids on /api/practice/claude → fan-out first, then Claude compiles;
+    the response names every participant (the 'skills' list shown in the UI)."""
+    monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {
+        "notebooks": [{"id": "nb-one-12345", "title": "ПИ Коровин", "sources": 50},
+                      {"id": "nb-two-12345", "title": "MES Straddle", "sources": 5}]})
+    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q:
+                        {"error": "quota"} if nb == "nb-two-12345"
+                        else {"answer": "пример RI", "sources_used": [1]})
+    seen = {}
+
+    def fake_chat(question, history=None, construction=None, sources=None):
+        seen["sources"] = sources
+        return {"answer": "компиляция", "model": "claude-sonnet-4-6"}
+    monkeypatch.setattr(claude_bridge, "chat", fake_chat)
+    r = client.post("/api/practice/claude", json={
+        "question": "сведи примеры", "notebook_ids": ["nb-one-12345", "nb-two-12345"],
+        "construction": {"premium_total_usd": 4000}})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["answer"] == "компиляция"
+    # only the successful notebook reaches Claude as a source
+    assert [s["title"] for s in seen["sources"]] == ["ПИ Коровин"]
+    kinds = {p["kind"] for p in d["participants"]}
+    assert {"doctrine", "construction", "notebook", "claude"} <= kinds
+    failed = [p for p in d["participants"] if p["kind"] == "notebook" and p.get("error")]
+    assert failed and failed[0]["name"] == "MES Straddle"
+    assert len(d["notebook_results"]) == 2
+
+
+def test_build_prompt_with_sources_has_compile_instruction():
+    p = claude_bridge.build_prompt("вопрос", sources=[
+        {"title": "ПИ Коровин", "answer": "пример RI 100000"}])
+    assert "КОМПИЛЯЦИЯ" in p and "Ноутбук «ПИ Коровин»" in p
+
+
+# ------------------------------------------------------------------ extraction → graph
+def test_extract_construction_parses_haiku_json(monkeypatch):
+    monkeypatch.setattr(claude_bridge, "_run_claude", lambda prompt, model: {
+        "answer": 'вот:\n{"instrument": "RTS", "s0": 100000, "strike": 100000, '
+                  '"n_calls": 2, "n_futs": 1, "premium": 2000, "dte_days": 30, '
+                  '"multiplier": null, "iv": null, "comment": "пример из вебинара"}',
+        "model": "claude-haiku-4-5"})
+    res = claude_bridge.extract_construction("текст примера…")
+    assert res["params"]["s0"] == 100000 and res["params"]["premium"] == 2000
+    assert "multiplier" not in res["params"]          # nulls dropped
+    assert res["comment"] == "пример из вебинара"
+
+
+def test_extract_endpoint(monkeypatch):
+    monkeypatch.setattr(claude_bridge, "extract_construction", lambda text: {
+        "params": {"s0": 50_000, "strike": 50_000, "premium": 1500},
+        "comment": "ок", "model": "claude-haiku-4-5"})
+    r = client.post("/api/practice/extract", json={"text": "x" * 40})
+    assert r.status_code == 200
+    assert r.json()["params"]["s0"] == 50_000
+
+
+# ------------------------------------------------------------------ persisted tab state
+def test_state_accumulates_and_restores(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {"notebooks": []})
+    monkeypatch.setattr(nlm_bridge, "query",
+                        lambda nb, q: {"answer": "ответ ноутбука", "sources_used": [1, 2]})
+    client.post("/api/practice/ask",
+                json={"notebook_ids": ["abcd1234efgh"], "question": "дай пример"})
+    client.post("/api/practice/payoff", json={
+        "s0": 100, "strike": 100, "n_calls": 2, "n_futs": 1, "iv": 0.4, "dte_days": 30})
+    st = client.get("/api/practice/state").json()
+    roles = [e["role"] for e in st["entries"]]
+    assert roles == ["q", "a"]                        # question + notebook answer logged
+    assert st["entries"][1]["sources"] == 2
+    assert st["construction"]["request"]["s0"] == 100
+    assert st["construction"]["stats"]["premium_total_usd"] > 0
+    # clear wipes everything
+    client.post("/api/practice/state/clear")
+    st2 = client.get("/api/practice/state").json()
+    assert st2["entries"] == [] and st2["construction"] is None
+
+
+def test_state_log_is_capped(monkeypatch):
+    monkeypatch.setattr(practice_log, "MAX_ENTRIES", 5)
+    for i in range(8):
+        practice_log.append("q", f"вопрос {i}")
+    st = practice_log.load()
+    assert len(st["entries"]) == 5
+    assert st["entries"][-1]["text"] == "вопрос 7"
+
+
+def test_state_survives_corrupted_file(monkeypatch, tmp_path):
+    bad = tmp_path / "broken.json"
+    bad.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(practice_log, "LOG_PATH", str(bad))
+    st = practice_log.load()                          # no 500 — resets instead
+    assert st["entries"] == []

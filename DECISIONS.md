@@ -1208,3 +1208,28 @@ Not implemented; documented as a rejected tactic.
   context ($241×7/5≈$337/торг.день to cover theta, $639/день to recover the full premium); fan-out to
   2 notebooks (MES Micro Straddle + hedged intraday) returned both corpus-grounded answers in order.
 - 171 tests (+6). assets v105.
+
+## D101 — Practice tab v3: graph FROM the notebook example, Claude-as-compiler with participants, persisted tab log (2026-06-11)
+- **User asks:** (1) the option graph must be built from the CONCRETE real-life example in NotebookLM and
+  look like the other tab's straddle payoff; (2) the Claude chat must show the list of "skills"/sources
+  participating in the answer — NotebookLM = data source, Claude = overview/compilation across notebooks;
+  (3) the answers log must be SAVED in the tab for incremental iteration.
+- **Graph from example:** «📊 График из примера» takes the LAST notebook answer from the log →
+  `claude_bridge.extract_construction` (haiku, strict-JSON prompt: instrument/s0/strike/n_calls/n_futs/
+  premium/dte_days/multiplier/iv, null = not present, no invention) → fills the payoff form → computes →
+  draws. Graph restyled to Tab-14 language: 🟢 profit wings / 🔴 loss band between breakevens, БУ dash
+  lines, S₀ marker, today-BS curve; title carries «📖 пример: <instrument — notebook>». Missing params →
+  honest toast, user completes the form. Verified live on the real corpus: extracted Korovin's teaching
+  portfolio (30C−15F @ 100000, prem 3300, DTE 90) → max loss = premium 99000 @ strike, BE 93400/106600.
+- **Claude = compiler:** `/api/practice/claude` takes `notebook_ids[]`; backend fans the question to
+  those notebooks FIRST, passes the successful answers to Claude as ПЕРВОИСТОЧНИКИ with an explicit
+  compile instruction (merge, cross-reference, mark contradictions, attribute claims to notebooks), and
+  returns `participants[]` — doctrine preamble / construction / history / each notebook (with per-notebook
+  errors) / claude model. UI: 🧩 hint line under the chat shows what WILL participate (updates on checkbox
+  change/calc), and the answer entry lists what DID; raw per-notebook answers render before the compilation.
+- **Persisted tab state:** `src/antimg/practice_log.py` — JSON in /data (`ANTIMG_PRACTICE_LOG`), fcntl-locked
+  read-modify-write (4 gunicorn workers), capped 200 entries, corrupt-file self-reset. Server logs q/a/c/s
+  entries in ask/claude/extract; payoff saves the full construction (request+payoff+stats). GET
+  /api/practice/state restores chat+form+graph on load; /api/practice/state/clear + 🧹 button. Found & fixed
+  a shallow-copy bug (`dict(_EMPTY)` shared the entries list → ghost entries after clear).
+- 178 tests (+7). assets v106.

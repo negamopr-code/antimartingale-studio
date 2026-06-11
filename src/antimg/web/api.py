@@ -27,6 +27,7 @@ from .. import hedged_intraday as hi
 from .. import pi_model as pim
 from .. import pi_sim as pisim
 from .. import practice as prac
+from .. import practice_log as prlog
 from .. import pure_straddle as ps
 from .. import vol as volmod
 from .. import instruments, scenarios, signals, tradingview
@@ -36,7 +37,7 @@ from .config import settings
 from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
                       PiCoinReq, PiSimReq, PracticeAskReq, PracticeClaudeReq,
-                      PracticePayoffReq, PureStraddleReq, ScanReq)
+                      PracticeExtractReq, PracticePayoffReq, PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1606,17 +1607,32 @@ def practice_notebooks(force: bool = Query(False)):
             "claude_model": claude_bridge.CHAT_MODEL if cl_ok else None}
 
 
+def _nlm_fanout(notebook_ids: list[str], question: str) -> list[dict]:
+    """Serial fan-out of one question across notebooks → [{notebook_id, title, answer|error}]."""
+    titles = {n["id"]: n["title"]
+              for n in nlm_bridge.list_notebooks().get("notebooks", [])}
+    results = []
+    for nb_id in dict.fromkeys(notebook_ids):           # de-dup, keep order
+        res = nlm_bridge.query(nb_id, question)
+        results.append({"notebook_id": nb_id, "title": titles.get(nb_id, nb_id), **res})
+    return results
+
+
+def _log_fanout(results: list[dict]) -> None:
+    for r in results:
+        if not r.get("error"):
+            prlog.append("a", r["answer"], title=r["title"],
+                         sources=len(r.get("sources_used") or []) or None)
+
+
 @app.post("/api/practice/ask")
 def practice_ask(req: PracticeAskReq):
     """Fan the question VERBATIM across the selected notebooks (Gemini answers from each
     corpus — zero LLM tokens here). Serial calls: N notebooks can take N×1–2 min. Partial
     failures are per-notebook; only all-failed becomes a 502."""
-    titles = {n["id"]: n["title"]
-              for n in nlm_bridge.list_notebooks().get("notebooks", [])}
-    results = []
-    for nb_id in dict.fromkeys(req.notebook_ids):       # de-dup, keep order
-        res = nlm_bridge.query(nb_id, req.question)
-        results.append({"notebook_id": nb_id, "title": titles.get(nb_id, nb_id), **res})
+    prlog.append("q", req.question)
+    results = _nlm_fanout(req.notebook_ids, req.question)
+    _log_fanout(results)
     if all(r.get("error") for r in results):
         raise HTTPException(status_code=502, detail="; ".join(
             f"{r['title']}: {r['error']}" for r in results)[:600])
@@ -1625,14 +1641,62 @@ def practice_ask(req: PracticeAskReq):
 
 @app.post("/api/practice/claude")
 def practice_claude(req: PracticeClaudeReq):
-    """Direct chat with a Claude model (headless `claude -p`, text-only, no tools).
-    The chat history + current construction ride along as context."""
+    """Chat with a Claude model (headless `claude -p`, text-only, no tools). The chat
+    history + current construction ride along as context. With `notebook_ids` the
+    question is FIRST fanned out to those notebooks and Claude COMPILES the answers —
+    NotebookLM is the data source, Claude is the overview across all of them. The
+    response lists the participants so the UI can show what fed the answer."""
+    prlog.append("q", req.question)
+    participants = [{"kind": "doctrine", "name": "ПИ (Прикрытый Интрадей) — преамбула домена"}]
+    if req.construction:
+        participants.append({"kind": "construction", "name": "текущая конструкция калькулятора"})
+    if req.history:
+        participants.append({"kind": "history", "name": f"история чата ({len(req.history)} реплик)"})
+
+    notebook_results = []
+    sources = None
+    if req.notebook_ids:
+        notebook_results = _nlm_fanout(req.notebook_ids, req.question)
+        _log_fanout(notebook_results)
+        sources = [r for r in notebook_results if not r.get("error")]
+        for r in notebook_results:
+            participants.append({
+                "kind": "notebook", "name": r["title"],
+                **({"error": r["error"]} if r.get("error") else {})})
+
     res = claude_bridge.chat(req.question,
                              history=[t.model_dump() for t in req.history],
-                             construction=req.construction)
+                             construction=req.construction, sources=sources)
     if "error" in res:
         raise HTTPException(status_code=502, detail=res["error"])
+    participants.append({"kind": "claude", "name": res["model"]
+                         + (" — компиляция источников" if sources else " — прямой ответ")})
+    prlog.append("c", res["answer"], model=res["model"], participants=participants)
+    return {**res, "participants": participants, "notebook_results": notebook_results}
+
+
+@app.post("/api/practice/extract")
+def practice_extract(req: PracticeExtractReq):
+    """Pull construction parameters out of a notebook's textual example (Claude haiku
+    extraction) — so the payoff graph is built from the REAL-life case in the corpus."""
+    res = claude_bridge.extract_construction(req.text)
+    if "error" in res:
+        raise HTTPException(status_code=502, detail=res["error"])
+    if res["comment"]:
+        prlog.append("s", "Извлёк параметры из примера: " + res["comment"])
     return res
+
+
+@app.get("/api/practice/state")
+def practice_state():
+    """The persisted Practice-tab state: the answers log + the last construction —
+    so the tab restores itself on reload and the user iterates incrementally."""
+    return prlog.load()
+
+
+@app.post("/api/practice/state/clear")
+def practice_state_clear():
+    return prlog.clear()
 
 
 @app.post("/api/practice/payoff")
@@ -1645,7 +1709,7 @@ def practice_payoff(req: PracticePayoffReq):
                        r=req.r, multiplier=req.multiplier, lots=req.lots)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    return {
+    out = {
         "payoff": c.payoff,
         "stats": {
             "premium_per_call_pts": round(c.premium, 4),
@@ -1664,6 +1728,9 @@ def practice_payoff(req: PracticePayoffReq):
         },
         "notes": c.notes,
     }
+    # persist: the tab restores the form + graph on reload (incremental iteration)
+    prlog.set_construction({"request": req.model_dump(exclude_none=True), **out})
+    return out
 
 
 # ----------------------------------------------------------------- static frontend

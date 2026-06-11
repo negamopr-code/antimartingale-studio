@@ -551,6 +551,7 @@
     <form class="controls" id="form-pr-nb" onsubmit="return false">
       <div id="pr-notebooks" style="max-height:170px;overflow:auto;min-width:380px;max-width:560px;border:1px solid #2a3340;border-radius:6px;padding:6px;background:#0d1117"></div>
       <button type="button" id="pr-nb-refresh" title="перечитать список ноутбуков">🔄</button>
+      <button type="button" id="pr-clear-log" title="очистить сохранённый лог вкладки (вопросы/ответы/конструкция)">🧹 Очистить лог</button>
       <span class="hint" id="pr-nb-status" style="margin-left:8px"></span>
     </form>
 
@@ -560,9 +561,11 @@
         <textarea name="question" rows="3" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #2a3340;border-radius:6px;padding:6px"
           placeholder="Например: дай конкретный пример конструкции ПИ с числами — инструмент, цена фьючерса, страйк, премия колла, сколько коллов и фьючей"></textarea></label>
       <button type="submit" title="вопрос уходит ДОСЛОВНО в каждый отмеченный ноутбук; отвечает Gemini по источникам (1–2 мин на ноутбук)">📖 Спросить ноутбуки</button>
-      <button type="button" id="pr-ask-claude" title="спросить модель Claude напрямую (история чата + текущая конструкция уходят как контекст)">🤖 Спросить Claude</button>
+      <button type="button" id="pr-ask-claude" title="Claude компилирует: вопрос сперва уходит в отмеченные ноутбуки (источники данных), затем Claude сводит их ответы + историю + конструкцию в полную картину">🤖 Спросить Claude</button>
       <button type="button" id="pr-preset-example" title="готовый вопрос: запросить конкретный пример с числами">🎯 Пример с числами</button>
+      <button type="button" id="pr-graph-example" title="взять ПОСЛЕДНИЙ ответ ноутбука из лога, извлечь из него параметры конструкции (Claude haiku) и построить график стреддла по этому реальному примеру">📊 График из примера</button>
     </form>
+    <p class="hint" id="pr-ctx" style="margin:2px 0 0"></p>
 
     <h3 style="margin:18px 0 4px;font-size:14px;color:#8b949e">📐 2 · Конструктор: n·Колл − m·Фьюч в конкретных числах</h3>
     <form class="controls" id="form-pr-payoff">
@@ -584,6 +587,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=105"></script>
+  <script src="/app.js?v=106"></script>
 </body>
 </html>
