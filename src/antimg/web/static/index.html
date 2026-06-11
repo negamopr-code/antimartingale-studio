@@ -568,7 +568,12 @@
       <div style="flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px">
         <span class="hint" title="доктрины из ~/.claude/skills — выбери, какие участвуют в ответе Claude; несколько комбинируются">🧠 Скиллы:</span>
         <span id="pr-skills" style="display:inline-flex;flex-wrap:wrap;gap:2px 12px"></span>
-        <label style="margin-left:auto" title="модель для чата (Fable 5 = новейшая)">Модель
+        <label style="margin-left:auto" title="ЯВНЫЙ выбор: «только Claude» — ноутбуки НЕ спрашиваются вообще (быстро, без квоты NotebookLM); «Claude + ноутбуки» — вопрос сперва уходит в отмеченные ноутбуки, Claude компилирует">Источник для 🤖
+          <select id="pr-claude-src">
+            <option value="claude">только Claude (без NotebookLM)</option>
+            <option value="nb">Claude + отмеченные ноутбуки</option>
+          </select></label>
+        <label title="модель для чата (Fable 5 = новейшая)">Модель
           <select id="pr-model"></select></label>
       </div>
       <button type="submit" title="вопрос уходит ДОСЛОВНО в каждый отмеченный ноутбук; отвечает Gemini по источникам (1–2 мин на ноутбук)">📖 Спросить ноутбуки</button>
@@ -605,6 +610,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=110"></script>
+  <script src="/app.js?v=111"></script>
 </body>
 </html>

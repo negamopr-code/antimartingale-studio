@@ -2298,8 +2298,11 @@ function prCtxHint() {
   if (sks.length) parts.push(`🧠 скиллы: ${sks.join(" + ")}`);
   const nimg = prImages.filter((i) => i.checked).length;
   if (nimg) parts.push(`📷 картинки (${nimg})`);
-  if (nbs.length) parts.push(`📖 ноутбуки-источники: ${nbs.join(", ")} → компиляция`);
-  else parts.push("📖 ноутбуки не отмечены → ответ по истории чата");
+  const srcSel = $("#pr-claude-src");
+  if (srcSel && srcSel.value !== "nb")
+    parts.push("📖 ноутбуки НЕ спрашиваются (источник: только Claude)");
+  else if (nbs.length) parts.push(`📖 ноутбуки-источники: ${nbs.join(", ")} → компиляция`);
+  else parts.push("⚠ источник «Claude + ноутбуки», но ни один не отмечен");
   if (prLastStats) parts.push("📐 текущая конструкция");
   if (prHistory.length) parts.push(`🕘 история (${prHistory.length})`);
   const model = $("#pr-model") && $("#pr-model").value;
@@ -2332,15 +2335,25 @@ $("#form-pr-ask").onsubmit = (e) => {        // 📖 fan the question across che
   });
 };
 
-// 🤖 Claude = the compiler: checked notebooks answer first (data sources), Claude then
-// builds the full picture across them + history + construction; participants are shown.
+// explicit source switch for 🤖: «только Claude» = notebooks are LITERALLY not asked
+// (no NotebookLM call, no quota); «Claude + ноутбуки» = the user opted in and chose them.
+const PR_SRC_KEY = "pr-claude-src";
+$("#pr-claude-src").value = localStorage.getItem(PR_SRC_KEY) || "claude";
+$("#pr-claude-src").onchange = (e) => { localStorage.setItem(PR_SRC_KEY, e.target.value); prCtxHint(); };
+
+// 🤖 Claude: alone by default; as the compiler over the chosen notebooks when opted in.
 $("#pr-ask-claude").onclick = (e) => {
   withBusy(e.target, async () => {
     if (!prClaudeInfo.available) { toast("Claude недоступен: " + (prClaudeInfo.error || "")); return; }
     const form = $("#form-pr-ask");
     const q = prTakeQuestion(form);
     if (!q) return;
-    const ids = $$(".pr-nb-cb").filter((c) => c.checked).map((c) => c.value);
+    const useNb = $("#pr-claude-src").value === "nb";
+    const ids = useNb ? $$(".pr-nb-cb").filter((c) => c.checked).map((c) => c.value) : [];
+    if (useNb && !ids.length) {
+      toast("Режим «Claude + ноутбуки», но ни один ноутбук не отмечен — отметь нужные или переключи источник на «только Claude»");
+      return;
+    }
     const skills = $$(".pr-skill-cb").filter((c) => c.checked).map((c) => c.value);
     const model = $("#pr-model").value || undefined;
     prChatAdd("q", q);

@@ -1310,3 +1310,15 @@ Not implemented; documented as a rejected tactic.
   from the pasted analysis recovered ALL fields incl. put_premium 227.5 and multiplier 5.
 - UI: «Путов (long)» + «Премия пута (пп)» inputs (apply-from-example clears stale put fields),
   legs label in the graph title (e.g. 30C + 30P). 195 tests (+2). assets v110.
+
+## D106 — Practice tab v8: explicit «только Claude» source switch for the chat (2026-06-11)
+- **User ask:** when asking a question it must be possible to LITERALLY define that NotebookLM is not
+  asked — only Claude; and when NotebookLM is needed, the user chooses it.
+- Previously the 🤖 button auto-fanned to whatever notebooks were checked (and the ПИ corpus is
+  pre-checked) — every "just Claude" question silently burned a slow NotebookLM query + quota.
+- **«Источник для 🤖» select** next to the model dropdown: `только Claude (без NotebookLM)` — DEFAULT,
+  notebooks are not contacted at all; `Claude + отмеченные ноутбуки` — explicit opt-in, requires at
+  least one checked notebook (clear toast otherwise). Choice persists in localStorage. The 🧩 hint
+  states the mode outright («📖 ноутбуки НЕ спрашиваются (источник: только Claude)»). The separate
+  📖 button remains the explicit pure-NotebookLM path.
+- Frontend-only (backend already handled empty notebook_ids = pure Claude). 195 tests. assets v111.
