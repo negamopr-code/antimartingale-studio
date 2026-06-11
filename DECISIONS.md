@@ -1187,3 +1187,24 @@ Not implemented; documented as a rejected tactic.
   auth as yt2nlm-web; notebook UUID = connection string). Verified live end-to-end: list (30+ notebooks),
   payoff math (loss cap = premium at K, BE ±14% @ IV60/DTE30), real query to 5fada65b answered with sources.
 - 165 tests (+14). assets v104.
+
+## D100 — Practice tab v2: MULTI-notebook fan-out + direct Claude chat (2026-06-11)
+- **User ask:** choose SEVERAL NotebookLM notebooks, and chat with a Claude model directly in the tab.
+- **Multi-notebook:** the single select became a checkbox list (ПИ corpus pre-checked). `/api/practice/ask`
+  now takes `notebook_ids[]` (≤8, de-duped) and fans the question VERBATIM across them SERIALLY (bridge
+  min-gap, anti RESOURCE_EXHAUSTED), returning per-notebook {title, answer|error}; partial failure = 200
+  with per-notebook errors, only all-failed = 502. Same contract as yt2nlm-web's fan-out.
+- **Claude chat:** `src/antimg/claude_bridge.py` — headless `claude -p --model $CLAUDE_CHAT_MODEL`
+  (default claude-sonnet-4-6), text-only, no tools, STATELESS: the client resends a compact history
+  (last 40 turns: user/notebook/claude) and the current calculator construction; the bridge builds one
+  prompt with a ПИ-domain preamble («НЕ инвестсовет»). `/api/practice/claude` → {answer, model};
+  graceful 502 with reason when CLI/credentials missing. `/api/practice/notebooks` now also reports
+  claude_available/model so the UI labels the 🤖 button.
+- **Deploy (yt2nlm-web pattern):** image bakes nodejs+npm+`@anthropic-ai/claude-code`
+  (DISABLE_AUTOUPDATER=1, CLAUDE_CONFIG_DIR=/home/app/.claude); new `deploy/entrypoint.sh` SEEDS
+  .credentials.json from a READ-ONLY `/seed` mount of the host ~/.claude (copy, never write back) then
+  execs gunicorn; serve.sh/compose add `-v /root/.claude:/seed:ro`.
+- **Verified live:** credentials seeded; Sonnet 4.6 answered a theta-coverage calc off the construction
+  context ($241×7/5≈$337/торг.день to cover theta, $639/день to recover the full premium); fan-out to
+  2 notebooks (MES Micro Straddle + hedged intraday) returned both corpus-grounded answers in order.
+- 171 tests (+6). assets v105.

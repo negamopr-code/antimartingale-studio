@@ -538,27 +538,29 @@
   <!-- TAB 15 -->
   <section id="practice" class="panel">
     <p class="hint"><b>Практика — конкретные примеры из NotebookLM + графика опционной конструкции.</b>
-      1) Выбери ноутбук (корпус вебинаров/инструкций — например, корпус ПИ Коровина) и спроси
-      <i>конкретный пример</i>: инструмент, цена фьючерса, страйк, премия. Отвечает Gemini по
-      источникам ноутбука — 0 токенов Claude. 2) Введи числа из примера в конструктор ниже —
-      получишь график выплат, безубытки, лимит убытка (= премия) и тету, которую должен отбивать
-      скальп. 3) Кнопка «спросить про эту конструкцию» отправляет твои числа обратно в ноутбук
-      для дальнейшего разбора.</p>
+      1) Отметь один или НЕСКОЛЬКО ноутбуков (корпусы вебинаров/инструкций — например, корпус ПИ
+      Коровина) и спроси <i>конкретный пример</i>: инструмент, цена фьючерса, страйк, премия.
+      Вопрос уходит дословно в каждый отмеченный ноутбук; отвечает Gemini по его источникам —
+      0 токенов Claude. Кнопка «🤖 Спросить Claude» — прямой чат с моделью Claude: она видит
+      историю чата (включая ответы ноутбуков) и текущую конструкцию — для дальнейших расчётов.
+      2) Введи числа из примера в конструктор ниже — получишь график выплат, безубытки, лимит
+      убытка (= премия) и тету, которую должен отбивать скальп. 3) Кнопка «спросить про эту
+      конструкцию» подставляет твои числа в вопрос для разбора.</p>
 
-    <h3 style="margin:10px 0 4px;font-size:14px;color:#8b949e">📚 1 · Ноутбук с примерами</h3>
+    <h3 style="margin:10px 0 4px;font-size:14px;color:#8b949e">📚 1 · Ноутбуки с примерами (можно несколько — вопрос уйдёт в каждый)</h3>
     <form class="controls" id="form-pr-nb" onsubmit="return false">
-      <label style="min-width:340px">Notebook
-        <select name="notebook" id="pr-notebook" style="max-width:420px"></select></label>
+      <div id="pr-notebooks" style="max-height:170px;overflow:auto;min-width:380px;max-width:560px;border:1px solid #2a3340;border-radius:6px;padding:6px;background:#0d1117"></div>
       <button type="button" id="pr-nb-refresh" title="перечитать список ноутбуков">🔄</button>
       <span class="hint" id="pr-nb-status" style="margin-left:8px"></span>
     </form>
 
     <div id="pr-chat" class="tradetable" style="margin:8px 0"></div>
     <form class="controls" id="form-pr-ask">
-      <label style="flex:1;min-width:420px">Вопрос к ноутбуку
+      <label style="flex:1;min-width:420px">Вопрос
         <textarea name="question" rows="3" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #2a3340;border-radius:6px;padding:6px"
           placeholder="Например: дай конкретный пример конструкции ПИ с числами — инструмент, цена фьючерса, страйк, премия колла, сколько коллов и фьючей"></textarea></label>
-      <button type="submit" title="ответ считает Gemini по источникам ноутбука; может занять 1–2 минуты">❓ Спросить</button>
+      <button type="submit" title="вопрос уходит ДОСЛОВНО в каждый отмеченный ноутбук; отвечает Gemini по источникам (1–2 мин на ноутбук)">📖 Спросить ноутбуки</button>
+      <button type="button" id="pr-ask-claude" title="спросить модель Claude напрямую (история чата + текущая конструкция уходят как контекст)">🤖 Спросить Claude</button>
       <button type="button" id="pr-preset-example" title="готовый вопрос: запросить конкретный пример с числами">🎯 Пример с числами</button>
     </form>
 
@@ -582,6 +584,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=104"></script>
+  <script src="/app.js?v=105"></script>
 </body>
 </html>

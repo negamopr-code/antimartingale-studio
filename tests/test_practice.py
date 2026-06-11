@@ -6,7 +6,7 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from antimg import nlm_bridge, options as opt, practice
+from antimg import claude_bridge, nlm_bridge, options as opt, practice
 from antimg.web.api import app
 
 client = TestClient(app)
@@ -118,51 +118,111 @@ def test_practice_notebooks_lists_and_caches(monkeypatch):
     assert len(calls) == 1
 
 
-def test_practice_ask_endpoint(monkeypatch):
+def test_bridge_query_old_wrapped_shape(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "available", lambda: (True, ""))
     monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
-
-    def fake_run(cmd, capture_output, text, timeout):
-        assert cmd[1:3] == ["notebook", "query"]
-        return _FakeProc('{"value": {"answer": "Пример: RI 100000, 2 колла", "sources_used": [1, 2]}}')
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    r = client.post("/api/practice/ask",
-                    json={"notebook_id": "abcd1234efgh", "question": "дай пример"})
-    assert r.status_code == 200
-    assert "Пример" in r.json()["answer"]
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(
+        '{"value": {"answer": "Пример: RI 100000, 2 колла", "sources_used": [1, 2]}}'))
+    res = nlm_bridge.query("abcd1234efgh", "дай пример")
+    assert "Пример" in res["answer"] and res["sources_used"] == [1, 2]
 
 
-def test_practice_ask_new_cli_top_level_shape(monkeypatch):
+def test_bridge_query_new_cli_top_level_shape(monkeypatch):
     """notebooklm-mcp-cli >0.6.x returns {"answer": ...} top-level (no "value" wrapper) —
     bit us live 2026-06-11: the wrapped-only parser reported 'empty answer'."""
     monkeypatch.setattr(nlm_bridge, "available", lambda: (True, ""))
     monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(
         '{"status": "success", "answer": "Правило трёх третей…", "sources": ["a", "b"]}'))
-    r = client.post("/api/practice/ask",
-                    json={"notebook_id": "abcd1234efgh", "question": "что такое три трети"})
-    assert r.status_code == 200
-    d = r.json()
-    assert "трёх третей" in d["answer"] and d["sources_used"] == ["a", "b"]
+    res = nlm_bridge.query("abcd1234efgh", "что такое три трети")
+    assert "трёх третей" in res["answer"] and res["sources_used"] == ["a", "b"]
 
 
-def test_practice_ask_cli_status_error_surfaced(monkeypatch):
+def test_bridge_query_cli_status_error_surfaced(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "available", lambda: (True, ""))
     monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(
         '{"status": "error", "error": "Query failed: API error (code 5): NOT_FOUND"}'))
-    r = client.post("/api/practice/ask",
-                    json={"notebook_id": "abcd1234efgh", "question": "дай пример"})
-    assert r.status_code == 502
-    assert "NOT_FOUND" in r.json()["error"]
+    assert "NOT_FOUND" in nlm_bridge.query("abcd1234efgh", "дай пример")["error"]
 
 
-def test_practice_ask_error_becomes_502(monkeypatch):
-    monkeypatch.setattr(nlm_bridge, "available", lambda: (True, ""))
-    monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
-    monkeypatch.setattr(subprocess, "run",
-                        lambda *a, **k: _FakeProc("", returncode=1, stderr="RESOURCE_EXHAUSTED"))
+def test_practice_ask_fans_out_to_selected_notebooks(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {
+        "notebooks": [{"id": "nb-one-12345", "title": "ПИ Коровин", "sources": 50},
+                      {"id": "nb-two-12345", "title": "MES Straddle", "sources": 5}]})
+    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q: {
+        "answer": f"ответ из {nb}", "sources_used": [1]})
+    r = client.post("/api/practice/ask", json={
+        "notebook_ids": ["nb-one-12345", "nb-two-12345", "nb-one-12345"],   # dup dropped
+        "question": "дай пример"})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    assert [x["title"] for x in res] == ["ПИ Коровин", "MES Straddle"]
+    assert all("ответ из" in x["answer"] for x in res)
+
+
+def test_practice_ask_partial_failure_is_200(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {"notebooks": []})
+    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q:
+                        {"error": "RESOURCE_EXHAUSTED"} if nb.startswith("bad")
+                        else {"answer": "ок", "sources_used": []})
+    r = client.post("/api/practice/ask", json={
+        "notebook_ids": ["good-1234567", "bad-12345678"], "question": "дай пример"})
+    assert r.status_code == 200                      # one answer survived
+    res = r.json()["results"]
+    assert res[0]["answer"] == "ок" and "RESOURCE_EXHAUSTED" in res[1]["error"]
+
+
+def test_practice_ask_all_failed_becomes_502(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {"notebooks": []})
+    monkeypatch.setattr(nlm_bridge, "query",
+                        lambda nb, q: {"error": "RESOURCE_EXHAUSTED"})
     r = client.post("/api/practice/ask",
-                    json={"notebook_id": "abcd1234efgh", "question": "дай пример"})
+                    json={"notebook_ids": ["abcd1234efgh"], "question": "дай пример"})
     assert r.status_code == 502
     assert "RESOURCE_EXHAUSTED" in r.json()["error"]
+
+
+# ------------------------------------------------------------------ claude chat
+def test_claude_prompt_includes_history_and_construction():
+    p = claude_bridge.build_prompt(
+        "посчитай тету", history=[
+            {"role": "q", "text": "дай пример"},
+            {"role": "a", "text": "RI 100000, премия 2000", "title": "ПИ Коровин"},
+            {"role": "c", "text": "вот расчёт"}],
+        construction={"premium_total_usd": 4000})
+    assert "Прикрытый Интрадей" in p                  # domain preamble
+    assert "Ноутбук «ПИ Коровин»: RI 100000" in p
+    assert '"premium_total_usd": 4000' in p
+    assert p.rstrip().endswith("посчитай тету")
+
+
+def test_practice_claude_endpoint(monkeypatch):
+    monkeypatch.setattr(claude_bridge, "available", lambda: (True, ""))
+
+    def fake_run(cmd, input, capture_output, text, timeout):
+        assert cmd[:2] == [claude_bridge.CLAUDE_BIN, "-p"] and "ВОПРОС" in input
+        return _FakeProc("Тета ≈ −241 $/день")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    r = client.post("/api/practice/claude", json={
+        "question": "сколько тета?",
+        "history": [{"role": "a", "text": "пример", "title": "ПИ"}],
+        "construction": {"theta_usd_per_day": -241}})
+    assert r.status_code == 200
+    d = r.json()
+    assert "Тета" in d["answer"] and d["model"] == claude_bridge.CHAT_MODEL
+
+
+def test_practice_claude_unavailable_becomes_502(monkeypatch):
+    monkeypatch.setattr(claude_bridge, "available",
+                        lambda: (False, "claude credentials not seeded"))
+    r = client.post("/api/practice/claude", json={"question": "привет"})
+    assert r.status_code == 502
+    assert "not seeded" in r.json()["error"]
+
+
+def test_notebooks_endpoint_reports_claude_availability(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "available", lambda: (False, "no nlm"))
+    monkeypatch.setattr(claude_bridge, "available", lambda: (True, ""))
+    d = client.get("/api/practice/notebooks").json()
+    assert d["claude_available"] is True and d["claude_model"] == claude_bridge.CHAT_MODEL

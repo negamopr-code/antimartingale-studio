@@ -18,6 +18,9 @@ PORT="${PORT:-8090}"
 # yt2nlm-web uses. Mounted at the app user's ~/.notebooklm-mcp-cli for the Practice tab;
 # if absent on this host the tab degrades gracefully (calculator still works).
 NLM_PROFILE="${NLM_PROFILE:-/root/claude-sandbox/persistent/nlm-profile}"
+# Claude CLI credential seed for the Practice tab's Claude chat — READ-ONLY mount of the
+# operator's ~/.claude; entrypoint.sh COPIES .credentials.json out of it (never writes back).
+CLAUDE_SEED="${CLAUDE_SEED:-/root/.claude}"
 
 echo "[serve] building $IMAGE …"
 docker build -f deploy/Dockerfile -t "$IMAGE" .
@@ -27,6 +30,7 @@ docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" --restart unless-stopped \
   -p "${PORT}:8000" -v antimg-data:/data \
   -v "${NLM_PROFILE}:/home/app/.notebooklm-mcp-cli" \
+  -v "${CLAUDE_SEED}:/seed:ro" \
   "$IMAGE" >/dev/null
 
 sleep 5

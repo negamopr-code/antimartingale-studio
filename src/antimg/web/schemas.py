@@ -361,11 +361,27 @@ class PiSimReq(BaseModel):
 
 
 class PracticeAskReq(BaseModel):
-    """Tab 15 — «Практика»: forward one question VERBATIM to one NotebookLM notebook
-    (the corpus of concrete examples — e.g. the ПИ webinars). Answered by Gemini on
-    Google's side via the `nlm` CLI; zero LLM tokens spent here."""
-    notebook_id: str = Field(..., min_length=8, max_length=64)
+    """Tab 15 — «Практика»: fan one question VERBATIM across the SELECTED NotebookLM
+    notebooks (the corpora of concrete examples — e.g. the ПИ webinars). Answered by
+    Gemini on Google's side via the `nlm` CLI; zero LLM tokens spent here. Queries run
+    serially (anti RESOURCE_EXHAUSTED) — N notebooks ≈ N× the single-notebook latency."""
+    notebook_ids: list[str] = Field(..., min_length=1, max_length=8)
     question: str = Field(..., min_length=3, max_length=4000)
+
+
+class PracticeChatTurn(BaseModel):
+    role: str = Field(..., pattern="^(q|a|c)$")        # q=user, a=notebook answer, c=claude
+    text: str = Field(..., max_length=20_000)
+    title: str | None = Field(None, max_length=200)    # notebook title for role=a
+
+
+class PracticeClaudeReq(BaseModel):
+    """Tab 15 — chat with a Claude model directly (headless `claude -p`, no tools).
+    Stateless: the client resends a compact history each turn; the current calculator
+    construction (if any) is attached as context for «further calculation»."""
+    question: str = Field(..., min_length=1, max_length=8000)
+    history: list[PracticeChatTurn] = Field(default_factory=list, max_length=40)
+    construction: dict | None = None
 
 
 class PracticePayoffReq(BaseModel):

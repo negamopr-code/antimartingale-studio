@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import am_overlay as amov
 from .. import atr_strategy as strat
+from .. import claude_bridge
 from .. import nlm_bridge
 from .. import pi_coin as picoin
 from .. import data as datamod
@@ -34,8 +35,8 @@ from . import serialization as ser
 from .config import settings
 from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
-                      PiCoinReq, PiSimReq, PracticeAskReq, PracticePayoffReq,
-                      PureStraddleReq, ScanReq)
+                      PiCoinReq, PiSimReq, PracticeAskReq, PracticeClaudeReq,
+                      PracticePayoffReq, PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1596,16 +1597,39 @@ def practice_notebooks(force: bool = Query(False)):
     payoff calculator keeps working."""
     out = nlm_bridge.list_notebooks(force=force)
     ok, why = nlm_bridge.available()
+    cl_ok, cl_why = claude_bridge.available()
     return {"available": ok and not out.get("error"),
             "notebooks": out.get("notebooks", []),
-            "error": out.get("error") or (why or None)}
+            "error": out.get("error") or (why or None),
+            "claude_available": cl_ok,
+            "claude_error": cl_why or None,
+            "claude_model": claude_bridge.CHAT_MODEL if cl_ok else None}
 
 
 @app.post("/api/practice/ask")
 def practice_ask(req: PracticeAskReq):
-    """Forward the question VERBATIM to one notebook (Gemini answers from the corpus —
-    zero LLM tokens here). Long call: nlm query can take ~1–2 min."""
-    res = nlm_bridge.query(req.notebook_id, req.question)
+    """Fan the question VERBATIM across the selected notebooks (Gemini answers from each
+    corpus — zero LLM tokens here). Serial calls: N notebooks can take N×1–2 min. Partial
+    failures are per-notebook; only all-failed becomes a 502."""
+    titles = {n["id"]: n["title"]
+              for n in nlm_bridge.list_notebooks().get("notebooks", [])}
+    results = []
+    for nb_id in dict.fromkeys(req.notebook_ids):       # de-dup, keep order
+        res = nlm_bridge.query(nb_id, req.question)
+        results.append({"notebook_id": nb_id, "title": titles.get(nb_id, nb_id), **res})
+    if all(r.get("error") for r in results):
+        raise HTTPException(status_code=502, detail="; ".join(
+            f"{r['title']}: {r['error']}" for r in results)[:600])
+    return {"results": results}
+
+
+@app.post("/api/practice/claude")
+def practice_claude(req: PracticeClaudeReq):
+    """Direct chat with a Claude model (headless `claude -p`, text-only, no tools).
+    The chat history + current construction ride along as context."""
+    res = claude_bridge.chat(req.question,
+                             history=[t.model_dump() for t in req.history],
+                             construction=req.construction)
     if "error" in res:
         raise HTTPException(status_code=502, detail=res["error"])
     return res

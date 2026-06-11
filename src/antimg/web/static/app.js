@@ -2126,60 +2126,106 @@ $("#pisim-scan-all").onclick = (e) => withBusy(e.target, async () => {
   renderPiSimScan(await post("/api/pi-sim/scan", o));
 });
 
-// ---- tab 15: Практика — NotebookLM examples + manual construction payoff
-const PR_DEFAULT_NB = /прикрыт|интрадей|intraday|коровин/i;   // preselect the ПИ corpus if present
+// ---- tab 15: Практика — NotebookLM examples (multi) + Claude chat + construction payoff
+const PR_DEFAULT_NB = /прикрыт|интрадей|intraday|коровин/i;   // pre-check the ПИ corpus if present
+let prClaudeInfo = { available: false, error: "ещё не проверял", model: null };
 
 async function prLoadNotebooks(force = false) {
-  const sel = $("#pr-notebook"), st = $("#pr-nb-status");
+  const box = $("#pr-notebooks"), st = $("#pr-nb-status");
   st.textContent = "загружаю список ноутбуков…";
   try {
     const d = await api("/api/practice/notebooks" + (force ? "?force=true" : ""));
-    sel.innerHTML = "";
+    prClaudeInfo = { available: !!d.claude_available, error: d.claude_error, model: d.claude_model };
+    $("#pr-ask-claude").title = prClaudeInfo.available
+      ? `прямой чат с ${prClaudeInfo.model} (история + конструкция уходят как контекст)`
+      : "недоступно: " + (prClaudeInfo.error || "");
+    box.innerHTML = "";
     if (!d.available || !d.notebooks.length) {
-      st.textContent = "⚠ " + (d.error || "ноутбуки недоступны — работает только конструктор");
+      st.textContent = "⚠ " + (d.error || "ноутбуки недоступны — работают конструктор и Claude-чат");
       return;
     }
+    let defDone = false;
     for (const n of d.notebooks) {
-      const o = document.createElement("option");
-      o.value = n.id;
-      o.textContent = n.title + (n.sources != null ? ` (${n.sources} ист.)` : "");
-      if (PR_DEFAULT_NB.test(n.title) && !sel.querySelector("option[data-def]")) {
-        o.selected = true; o.dataset.def = "1";
-      }
-      sel.appendChild(o);
+      const lab = document.createElement("label");
+      lab.style.cssText = "display:block;padding:1px 4px;font-weight:normal;cursor:pointer";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = n.id; cb.className = "pr-nb-cb";
+      cb.style.marginRight = "6px";
+      if (!defDone && PR_DEFAULT_NB.test(n.title)) { cb.checked = true; defDone = true; }
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(
+        n.title + (n.sources != null ? ` (${n.sources} ист.)` : "")));
+      box.appendChild(lab);
     }
-    st.textContent = `${d.notebooks.length} ноутбуков; отвечает Gemini по источникам (0 токенов Claude)`;
+    st.textContent = `${d.notebooks.length} ноутбуков — отметь нужные; Gemini отвечает по источникам `
+      + `(0 токенов Claude)${prClaudeInfo.available ? ` · 🤖 ${prClaudeInfo.model} доступен` : ""}`;
   } catch (e) { st.textContent = "⚠ " + (e.message || e); }
 }
 $("#pr-nb-refresh").onclick = (e) => withBusy(e.target, () => prLoadNotebooks(true));
 
-function prChatAdd(role, text, sources) {
+const prHistory = [];   // compact chat history for the Claude context: {role: q|a|c, text, title?}
+function prChatAdd(role, text, opts = {}) {
   const box = $("#pr-chat");
   const div = document.createElement("div");
   div.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3340;white-space:pre-wrap";
-  const tag = role === "q" ? "🧑 Вопрос" : (role === "a" ? "📖 Ноутбук" : "⚠");
+  const tag = role === "q" ? "🧑 Вопрос"
+    : role === "a" ? `📖 ${opts.title || "Ноутбук"}`
+    : role === "c" ? `🤖 Claude${opts.model ? " · " + opts.model : ""}` : "⚠";
   const head = document.createElement("b");
-  head.style.color = role === "q" ? "#58a6ff" : (role === "a" ? "#3fb950" : "#f85149");
-  head.textContent = tag + (sources && sources.length ? ` (${sources.length} источников)` : "");
+  head.style.color = role === "q" ? "#58a6ff" : role === "a" ? "#3fb950"
+    : role === "c" ? "#d29922" : "#f85149";
+  head.textContent = tag + (opts.sources && opts.sources.length
+    ? ` (${opts.sources.length} источников)` : "");
   div.appendChild(head);
   div.appendChild(document.createTextNode("\n" + text));
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
+  if (role === "q" || role === "a" || role === "c") {
+    prHistory.push({ role, text, ...(opts.title ? { title: opts.title } : {}) });
+    if (prHistory.length > 40) prHistory.splice(0, prHistory.length - 40);
+  }
 }
 
-$("#form-pr-ask").onsubmit = (e) => {
+function prTakeQuestion(form) {
+  const q = (new FormData(form).get("question") || "").toString().trim();
+  if (!q) { toast("Введи вопрос"); return null; }
+  return q;
+}
+
+$("#form-pr-ask").onsubmit = (e) => {        // 📖 fan the question across checked notebooks
   e.preventDefault();
   withBusy(e.submitter, async () => {
-    const nb = $("#pr-notebook").value;
-    const q = (new FormData(e.target).get("question") || "").toString().trim();
-    if (!nb) { toast("Сначала выбери ноутбук"); return; }
-    if (!q) { toast("Введи вопрос"); return; }
+    const ids = $$(".pr-nb-cb").filter((c) => c.checked).map((c) => c.value);
+    if (!ids.length) { toast("Отметь хотя бы один ноутбук"); return; }
+    const q = prTakeQuestion(e.target);
+    if (!q) return;
     prChatAdd("q", q);
-    toast("Спрашиваю ноутбук (Gemini по источникам, может занять 1–2 мин)…", true);
+    toast(`Спрашиваю ${ids.length} ноутбук(а) — Gemini по источникам, ~1–2 мин на каждый…`, true);
     try {
-      const d = await post("/api/practice/ask", { notebook_id: nb, question: q });
-      prChatAdd("a", d.answer, d.sources_used);
+      const d = await post("/api/practice/ask", { notebook_ids: ids, question: q });
+      for (const r of d.results)
+        if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
+        else prChatAdd("a", r.answer, { title: r.title, sources: r.sources_used });
       e.target.question.value = "";
+    } catch (err) { prChatAdd("e", err.message || String(err)); throw err; }
+  });
+};
+
+$("#pr-ask-claude").onclick = (e) => {       // 🤖 direct Claude chat (history + construction ride along)
+  withBusy(e.target, async () => {
+    if (!prClaudeInfo.available) { toast("Claude недоступен: " + (prClaudeInfo.error || "")); return; }
+    const form = $("#form-pr-ask");
+    const q = prTakeQuestion(form);
+    if (!q) return;
+    prChatAdd("q", q);
+    toast(`Спрашиваю ${prClaudeInfo.model}…`, true);
+    try {
+      const d = await post("/api/practice/claude", {
+        question: q, history: prHistory.slice(0, -1),   // current q goes as `question`, not history
+        construction: prLastStats,
+      });
+      prChatAdd("c", d.answer, { model: d.model });
+      form.question.value = "";
     } catch (err) { prChatAdd("e", err.message || String(err)); throw err; }
   });
 };

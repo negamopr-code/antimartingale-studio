@@ -23,10 +23,20 @@ RUN pip install -r requirements-web.txt
 RUN python -m venv /opt/nlmvenv && /opt/nlmvenv/bin/pip install notebooklm-mcp-cli
 ENV NLM_BIN=/opt/nlmvenv/bin/nlm
 
+# Claude Code CLI for the Practice tab's direct Claude chat (headless `claude -p`, no tools).
+# OAuth credentials are SEEDED at start from the read-only /seed mount (deploy/entrypoint.sh) —
+# never baked into the image. Without them the chat endpoint degrades gracefully.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && npm install -g @anthropic-ai/claude-code \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /root/.npm
+ENV CLAUDE_CONFIG_DIR=/home/app/.claude \
+    DISABLE_AUTOUPDATER=1
+
 COPY src/ ./src/
+COPY deploy/entrypoint.sh /entrypoint.sh
 
 # non-root + writable data volume
-RUN useradd -m app && mkdir -p /data && chown -R app:app /data /app
+RUN chmod +x /entrypoint.sh && useradd -m app && mkdir -p /data && chown -R app:app /data /app
 USER app
 VOLUME ["/data"]
 
@@ -35,5 +45,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=4s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",8000)}/api/health').status==200 else 1)"
 
-# gunicorn process manager + uvicorn workers (scale workers via WEB_CONCURRENCY)
-CMD ["sh", "-c", "gunicorn antimg.web.api:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT} -w ${WEB_CONCURRENCY} --timeout 900 --access-logfile - --error-logfile -"]
+# entrypoint seeds claude credentials from /seed (if mounted) then execs gunicorn
+# (process manager + uvicorn workers; scale via WEB_CONCURRENCY)
+CMD ["/entrypoint.sh"]

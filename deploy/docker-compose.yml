@@ -20,6 +20,9 @@ services:
       # NotebookLM auth profile for the Practice tab (shared, host path; optional —
       # without it the tab reports "nlm unavailable" and the calculator still works)
       - ${NLM_PROFILE:-/root/claude-sandbox/persistent/nlm-profile}:/home/app/.notebooklm-mcp-cli
+      # Claude CLI credential seed (read-only; entrypoint copies, never writes back).
+      # Optional — without it the Claude chat reports why and everything else works.
+      - ${CLAUDE_SEED:-/root/.claude}:/seed:ro
     restart: unless-stopped
 
 volumes:
