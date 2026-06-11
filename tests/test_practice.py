@@ -72,6 +72,32 @@ def test_build_validates_inputs():
         practice.build(100.0, 100.0)                # neither premium nor iv
 
 
+def test_classic_long_straddle_real_mes_ticket():
+    """The user's REAL ticket: 30 Put + 30 Call, K=7375, MES $5/pt, ask 244 (C) / 227.5 (P),
+    DTE 81. Platform showed Max Loss ≈ −70 800 $, BE 6899.61/7850.39 (incl. fees) and
+    +261 137 $ at S=9603.69. Clean-premium math must reproduce those within fees."""
+    c = practice.build(7384.0, 7375.0, n_calls=30, n_puts=30, n_futs=0,
+                       premium=244.0, put_premium=227.5, dte_days=81, multiplier=5)
+    assert c.premium_total == pytest.approx(70_725.0)            # 30·(244+227.5)·5
+    assert c.max_loss == pytest.approx(-70_725.0, rel=1e-6)      # all premium at the strike
+    assert c.max_loss_at == pytest.approx(7375.0, abs=20)        # grid resolution
+    assert c.be_down == pytest.approx(6_903.5)                   # K − (C+P) = 7375 − 471.5
+    assert c.be_up == pytest.approx(7_846.5)                     # K + (C+P)
+    # expiry P&L at the platform's Max-Move point: 150·(9603.69−7375) − 70725 ≈ +263.6k
+    pnl = 5 * (30 * (9603.69 - 7375.0) - (30 * 244.0 + 30 * 227.5))
+    assert pnl == pytest.approx(263_578.5, rel=1e-6)
+    assert any("длинный стреддл" in n for n in c.notes)
+    # near-ATM long straddle: roughly delta-neutral, bleeding theta both legs
+    assert c.delta0 is not None and abs(c.delta0) < 6            # ~0.2Δ per pair × 30
+    assert c.theta_day < 0
+
+
+def test_put_premium_defaults_to_bs_when_missing():
+    c = practice.build(100.0, 100.0, n_calls=1, n_puts=1, n_futs=0, iv=0.4, dte_days=30)
+    assert c.put_premium > 0
+    assert any("оценена по BS" in n for n in c.notes)
+
+
 # ------------------------------------------------------------------ /api/practice/payoff
 def test_api_payoff_endpoint():
     r = client.post("/api/practice/payoff", json={

@@ -417,9 +417,11 @@ class PracticePayoffReq(BaseModel):
     the BS implied vol is extracted for the greeks."""
     s0: float = Field(..., gt=0)                       # futures/underlying price at entry
     strike: float = Field(..., gt=0)
-    n_calls: float = Field(2.0, ge=0, le=100)
-    n_futs: float = Field(1.0, ge=0, le=100)           # SHORT futures legs
+    n_calls: float = Field(2.0, ge=0, le=1000)
+    n_puts: float = Field(0.0, ge=0, le=1000)          # LONG puts at K (classic straddle leg)
+    n_futs: float = Field(1.0, ge=0, le=1000)          # SHORT futures legs
     premium: float | None = Field(None, gt=0)          # per-call premium, points (from the example)
+    put_premium: float | None = Field(None, gt=0)      # per-put premium, points
     iv: float | None = Field(None, gt=0, le=5)         # else BS premium from this sigma
     dte_days: float = Field(30.0, ge=0.5, le=365)
     r: float = Field(0.045, ge=-0.05, le=0.5)

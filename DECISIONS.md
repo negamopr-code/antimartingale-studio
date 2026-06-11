@@ -1289,3 +1289,24 @@ Not implemented; documented as a rejected tactic.
   DTE 60) uploaded → fable-5 read BOTH, built a comparison table, computed premium-% (4.0% vs 7.64%)
   and breakevens F₀±2P — correct on both counts.
 - 193 tests (+3). assets v109.
+
+## D105 — Practice tab v7: PUT legs (classic straddle) + update the graph from Claude's answer (2026-06-11)
+- **User case that forced it:** a REAL MES ticket — 30 Put + 30 Call, K 7375, $5/pt, ask 244 (C) /
+  227.5 (P), DTE 81 — analysed by Claude from three uploaded pictures. The constructor only knew
+  n·Calls − m·Futs (synthetic straddle), so the CLASSIC long straddle was unrepresentable; and the
+  user wants the graph updatable from that Claude feedback.
+- **Put legs:** `practice.build` now takes `n_puts` (long puts at the same K) + `put_premium`
+  (real ask from the ticket; omitted → BS-priced from the same implied sigma, noted). Payoff
+  `n_c·max(S−K,0) + n_p·max(K−S,0) − n_f·(S−S0) − Σprem`; breakevens generalized (down-slope
+  n_p+n_f, up-slope n_c−n_f); greeks include puts (Δput = Δcall−1, theta both legs). **Grid-kink
+  fix:** K и БУ теперь явно вставляются в сетку — раньше равномерная сетка вокруг S0≠K проскакивала
+  излом, и max loss на графике был −69 375 вместо точных −70 725 (то самое «цена неверна» в малом).
+- **«📐 График из ответа Claude»:** extracts construction params from the LAST Claude message in
+  the log (extraction prompt extended with n_puts/put_premium and «s0 = ТЕКУЩАЯ цена, не страйк»)
+  and rebuilds the graph — the analyse-pictures → refine-with-Claude → updated-graph loop closes.
+- **Verified vs the real ticket:** premium_total 70 725 (platform 70 800 = fees, 0.1%), max loss
+  exactly at K 7375, BE 6 903.5/7 846.5 (clean premium; platform's 6 899.61/7 850.39 wider by fees),
+  P&L(9 603.69)=+263.6k (platform +261.1k), θ −381 $/день (≈ premium/(2T) estimate); extraction
+  from the pasted analysis recovered ALL fields incl. put_premium 227.5 and multiplier 5.
+- UI: «Путов (long)» + «Премия пута (пп)» inputs (apply-from-example clears stale put fields),
+  legs label in the graph title (e.g. 30C + 30P). 195 tests (+2). assets v110.

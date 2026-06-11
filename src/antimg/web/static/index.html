@@ -575,6 +575,7 @@
       <button type="button" id="pr-ask-claude" title="Claude компилирует: вопрос сперва уходит в отмеченные ноутбуки (источники данных), затем Claude сводит их ответы + историю + конструкцию в полную картину">🤖 Спросить Claude</button>
       <button type="button" id="pr-preset-example" title="готовый вопрос: запросить конкретный пример с числами">🎯 Пример с числами</button>
       <button type="button" id="pr-graph-example" title="взять ПОСЛЕДНИЙ ответ ноутбука из лога, извлечь из него параметры конструкции (Claude haiku) и построить график стреддла по этому реальному примеру">📊 График из примера</button>
+      <button type="button" id="pr-graph-claude" title="взять ПОСЛЕДНИЙ ответ Claude из лога (например разбор картинок), извлечь параметры конструкции и ОБНОВИТЬ график по ним">📐 График из ответа Claude</button>
     </form>
     <p class="hint" id="pr-ctx" style="margin:2px 0 0"></p>
 
@@ -587,8 +588,10 @@
       <label title="цена фьючерса/базового актива при входе">Цена фьючерса S₀ <input name="s0" type="number" step="any" value="100000"></label>
       <label title="страйк коллов (для классического ПИ ≈ около денег)">Страйк K <input name="strike" type="number" step="any" value="100000"></label>
       <label>Коллов (long) <input name="n_calls" type="number" step="any" value="2"></label>
-      <label title="фьючей в шорт от S₀">Фьючей (short) <input name="n_futs" type="number" step="any" value="1"></label>
-      <label title="премия ОДНОГО колла в пунктах — число из примера ноутбука. Если задана, IV извлекается из неё (implied)">Премия колла (пп) <input name="premium" type="number" step="any" placeholder="из примера"></label>
+      <label title="длинные путы на том же страйке — классический стреддл (например 30 Put + 30 Call); 0 = синтетика через фьючерс">Путов (long) <input name="n_puts" type="number" step="any" value="0"></label>
+      <label title="фьючей в шорт от S₀ (0 для классического стреддла)">Фьючей (short) <input name="n_futs" type="number" step="any" value="1"></label>
+      <label title="премия ОДНОГО колла в пунктах — число из примера. Если задана, IV извлекается из неё (implied)">Премия колла (пп) <input name="premium" type="number" step="any" placeholder="из примера"></label>
+      <label title="премия ОДНОГО пута в пунктах (ask из тикета может отличаться от колла); пусто = BS-оценка от той же IV">Премия пута (пп) <input name="put_premium" type="number" step="any" placeholder="если есть путы"></label>
       <label title="если премии нет — посчитать её по Блэку-Шоулзу из этой IV">IV (если нет премии) <input name="iv" type="number" step="any" placeholder="0.60"></label>
       <label>DTE (дней) <input name="dte_days" type="number" step="any" value="30"></label>
       <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
@@ -602,6 +605,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=109"></script>
+  <script src="/app.js?v=110"></script>
 </body>
 </html>

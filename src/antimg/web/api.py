@@ -1841,8 +1841,9 @@ def practice_payoff(req: PracticePayoffReq):
     """Manual ПИ construction (n·Calls − m·Futs) in concrete numbers — payoff graph,
     breakevens, loss cap, theta the scalp must cover. Pure math, no market data."""
     try:
-        c = prac.build(req.s0, req.strike, n_calls=req.n_calls, n_futs=req.n_futs,
-                       premium=req.premium, iv=req.iv, dte_days=req.dte_days,
+        c = prac.build(req.s0, req.strike, n_calls=req.n_calls, n_puts=req.n_puts,
+                       n_futs=req.n_futs, premium=req.premium,
+                       put_premium=req.put_premium, iv=req.iv, dte_days=req.dte_days,
                        r=req.r, multiplier=req.multiplier, lots=req.lots)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -1850,6 +1851,7 @@ def practice_payoff(req: PracticePayoffReq):
         "payoff": c.payoff,
         "stats": {
             "premium_per_call_pts": round(c.premium, 4),
+            "premium_per_put_pts": round(c.put_premium, 4) if c.n_puts else None,
             "premium_total_usd": round(c.premium_total, 2),
             "implied_or_given_iv": round(c.iv, 4) if c.iv is not None else None,
             "max_loss_usd": round(c.max_loss, 2),

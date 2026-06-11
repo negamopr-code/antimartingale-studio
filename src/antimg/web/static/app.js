@@ -2373,6 +2373,9 @@ async function prApplyExtracted(d, sourceLabel) {
   setIf("n_calls", p.n_calls); setIf("n_futs", p.n_futs);
   setIf("premium", p.premium); setIf("iv", p.iv);
   setIf("dte_days", p.dte_days); setIf("multiplier", p.multiplier);
+  // put leg: explicit values win; an example WITHOUT puts must also clear stale put fields
+  form.n_puts.value = p.n_puts != null ? p.n_puts : 0;
+  form.put_premium.value = p.put_premium != null ? p.put_premium : "";
   prExampleSource = (p.instrument ? p.instrument + " — " : "") + sourceLabel;
   prChatAdd("s", `Извлёк параметры из «${sourceLabel}»: `
     + JSON.stringify(p) + (d.comment ? "\n" + d.comment : ""));
@@ -2396,6 +2399,17 @@ $("#pr-graph-example").onclick = (e) => {
     toast("Извлекаю параметры конструкции из ответа ноутбука…", true);
     const d = await post("/api/practice/extract", { text: last.text });
     await prApplyExtracted(d, last.title || "пример из ноутбука");
+  });
+};
+
+// 📐 update the graph from the LAST Claude answer (e.g. its analysis of pictures/feedback)
+$("#pr-graph-claude").onclick = (e) => {
+  withBusy(e.target, async () => {
+    const last = [...prHistory].reverse().find((h) => h.role === "c");
+    if (!last) { toast("В логе нет ответа Claude — сначала спроси 🤖"); return; }
+    toast("Извлекаю параметры конструкции из ответа Claude…", true);
+    const d = await post("/api/practice/extract", { text: last.text });
+    await prApplyExtracted(d, "ответ Claude");
   });
 };
 
@@ -2485,9 +2499,11 @@ async function renderPracticePayoff(d, o) {
   const p = d.payoff, s = d.stats;
   const xmin = p.S[0], xmax = p.S[p.S.length - 1];
   const zero = p.S.map(() => 0);
+  const legsLbl = `${o.n_calls || 0}C` + (o.n_puts ? ` + ${o.n_puts}P` : "")
+    + (o.n_futs ? ` − ${o.n_futs}F` : "");
   const traces = [
     { x: p.S, y: zero, mode: "lines", name: "0", line: { color: "#3a4452", width: 1, dash: "dot" }, hoverinfo: "skip" },
-    { x: p.S, y: p.expiry, mode: "lines", name: `стреддл на экспирации (${o.n_calls}C − ${o.n_futs}F)`,
+    { x: p.S, y: p.expiry, mode: "lines", name: `на экспирации (${legsLbl})`,
       line: { width: 2.4, color: "#58a6ff" } },
   ];
   if (p.today)
@@ -2520,7 +2536,7 @@ async function renderPracticePayoff(d, o) {
     shapes.push(band(lossHi, xmax, "rgba(63,185,80,0.10)")),
     ann.push({ x: (lossHi + xmax) / 2, y: 0.96, yref: "paper", text: "🟢 ПРИБЫЛЬ", showarrow: false, font: { size: 11, color: "#3fb950" } });
   await plot("pr-payoff", traces,
-    layout(`Выплата: ${o.n_calls}C − ${o.n_futs}F · страйк ${o.strike}`
+    layout(`Выплата: ${legsLbl} · страйк ${o.strike}`
            + (prExampleSource ? ` · 📖 пример: ${prExampleSource}` : ""),
            { height: 380, shapes, annotations: ann,
              xaxis: { gridcolor: "#2a3340", title: { text: "цена на экспирации S_T" } },
@@ -2528,6 +2544,7 @@ async function renderPracticePayoff(d, o) {
   const f = (v) => v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 4 });
   $("#pr-stats").textContent =
     `премия 1 колла      : ${f(s.premium_per_call_pts)} пп\n` +
+    (s.premium_per_put_pts != null ? `премия 1 пута       : ${f(s.premium_per_put_pts)} пп\n` : "") +
     `премия всего ($)    : ${f(s.premium_total_usd)}  ← лимит убытка конструкции\n` +
     `IV (implied/given)  : ${f(s.implied_or_given_iv)}\n` +
     `макс. убыток ($)    : ${f(s.max_loss_usd)}  при S_T = ${f(s.max_loss_at_S)}\n` +
