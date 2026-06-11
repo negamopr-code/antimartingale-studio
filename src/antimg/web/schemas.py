@@ -395,6 +395,9 @@ class PracticeClaudeReq(BaseModel):
     sources: dict[str, list[str]] = Field(default_factory=dict)   # per-notebook source filter
     # uploaded pictures (paths from /api/practice/upload) to discuss directly with Claude
     images: list[str] = Field(default_factory=list, max_length=8)
+    # let Claude run python3 (numpy/pandas/scipy/matplotlib) in a per-turn workdir;
+    # saved PNGs come back as chat artifacts. python3 only — no arbitrary shell.
+    allow_python: bool = True
 
 
 class PracticeExtractImageReq(BaseModel):

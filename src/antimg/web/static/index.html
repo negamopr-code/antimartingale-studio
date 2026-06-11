@@ -575,6 +575,8 @@
           </select></label>
         <label title="модель для чата (Fable 5 = новейшая)">Модель
           <select id="pr-model"></select></label>
+        <label title="разрешить Claude запускать python3 (numpy/pandas/scipy/matplotlib) в изолированной рабочей папке — расчёты и НАСТОЯЩИЕ графики (PNG появится в чате). Только python3, произвольный shell запрещён.">🐍 Python
+          <input type="checkbox" id="pr-python" checked></label>
       </div>
       <button type="submit" title="вопрос уходит ДОСЛОВНО в каждый отмеченный ноутбук; отвечает Gemini по источникам (1–2 мин на ноутбук)">📖 Спросить ноутбуки</button>
       <button type="button" id="pr-ask-claude" title="Claude компилирует: вопрос сперва уходит в отмеченные ноутбуки (источники данных), затем Claude сводит их ответы + историю + конструкцию в полную картину">🤖 Спросить Claude</button>
@@ -610,6 +612,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=111"></script>
+  <script src="/app.js?v=112"></script>
 </body>
 </html>

@@ -1,7 +1,9 @@
-# Runtime deps for the web service (lean image — no matplotlib/tkinter).
+# Runtime deps for the web service (no tkinter; matplotlib headless — the Practice
+# chat's Python capability renders charts with it, Agg backend).
 numpy
 pandas
 scipy
+matplotlib
 yfinance
 fastapi
 uvicorn[standard]

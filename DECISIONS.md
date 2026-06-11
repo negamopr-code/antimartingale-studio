@@ -1322,3 +1322,21 @@ Not implemented; documented as a rejected tactic.
   states the mode outright («📖 ноутбуки НЕ спрашиваются (источник: только Claude)»). The separate
   📖 button remains the explicit pure-NotebookLM path.
 - Frontend-only (backend already handled empty notebook_ids = pure Claude). 195 tests. assets v111.
+
+## D107 — Practice tab v9: Python capability for the chat (real charts, no more «среда не разрешила») (2026-06-11)
+- **User hit:** «Среда снова не разрешила запуск Python — строю график текстом» — the chat's headless
+  `claude -p` ran with NO tools by design (text-only; Read opened only for images), so the model's
+  attempts to compute/plot were denied and it fell back to ASCII art. User: why not allow it?
+- **Allowed, scoped:** new 🐍 toggle (default ON, sticky). When on, each chat turn gets a fresh workdir
+  under /data/uploads/chat-<id>/ and the CLI runs with `--allowedTools Read,Write,Bash(python3:*)` —
+  python3 ONLY, no arbitrary shell — cwd = the workdir. matplotlib (Agg) added to the web image
+  (requirements-web). The prompt instructs: don't draw ASCII — save a real PNG to the cwd.
+- **Artifacts:** images the model saves are collected from the workdir, returned as `artifacts[]`,
+  rendered as <img> in the chat (served by the new GET /api/practice/file, uploads-dir-validated),
+  and persisted with the «c» entry → restored on reload. Empty workdirs are cleaned. Participants
+  show «🐍 python3 (numpy/pandas/scipy/matplotlib)».
+- **Verified live:** asked fable-5 to plot the real MES 30C+30P K7375 straddle — it ran python3,
+  saved a 97KB matplotlib PNG (correct V, BE 6 903.5/7 846.5, max loss −70 725 at K, shaded zones),
+  the chart serves and displays in the chat.
+- Risk note: python3 inside the isolated antimg-web container, user-initiated; no arbitrary shell.
+- 198 tests (+3). assets v112.

@@ -2218,7 +2218,7 @@ function prSourcesPayload(ids) {
 }
 
 const prHistory = [];   // compact chat history for the Claude context: {role: q|a|c, text, title?}
-const PR_PART_ICON = { doctrine: "📜", skill: "🧠", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖", image: "📷" };
+const PR_PART_ICON = { doctrine: "📜", skill: "🧠", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖", image: "📷", python: "🐍" };
 const PR_DEFAULT_SKILLS = ["hedgedintraday", "antimartingal-strategy"];   // pre-checked if present
 
 // combinable skill doctrines + the model dropdown for the Claude chat
@@ -2275,6 +2275,13 @@ function prChatAdd(role, text, opts = {}) {
     div.appendChild(p);
   }
   div.appendChild(document.createTextNode("\n" + text));
+  for (const a of opts.artifacts || []) {              // charts the model rendered (🐍)
+    const im = document.createElement("img");
+    im.src = "/api/practice/file?path=" + encodeURIComponent(a.path);
+    im.alt = a.name; im.title = a.name; im.loading = "lazy";
+    im.style.cssText = "display:block;max-width:96%;margin:8px 0;border:1px solid #2a3340;border-radius:6px;background:#fff";
+    div.appendChild(im);
+  }
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
   if (role === "q" || role === "a" || role === "c") {
@@ -2298,6 +2305,8 @@ function prCtxHint() {
   if (sks.length) parts.push(`🧠 скиллы: ${sks.join(" + ")}`);
   const nimg = prImages.filter((i) => i.checked).length;
   if (nimg) parts.push(`📷 картинки (${nimg})`);
+  const py = $("#pr-python");
+  if (py && py.checked) parts.push("🐍 python3 (расчёты + графики)");
   const srcSel = $("#pr-claude-src");
   if (srcSel && srcSel.value !== "nb")
     parts.push("📖 ноутбуки НЕ спрашиваются (источник: только Claude)");
@@ -2340,6 +2349,9 @@ $("#form-pr-ask").onsubmit = (e) => {        // 📖 fan the question across che
 const PR_SRC_KEY = "pr-claude-src";
 $("#pr-claude-src").value = localStorage.getItem(PR_SRC_KEY) || "claude";
 $("#pr-claude-src").onchange = (e) => { localStorage.setItem(PR_SRC_KEY, e.target.value); prCtxHint(); };
+const PR_PY_KEY = "pr-python";
+$("#pr-python").checked = (localStorage.getItem(PR_PY_KEY) ?? "1") === "1";
+$("#pr-python").onchange = (e) => { localStorage.setItem(PR_PY_KEY, e.target.checked ? "1" : "0"); prCtxHint(); };
 
 // 🤖 Claude: alone by default; as the compiler over the chosen notebooks when opted in.
 $("#pr-ask-claude").onclick = (e) => {
@@ -2366,11 +2378,13 @@ $("#pr-ask-claude").onclick = (e) => {
         construction: prLastStats, notebook_ids: ids, skills, model,
         sources: prSourcesPayload(ids),
         images: prImages.filter((i) => i.checked).map((i) => i.path),
+        allow_python: $("#pr-python").checked,
       });
       for (const r of d.notebook_results || [])         // raw per-notebook answers first (transparency)
         if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
         else prChatAdd("a", r.answer, { title: r.title, sources: r.sources_used });
-      prChatAdd("c", d.answer, { model: d.model, participants: d.participants });
+      prChatAdd("c", d.answer, { model: d.model, participants: d.participants,
+                                 artifacts: d.artifacts });
       form.question.value = "";
       prCtxHint();
     } catch (err) { prChatAdd("e", err.message || String(err)); throw err; }
@@ -2599,7 +2613,8 @@ async function prLoadState() {
     const st = await api("/api/practice/state");
     for (const en of st.entries || [])
       prChatAdd(en.role, en.text, { title: en.title, model: en.model,
-                                    participants: en.participants, sources: en.sources });
+                                    participants: en.participants, sources: en.sources,
+                                    artifacts: en.artifacts });
     prImages.length = 0;
     for (const i of st.images || []) prImages.push({ path: i.path, name: i.name, checked: true });
     prRenderImages();

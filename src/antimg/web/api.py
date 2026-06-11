@@ -8,6 +8,7 @@ runs them in a threadpool, keeping the event loop free.
 from __future__ import annotations
 
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import numpy as np
 import pandas as pd
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import am_overlay as amov
@@ -1676,6 +1677,14 @@ def practice_claude(req: PracticeClaudeReq):
         images.append({"path": real, "name": name})
         participants.append({"kind": "image", "name": f"📷 {name}"})
 
+    workdir = None
+    if req.allow_python:
+        os.makedirs(_UPLOAD_DIR, exist_ok=True)
+        workdir = os.path.join(os.path.realpath(_UPLOAD_DIR), f"chat-{uuid.uuid4().hex[:10]}")
+        os.makedirs(workdir, exist_ok=True)
+        participants.append({"kind": "python",
+                             "name": "🐍 python3 (numpy/pandas/scipy/matplotlib)"})
+
     if req.construction:
         participants.append({"kind": "construction", "name": "текущая конструкция калькулятора"})
     if req.history:
@@ -1697,13 +1706,36 @@ def practice_claude(req: PracticeClaudeReq):
                              history=[t.model_dump() for t in req.history],
                              construction=req.construction, sources=sources,
                              skills=skills or None, model=req.model,
-                             images=images or None)
+                             images=images or None, allow_python=req.allow_python,
+                             workdir=workdir)
     if "error" in res:
+        if workdir:
+            shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(status_code=502, detail=res["error"])
+    # charts/files the model saved in its workdir become chat artifacts (served via
+    # /api/practice/file, persisted with the entry — the workdir is under /data/uploads)
+    artifacts = []
+    if workdir:
+        for fn in sorted(os.listdir(workdir)):
+            if os.path.splitext(fn)[1].lower() in _UPLOAD_EXT | {".svg"}:
+                artifacts.append({"path": os.path.join(workdir, fn), "name": fn})
+        if not artifacts:
+            shutil.rmtree(workdir, ignore_errors=True)
     participants.append({"kind": "claude", "name": res["model"]
                          + (" — компиляция источников" if sources else " — прямой ответ")})
-    prlog.append("c", res["answer"], model=res["model"], participants=participants)
-    return {**res, "participants": participants, "notebook_results": notebook_results}
+    prlog.append("c", res["answer"], model=res["model"], participants=participants,
+                 artifacts=artifacts or None)
+    return {**res, "participants": participants, "notebook_results": notebook_results,
+            "artifacts": artifacts}
+
+
+@app.get("/api/practice/file")
+def practice_file(path: str = Query(..., min_length=4, max_length=500)):
+    """Serve an uploaded picture or a chat-produced chart (uploads dir only)."""
+    real = _uploaded_path(path)
+    if real is None:
+        raise HTTPException(status_code=404, detail="not an uploaded file")
+    return FileResponse(real)
 
 
 @app.get("/api/practice/sources")

@@ -232,7 +232,7 @@ def test_claude_prompt_includes_history_and_construction():
 def test_practice_claude_endpoint(monkeypatch):
     monkeypatch.setattr(claude_bridge, "available", lambda: (True, ""))
 
-    def fake_run(cmd, input, capture_output, text, timeout):
+    def fake_run(cmd, input, capture_output, text, timeout, **kw):
         assert cmd[:2] == [claude_bridge.CLAUDE_BIN, "-p"] and "ВОПРОС" in input
         return _FakeProc("Тета ≈ −241 $/день")
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -273,7 +273,7 @@ def test_claude_compiles_notebook_sources_with_participants(monkeypatch):
     seen = {}
 
     def fake_chat(question, history=None, construction=None, sources=None,
-                  skills=None, model=None, images=None):
+                  skills=None, model=None, images=None, **kw):
         seen["sources"] = sources
         return {"answer": "компиляция", "model": model or claude_bridge.CHAT_MODEL}
     monkeypatch.setattr(claude_bridge, "chat", fake_chat)
@@ -322,7 +322,7 @@ def test_claude_combines_selected_skills(_skills_dir, monkeypatch):
     seen = {}
 
     def fake_chat(question, history=None, construction=None, sources=None,
-                  skills=None, model=None, images=None):
+                  skills=None, model=None, images=None, **kw):
         seen.update(skills=skills, model=model)
         return {"answer": "ок", "model": model or claude_bridge.CHAT_MODEL}
     monkeypatch.setattr(claude_bridge, "chat", fake_chat)
@@ -492,7 +492,7 @@ def test_multiple_images_persist_and_attach_to_claude(tmp_path, monkeypatch):
     seen = {}
 
     def fake_chat(question, history=None, construction=None, sources=None,
-                  skills=None, model=None, images=None):
+                  skills=None, model=None, images=None, **kw):
         seen["images"] = images
         return {"answer": "вижу обе картинки", "model": model or claude_bridge.CHAT_MODEL}
     monkeypatch.setattr(claude_bridge, "chat", fake_chat)
@@ -516,6 +516,61 @@ def test_claude_rejects_foreign_image_path(tmp_path, monkeypatch):
     r = client.post("/api/practice/claude",
                     json={"question": "x", "images": ["/etc/passwd"]})
     assert r.status_code == 422
+
+
+def test_python_capability_tools_and_workdir(monkeypatch):
+    """allow_python → Write + Bash(python3:*) ONLY (no arbitrary shell), cwd = workdir."""
+    seen = {}
+
+    def fake_run(prompt, model, extra_args=None, cwd=None):
+        seen.update(prompt=prompt, extra=extra_args, cwd=cwd)
+        return {"answer": "посчитал", "model": model}
+    monkeypatch.setattr(claude_bridge, "_run_claude", fake_run)
+    claude_bridge.chat("построй график", allow_python=True, workdir="/tmp/wd")
+    assert seen["cwd"] == "/tmp/wd"
+    allowed = seen["extra"][seen["extra"].index("--allowedTools") + 1]
+    assert "Bash(python3:*)" in allowed and "Write" in allowed and "Read" in allowed
+    assert "PYTHON" in seen["prompt"] and "PNG" in seen["prompt"]
+    # without the flag: no tools at all
+    claude_bridge.chat("вопрос")
+    assert seen["extra"] is None and seen["cwd"] is None
+
+
+def test_chat_collects_chart_artifacts(tmp_path, monkeypatch):
+    """A PNG saved by the model in its workdir comes back as a chat artifact and is
+    served by /api/practice/file; the persisted entry carries it for restore."""
+    import antimg.web.api as apimod
+    monkeypatch.setattr(apimod, "_UPLOAD_DIR", str(tmp_path / "up"))
+
+    def fake_chat(question, history=None, construction=None, sources=None, skills=None,
+                  model=None, images=None, allow_python=False, workdir=None):
+        with open(f"{workdir}/payoff.png", "wb") as fh:
+            fh.write(b"\x89PNG chart")
+        return {"answer": "график сохранил", "model": claude_bridge.CHAT_MODEL}
+    monkeypatch.setattr(claude_bridge, "chat", fake_chat)
+    r = client.post("/api/practice/claude", json={"question": "нарисуй payoff"})
+    assert r.status_code == 200
+    d = r.json()
+    assert [a["name"] for a in d["artifacts"]] == ["payoff.png"]
+    assert any(p["kind"] == "python" for p in d["participants"])
+    f = client.get("/api/practice/file", params={"path": d["artifacts"][0]["path"]})
+    assert f.status_code == 200 and f.content == b"\x89PNG chart"
+    st = client.get("/api/practice/state").json()
+    assert st["entries"][-1]["artifacts"][0]["name"] == "payoff.png"
+    # foreign path refused
+    assert client.get("/api/practice/file", params={"path": "/etc/passwd"}).status_code == 404
+
+
+def test_empty_workdir_is_cleaned(tmp_path, monkeypatch):
+    import os as _os
+    import antimg.web.api as apimod
+    monkeypatch.setattr(apimod, "_UPLOAD_DIR", str(tmp_path / "up"))
+    monkeypatch.setattr(claude_bridge, "chat",
+                        lambda *a, **k: {"answer": "без графика", "model": "m"})
+    r = client.post("/api/practice/claude", json={"question": "просто вопрос"})
+    assert r.status_code == 200 and r.json()["artifacts"] == []
+    leftover = [d for d in _os.listdir(tmp_path / "up") if d.startswith("chat-")]
+    assert leftover == []
 
 
 def test_build_prompt_with_images_demands_read():

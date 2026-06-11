@@ -99,8 +99,17 @@ def build_prompt(question: str, history: list[dict] | None = None,
                  construction: dict | None = None,
                  sources: list[dict] | None = None,
                  skills: list[dict] | None = None,
-                 images: list[dict] | None = None) -> str:
+                 images: list[dict] | None = None,
+                 allow_python: bool = False) -> str:
     parts = [_PREAMBLE]
+    if allow_python:
+        parts.append(
+            "ТЕБЕ РАЗРЕШЁН PYTHON: выполняй `python3` (установлены numpy, pandas, scipy, "
+            "matplotlib — используй backend Agg). Работай ТОЛЬКО в текущей рабочей директории. "
+            "Для графиков НЕ рисуй ASCII — посчитай и СОХРАНИ настоящий график PNG-файлом в "
+            "текущую директорию (например `payoff.png`); сохранённые картинки автоматически "
+            "появятся в чате под твоим ответом. В тексте ответа сошлись на график и дай "
+            "ключевые числа.")
     if images:
         lst = "\n".join(f"- {i['path']}  (файл пользователя: {i.get('name', '?')})"
                         for i in images)
@@ -139,14 +148,15 @@ def build_prompt(question: str, history: list[dict] | None = None,
     return "\n\n---\n\n".join(parts)
 
 
-def _run_claude(prompt: str, model: str, extra_args: list[str] | None = None) -> dict:
+def _run_claude(prompt: str, model: str, extra_args: list[str] | None = None,
+                cwd: str | None = None) -> dict:
     ok, why = available()
     if not ok:
         return {"error": why}
     try:
         proc = subprocess.run([CLAUDE_BIN, "-p", "--model", model, *(extra_args or [])],
                               input=prompt, capture_output=True, text=True,
-                              timeout=CHAT_TIMEOUT)
+                              timeout=CHAT_TIMEOUT, cwd=cwd)
     except subprocess.TimeoutExpired:
         return {"error": "claude chat timed out"}
     if proc.returncode != 0:
@@ -160,13 +170,23 @@ def _run_claude(prompt: str, model: str, extra_args: list[str] | None = None) ->
 def chat(question: str, history: list[dict] | None = None,
          construction: dict | None = None, sources: list[dict] | None = None,
          skills: list[dict] | None = None, model: str | None = None,
-         images: list[dict] | None = None) -> dict:
-    """One stateless turn (optionally compiling notebook sources, with skill doctrines
-    and attached pictures in context). {answer, model} | {error}. With images the Read
-    tool is enabled (the ONLY tool) so the model actually sees the pixels."""
-    prompt = build_prompt(question, history, construction, sources, skills, images)
-    extra = ["--allowedTools", "Read"] if images else None
-    return _run_claude(prompt, model or CHAT_MODEL, extra_args=extra)
+         images: list[dict] | None = None, allow_python: bool = False,
+         workdir: str | None = None) -> dict:
+    """One stateless turn (optionally compiling notebook sources, with skill doctrines,
+    attached pictures and a Python capability in context). {answer, model} | {error}.
+    Tools stay OFF by default; images enable Read; allow_python additionally enables
+    Write + `Bash(python3:*)` (python3 ONLY — no arbitrary shell), cwd = the per-turn
+    workdir so produced charts land where the web layer collects them."""
+    prompt = build_prompt(question, history, construction, sources, skills, images,
+                          allow_python=allow_python)
+    tools: list[str] = []
+    if images or allow_python:
+        tools.append("Read")
+    if allow_python:
+        tools += ["Write", "Bash(python3:*)"]
+    extra = ["--allowedTools", ",".join(tools)] if tools else None
+    return _run_claude(prompt, model or CHAT_MODEL, extra_args=extra,
+                       cwd=workdir if allow_python else None)
 
 
 _EXTRACT_PROMPT = (
