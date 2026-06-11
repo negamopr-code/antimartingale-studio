@@ -246,9 +246,10 @@ def test_claude_compiles_notebook_sources_with_participants(monkeypatch):
                         else {"answer": "пример RI", "sources_used": [1]})
     seen = {}
 
-    def fake_chat(question, history=None, construction=None, sources=None):
+    def fake_chat(question, history=None, construction=None, sources=None,
+                  skills=None, model=None):
         seen["sources"] = sources
-        return {"answer": "компиляция", "model": "claude-sonnet-4-6"}
+        return {"answer": "компиляция", "model": model or claude_bridge.CHAT_MODEL}
     monkeypatch.setattr(claude_bridge, "chat", fake_chat)
     r = client.post("/api/practice/claude", json={
         "question": "сведи примеры", "notebook_ids": ["nb-one-12345", "nb-two-12345"],
@@ -269,6 +270,60 @@ def test_build_prompt_with_sources_has_compile_instruction():
     p = claude_bridge.build_prompt("вопрос", sources=[
         {"title": "ПИ Коровин", "answer": "пример RI 100000"}])
     assert "КОМПИЛЯЦИЯ" in p and "Ноутбук «ПИ Коровин»" in p
+
+
+# ------------------------------------------------------------------ skills + model choice
+@pytest.fixture
+def _skills_dir(tmp_path, monkeypatch):
+    for name, body in [("hedgedintraday", "# /hedgedintraday — ПИ Коровина\nдоктрина ПИ"),
+                       ("antimartingal-strategy", "# /antimartingal-strategy\nEV identity")]:
+        d = tmp_path / name
+        d.mkdir()
+        (d / "SKILL.md").write_text(body, encoding="utf-8")
+    (tmp_path / "_consult-lib").mkdir()               # underscore dirs are ignored
+    monkeypatch.setattr(claude_bridge, "SKILLS_DIR", str(tmp_path))
+    return tmp_path
+
+
+def test_skills_endpoint_lists_doctrines(_skills_dir):
+    d = client.get("/api/practice/skills").json()
+    assert [s["name"] for s in d["skills"]] == ["antimartingal-strategy", "hedgedintraday"]
+    assert "ПИ Коровина" in d["skills"][1]["description"]
+    assert d["models"][0] == "claude-fable-5" and d["default_model"] in d["models"]
+
+
+def test_claude_combines_selected_skills(_skills_dir, monkeypatch):
+    seen = {}
+
+    def fake_chat(question, history=None, construction=None, sources=None,
+                  skills=None, model=None):
+        seen.update(skills=skills, model=model)
+        return {"answer": "ок", "model": model or claude_bridge.CHAT_MODEL}
+    monkeypatch.setattr(claude_bridge, "chat", fake_chat)
+    r = client.post("/api/practice/claude", json={
+        "question": "сведи", "skills": ["hedgedintraday", "antimartingal-strategy"],
+        "model": "claude-opus-4-8"})
+    assert r.status_code == 200
+    assert seen["model"] == "claude-opus-4-8"
+    assert [s["name"] for s in seen["skills"]] == ["hedgedintraday", "antimartingal-strategy"]
+    assert "доктрина ПИ" in seen["skills"][0]["content"]
+    skill_parts = [p["name"] for p in r.json()["participants"] if p["kind"] == "skill"]
+    assert skill_parts == ["/hedgedintraday", "/antimartingal-strategy"]
+
+
+def test_claude_rejects_unknown_skill_and_model(_skills_dir):
+    r = client.post("/api/practice/claude",
+                    json={"question": "x", "skills": ["../etc/passwd"]})
+    assert r.status_code == 422
+    r = client.post("/api/practice/claude",
+                    json={"question": "x", "model": "gpt-5"})
+    assert r.status_code == 422
+
+
+def test_build_prompt_includes_skill_doctrines():
+    p = claude_bridge.build_prompt("вопрос", skills=[
+        {"name": "hedgedintraday", "content": "правило трёх третей"}])
+    assert "СКИЛЛЫ-ДОКТРИНЫ" in p and "[Скилл /hedgedintraday]" in p
 
 
 # ------------------------------------------------------------------ extraction → graph

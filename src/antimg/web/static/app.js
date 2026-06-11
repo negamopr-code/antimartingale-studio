@@ -2166,7 +2166,40 @@ async function prLoadNotebooks(force = false) {
 $("#pr-nb-refresh").onclick = (e) => withBusy(e.target, () => prLoadNotebooks(true));
 
 const prHistory = [];   // compact chat history for the Claude context: {role: q|a|c, text, title?}
-const PR_PART_ICON = { doctrine: "📜", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖" };
+const PR_PART_ICON = { doctrine: "📜", skill: "🧠", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖" };
+const PR_DEFAULT_SKILLS = ["hedgedintraday", "antimartingal-strategy"];   // pre-checked if present
+
+// combinable skill doctrines + the model dropdown for the Claude chat
+async function prLoadSkills() {
+  try {
+    const d = await api("/api/practice/skills");
+    const box = $("#pr-skills");
+    box.innerHTML = "";
+    for (const s of d.skills) {
+      const lab = document.createElement("label");
+      lab.style.cssText = "font-weight:normal;cursor:pointer;white-space:nowrap";
+      lab.title = s.description || s.name;
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = s.name; cb.className = "pr-skill-cb";
+      cb.style.marginRight = "4px";
+      cb.checked = PR_DEFAULT_SKILLS.includes(s.name);
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode("/" + s.name));
+      box.appendChild(lab);
+    }
+    box.onchange = prCtxHint;
+    const sel = $("#pr-model");
+    sel.innerHTML = "";
+    for (const m of d.models) {
+      const o = document.createElement("option");
+      o.value = m; o.textContent = m.replace(/^claude-/, "");
+      if (m === d.default_model) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.onchange = prCtxHint;
+    prCtxHint();
+  } catch (e) { console.error("skills load:", e); }
+}
 function prChatAdd(role, text, opts = {}) {
   const box = $("#pr-chat");
   const div = document.createElement("div");
@@ -2204,12 +2237,15 @@ function prCtxHint() {
   if (!el) return;
   const nbs = $$(".pr-nb-cb").filter((c) => c.checked)
     .map((c) => c.closest("label").textContent.trim().replace(/\s*\(\d+ ист\.\)$/, ""));
+  const sks = $$(".pr-skill-cb").filter((c) => c.checked).map((c) => "/" + c.value);
   const parts = ["📜 доктрина ПИ"];
-  if (nbs.length) parts.push(`📖 ноутбуки-источники: ${nbs.join(", ")} → 🤖 Claude компилирует`);
-  else parts.push("📖 ноутбуки не отмечены → Claude отвечает сам (по истории чата)");
+  if (sks.length) parts.push(`🧠 скиллы: ${sks.join(" + ")}`);
+  if (nbs.length) parts.push(`📖 ноутбуки-источники: ${nbs.join(", ")} → компиляция`);
+  else parts.push("📖 ноутбуки не отмечены → ответ по истории чата");
   if (prLastStats) parts.push("📐 текущая конструкция");
   if (prHistory.length) parts.push(`🕘 история (${prHistory.length})`);
-  el.textContent = "🧩 В ответе Claude участвуют: " + parts.join("  ·  ");
+  const model = $("#pr-model") && $("#pr-model").value;
+  el.textContent = `🧩 В ответе ${model || "Claude"} участвуют: ` + parts.join("  ·  ");
 }
 
 function prTakeQuestion(form) {
@@ -2246,14 +2282,16 @@ $("#pr-ask-claude").onclick = (e) => {
     const q = prTakeQuestion(form);
     if (!q) return;
     const ids = $$(".pr-nb-cb").filter((c) => c.checked).map((c) => c.value);
+    const skills = $$(".pr-skill-cb").filter((c) => c.checked).map((c) => c.value);
+    const model = $("#pr-model").value || undefined;
     prChatAdd("q", q);
     toast(ids.length
-      ? `${ids.length} ноутбук(а) отвечают, затем ${prClaudeInfo.model} компилирует (~1–2 мин на ноутбук)…`
-      : `Спрашиваю ${prClaudeInfo.model}…`, true);
+      ? `${ids.length} ноутбук(а) отвечают, затем ${model || prClaudeInfo.model} компилирует (~1–2 мин на ноутбук)…`
+      : `Спрашиваю ${model || prClaudeInfo.model}…`, true);
     try {
       const d = await post("/api/practice/claude", {
         question: q, history: prHistory.slice(0, -1),   // current q goes as `question`, not history
-        construction: prLastStats, notebook_ids: ids,
+        construction: prLastStats, notebook_ids: ids, skills, model,
       });
       for (const r of d.notebook_results || [])         // raw per-notebook answers first (transparency)
         if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
@@ -2417,6 +2455,7 @@ $('[data-tab="practice"]').addEventListener("click", () => {
   if (typeof Plotly !== "undefined" && el && el.data) Plotly.Plots.resize(el);
 });
 prLoadNotebooks();
+prLoadSkills();
 prLoadState();
 
 loadInstruments();

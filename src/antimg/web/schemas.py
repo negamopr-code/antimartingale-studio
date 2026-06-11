@@ -386,6 +386,9 @@ class PracticeClaudeReq(BaseModel):
     history: list[PracticeChatTurn] = Field(default_factory=list, max_length=40)
     construction: dict | None = None
     notebook_ids: list[str] = Field(default_factory=list, max_length=8)
+    # combinable skill doctrines (names from /api/practice/skills) injected into the prompt
+    skills: list[str] = Field(default_factory=list, max_length=6)
+    model: str | None = None                           # validated against claude_bridge.MODELS
 
 
 class PracticeExtractReq(BaseModel):

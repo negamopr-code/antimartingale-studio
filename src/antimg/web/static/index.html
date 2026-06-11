@@ -560,6 +560,12 @@
       <label style="flex:1;min-width:420px">Вопрос
         <textarea name="question" rows="3" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #2a3340;border-radius:6px;padding:6px"
           placeholder="Например: дай конкретный пример конструкции ПИ с числами — инструмент, цена фьючерса, страйк, премия колла, сколько коллов и фьючей"></textarea></label>
+      <div style="flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px">
+        <span class="hint" title="доктрины из ~/.claude/skills — выбери, какие участвуют в ответе Claude; несколько комбинируются">🧠 Скиллы:</span>
+        <span id="pr-skills" style="display:inline-flex;flex-wrap:wrap;gap:2px 12px"></span>
+        <label style="margin-left:auto" title="модель для чата (Fable 5 = новейшая)">Модель
+          <select id="pr-model"></select></label>
+      </div>
       <button type="submit" title="вопрос уходит ДОСЛОВНО в каждый отмеченный ноутбук; отвечает Gemini по источникам (1–2 мин на ноутбук)">📖 Спросить ноутбуки</button>
       <button type="button" id="pr-ask-claude" title="Claude компилирует: вопрос сперва уходит в отмеченные ноутбуки (источники данных), затем Claude сводит их ответы + историю + конструкцию в полную картину">🤖 Спросить Claude</button>
       <button type="button" id="pr-preset-example" title="готовый вопрос: запросить конкретный пример с числами">🎯 Пример с числами</button>
@@ -587,6 +593,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=106"></script>
+  <script src="/app.js?v=107"></script>
 </body>
 </html>

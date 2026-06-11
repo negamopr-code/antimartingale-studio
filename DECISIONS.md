@@ -1233,3 +1233,21 @@ Not implemented; documented as a rejected tactic.
   /api/practice/state restores chat+form+graph on load; /api/practice/state/clear + 🧹 button. Found & fixed
   a shallow-copy bug (`dict(_EMPTY)` shared the entries list → ghost entries after clear).
 - 178 tests (+7). assets v106.
+
+## D102 — Practice tab v4: latest model (Fable 5) + combinable SKILLS picker (2026-06-11)
+- **User asks:** the chat model must be the latest (Fable / Opus 4.8), and a visible list of SKILLS to
+  choose from — several combinable per question.
+- **Model:** default = `claude-fable-5` (verified live in the container: answers "Fable."); UI dropdown
+  with the allowlist [fable-5, opus-4-8, sonnet-4-6, haiku-4-5] (`claude_bridge.MODELS`, env override
+  CLAUDE_CHAT_MODEL); request `model` validated → 422 on unknown. Extraction stays haiku.
+- **Skills picker:** the operator's global skill doctrines (~/.claude/skills/<name>/SKILL.md) are read
+  through the EXISTING read-only /seed mount (CLAUDE_SKILLS_DIR=/seed/skills). GET /api/practice/skills →
+  [{name, description}] + models. UI: 🧠 checkbox chips row in the ask form (hedgedintraday +
+  antimartingal-strategy pre-checked), combinable; selected SKILL.md contents (clipped 16k each) are
+  injected into the prompt as «ВЫБРАННЫЕ СКИЛЛЫ-ДОКТРИНЫ … при конфликте отметь»; each appears in
+  participants[] (kind=skill) and in the 🧩 hint. Name validation against the real dir listing (no path
+  traversal) → 422 on unknown.
+- **Verified live:** 9 skills listed; fable-5 + [hedgedintraday, antimartingal-strategy] correctly
+  cross-compiled both doctrines (EV identity `b·((2p)^N−1)` at p≈0.51 ⇒ ~no edge; ПИ's payoff asymmetry
+  regime; p_net<0.5 execution risk ⇒ pyramid amplifies loss) — matches the canonical skill findings.
+- 182 tests (+4). assets v107.

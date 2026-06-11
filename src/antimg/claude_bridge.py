@@ -18,11 +18,17 @@ import shutil
 import subprocess
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
-CHAT_MODEL = os.environ.get("CLAUDE_CHAT_MODEL", "claude-sonnet-4-6")
+# Latest first — Fable 5 is the default; the UI offers the rest as a dropdown.
+MODELS = ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"]
+CHAT_MODEL = os.environ.get("CLAUDE_CHAT_MODEL", "claude-fable-5")
 EXTRACT_MODEL = os.environ.get("CLAUDE_EXTRACT_MODEL", "claude-haiku-4-5")
 CHAT_TIMEOUT = float(os.environ.get("CLAUDE_CHAT_TIMEOUT", "240"))
+# Global Claude skills (doctrine files) — combinable context for the chat. In the container
+# this is the read-only /seed mount of the operator's ~/.claude (see scripts/serve.sh).
+SKILLS_DIR = os.environ.get("CLAUDE_SKILLS_DIR", os.path.expanduser("~/.claude/skills"))
 MAX_HISTORY = 24           # turns kept in the prompt
 MAX_TURN_CHARS = 4000      # each turn clipped (notebook answers can be long)
+MAX_SKILL_CHARS = 16_000   # each skill doctrine clipped in the prompt
 
 _PREAMBLE = (
     "Ты — ассистент вкладки «Практика» студии Antimartingale. Домен: стратегия "
@@ -49,10 +55,56 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
+def list_skills() -> list[dict]:
+    """Available skill doctrines: [{name, description}] — directories with a SKILL.md."""
+    out = []
+    try:
+        names = sorted(os.listdir(SKILLS_DIR))
+    except OSError:
+        return out
+    for name in names:
+        if name.startswith((".", "_")):
+            continue
+        path = os.path.join(SKILLS_DIR, name, "SKILL.md")
+        if not os.path.isfile(path):
+            continue
+        desc = ""
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:                            # first non-empty line = the title
+                        desc = line.lstrip("#").strip()[:160]
+                        break
+        except OSError:
+            pass
+        out.append({"name": name, "description": desc})
+    return out
+
+
+def load_skill(name: str) -> str | None:
+    """SKILL.md content for one skill; None if unknown. Name validated against the
+    real directory listing — no path components accepted."""
+    if name not in {s["name"] for s in list_skills()}:
+        return None
+    try:
+        with open(os.path.join(SKILLS_DIR, name, "SKILL.md"),
+                  encoding="utf-8", errors="replace") as fh:
+            return fh.read()[:MAX_SKILL_CHARS]
+    except OSError:
+        return None
+
+
 def build_prompt(question: str, history: list[dict] | None = None,
                  construction: dict | None = None,
-                 sources: list[dict] | None = None) -> str:
+                 sources: list[dict] | None = None,
+                 skills: list[dict] | None = None) -> str:
     parts = [_PREAMBLE]
+    if skills:
+        blocks = "\n\n".join(f"[Скилл /{s['name']}]\n{s['content']}" for s in skills)
+        parts.append(
+            "ВЫБРАННЫЕ ПОЛЬЗОВАТЕЛЕМ СКИЛЛЫ-ДОКТРИНЫ — применяй их правила, математику и "
+            "анти-паттерны при ответе; при конфликте между скиллами явно это отметь:\n" + blocks)
     if construction:
         parts.append("ТЕКУЩАЯ КОНСТРУКЦИЯ (из калькулятора вкладки):\n"
                      + json.dumps(construction, ensure_ascii=False, indent=1))
@@ -98,9 +150,12 @@ def _run_claude(prompt: str, model: str) -> dict:
 
 
 def chat(question: str, history: list[dict] | None = None,
-         construction: dict | None = None, sources: list[dict] | None = None) -> dict:
-    """One stateless turn (optionally compiling notebook sources). {answer, model} | {error}."""
-    return _run_claude(build_prompt(question, history, construction, sources), CHAT_MODEL)
+         construction: dict | None = None, sources: list[dict] | None = None,
+         skills: list[dict] | None = None, model: str | None = None) -> dict:
+    """One stateless turn (optionally compiling notebook sources, with skill doctrines
+    in context). {answer, model} | {error}."""
+    return _run_claude(build_prompt(question, history, construction, sources, skills),
+                       model or CHAT_MODEL)
 
 
 _EXTRACT_PROMPT = (

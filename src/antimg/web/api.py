@@ -1646,8 +1646,20 @@ def practice_claude(req: PracticeClaudeReq):
     question is FIRST fanned out to those notebooks and Claude COMPILES the answers —
     NotebookLM is the data source, Claude is the overview across all of them. The
     response lists the participants so the UI can show what fed the answer."""
+    if req.model and req.model not in claude_bridge.MODELS:
+        raise HTTPException(status_code=422,
+                            detail=f"unknown model {req.model!r}; allowed: {claude_bridge.MODELS}")
     prlog.append("q", req.question)
     participants = [{"kind": "doctrine", "name": "ПИ (Прикрытый Интрадей) — преамбула домена"}]
+
+    skills = []
+    for name in dict.fromkeys(req.skills):
+        content = claude_bridge.load_skill(name)
+        if content is None:
+            raise HTTPException(status_code=422, detail=f"unknown skill {name!r}")
+        skills.append({"name": name, "content": content})
+        participants.append({"kind": "skill", "name": f"/{name}"})
+
     if req.construction:
         participants.append({"kind": "construction", "name": "текущая конструкция калькулятора"})
     if req.history:
@@ -1666,13 +1678,23 @@ def practice_claude(req: PracticeClaudeReq):
 
     res = claude_bridge.chat(req.question,
                              history=[t.model_dump() for t in req.history],
-                             construction=req.construction, sources=sources)
+                             construction=req.construction, sources=sources,
+                             skills=skills or None, model=req.model)
     if "error" in res:
         raise HTTPException(status_code=502, detail=res["error"])
     participants.append({"kind": "claude", "name": res["model"]
                          + (" — компиляция источников" if sources else " — прямой ответ")})
     prlog.append("c", res["answer"], model=res["model"], participants=participants)
     return {**res, "participants": participants, "notebook_results": notebook_results}
+
+
+@app.get("/api/practice/skills")
+def practice_skills():
+    """Combinable skill doctrines (from the operator's ~/.claude/skills via /seed) +
+    the model choices for the Claude chat."""
+    return {"skills": claude_bridge.list_skills(),
+            "models": claude_bridge.MODELS,
+            "default_model": claude_bridge.CHAT_MODEL}
 
 
 @app.post("/api/practice/extract")
