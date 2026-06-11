@@ -1666,6 +1666,16 @@ def practice_claude(req: PracticeClaudeReq):
         skills.append({"name": name, "content": content})
         participants.append({"kind": "skill", "name": f"/{name}"})
 
+    images = []
+    for p in dict.fromkeys(req.images):
+        real = _uploaded_path(p)
+        if real is None:
+            raise HTTPException(status_code=422, detail=f"image is not an uploaded file: {p!r}")
+        name = next((i["name"] for i in prlog.load()["images"] if i["path"] == p),
+                    os.path.basename(real))
+        images.append({"path": real, "name": name})
+        participants.append({"kind": "image", "name": f"📷 {name}"})
+
     if req.construction:
         participants.append({"kind": "construction", "name": "текущая конструкция калькулятора"})
     if req.history:
@@ -1686,7 +1696,8 @@ def practice_claude(req: PracticeClaudeReq):
     res = claude_bridge.chat(req.question,
                              history=[t.model_dump() for t in req.history],
                              construction=req.construction, sources=sources,
-                             skills=skills or None, model=req.model)
+                             skills=skills or None, model=req.model,
+                             images=images or None)
     if "error" in res:
         raise HTTPException(status_code=502, detail=res["error"])
     participants.append({"kind": "claude", "name": res["model"]
@@ -1734,10 +1745,21 @@ _UPLOAD_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _UPLOAD_MAX = 12 * 1024 * 1024
 
 
+def _uploaded_path(path: str) -> str | None:
+    """Resolve a client-supplied path to a real file under the uploads dir; None if not."""
+    real = os.path.realpath(path)
+    updir = os.path.realpath(_UPLOAD_DIR)
+    if real.startswith(updir + os.sep) and os.path.isfile(real):
+        return real
+    return None
+
+
 @app.post("/api/practice/upload")
 async def practice_upload(file: UploadFile):
-    """Upload a PICTURE of a concrete example (broker screenshot, option board, slide).
-    Returns the server path to feed /api/practice/extract-image."""
+    """Upload a PICTURE (broker screenshot, option board, slide) — several allowed, the
+    client calls this once per file. The picture is registered in the persisted tab state
+    so it survives reloads; it can then be DISCUSSED with Claude directly (attached to a
+    question) or fed to /api/practice/extract-image for the graph."""
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in _UPLOAD_EXT:
         raise HTTPException(status_code=422, detail=f"image only ({'/'.join(sorted(_UPLOAD_EXT))})")
@@ -1746,19 +1768,32 @@ async def practice_upload(file: UploadFile):
         raise HTTPException(status_code=422, detail="file too large (max 12 MB)")
     os.makedirs(_UPLOAD_DIR, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(_UPLOAD_DIR, name)
+    path = os.path.abspath(os.path.join(_UPLOAD_DIR, name))
     with open(path, "wb") as fh:
         fh.write(data)
-    return {"path": os.path.abspath(path), "name": file.filename, "bytes": len(data)}
+    prlog.add_image(path, file.filename or name)
+    return {"path": path, "name": file.filename, "bytes": len(data)}
+
+
+@app.post("/api/practice/image/remove")
+def practice_image_remove(req: PracticeExtractImageReq):
+    """Detach an uploaded picture from the tab (and delete the file)."""
+    real = _uploaded_path(req.path)
+    if real:
+        try:
+            os.remove(real)
+        except OSError:
+            pass
+    prlog.remove_image(req.path)
+    return prlog.load()
 
 
 @app.post("/api/practice/extract-image")
 def practice_extract_image(req: PracticeExtractImageReq):
     """Extract construction parameters from an uploaded picture (Claude reads the image
     with its Read tool). Path must be one returned by /api/practice/upload."""
-    real = os.path.realpath(req.path)
-    updir = os.path.realpath(_UPLOAD_DIR)
-    if not real.startswith(updir + os.sep) or not os.path.isfile(real):
+    real = _uploaded_path(req.path)
+    if real is None:
         raise HTTPException(status_code=422, detail="path is not an uploaded file")
     res = claude_bridge.extract_construction_from_image(real)
     if "error" in res:

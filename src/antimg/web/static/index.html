@@ -561,6 +561,11 @@
         <textarea name="question" rows="3" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #2a3340;border-radius:6px;padding:6px"
           placeholder="Например: дай конкретный пример конструкции ПИ с числами — инструмент, цена фьючерса, страйк, премия колла, сколько коллов и фьючей"></textarea></label>
       <div style="flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px">
+        <label title="скриншоты брокера / доски опционов / слайды — МОЖНО НЕСКОЛЬКО; отмеченные уходят в вопрос Claude (модель читает картинки), 📐 на чипе извлекает параметры в график">📷 Картинки
+          <input type="file" id="pr-image" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="max-width:230px"></label>
+        <span id="pr-images" style="display:inline-flex;flex-wrap:wrap;gap:3px 10px"></span>
+      </div>
+      <div style="flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px">
         <span class="hint" title="доктрины из ~/.claude/skills — выбери, какие участвуют в ответе Claude; несколько комбинируются">🧠 Скиллы:</span>
         <span id="pr-skills" style="display:inline-flex;flex-wrap:wrap;gap:2px 12px"></span>
         <label style="margin-left:auto" title="модель для чата (Fable 5 = новейшая)">Модель
@@ -578,8 +583,6 @@
       <div style="flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px">
         <label title="инструмент каталога — чтобы взять его РЕАЛЬНУЮ цену">Инструмент <select id="pr-instr" class="instr"></select></label>
         <button type="button" id="pr-real-price" title="подставить РЕАЛЬНУЮ последнюю цену инструмента (тот же дневной фид, что в бэктестах) в S₀ и страйк">📈 Реальная цена</button>
-        <label title="скриншот брокера / доска опционов / слайд вебинара — Claude прочитает картинку и извлечёт параметры конструкции">📷 Картинка-пример
-          <input type="file" id="pr-image" accept="image/png,image/jpeg,image/webp,image/gif" style="max-width:240px"></label>
       </div>
       <label title="цена фьючерса/базового актива при входе">Цена фьючерса S₀ <input name="s0" type="number" step="any" value="100000"></label>
       <label title="страйк коллов (для классического ПИ ≈ около денег)">Страйк K <input name="strike" type="number" step="any" value="100000"></label>
@@ -599,6 +602,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=108"></script>
+  <script src="/app.js?v=109"></script>
 </body>
 </html>

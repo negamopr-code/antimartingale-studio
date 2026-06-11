@@ -21,7 +21,7 @@ MAX_ENTRIES = int(os.environ.get("ANTIMG_PRACTICE_LOG_MAX", "200"))
 MAX_TEXT = 20_000
 
 def _empty() -> dict:
-    return {"entries": [], "construction": None}
+    return {"entries": [], "construction": None, "images": []}
 
 
 def _locked(fn):
@@ -37,6 +37,7 @@ def _locked(fn):
             state = _empty()
         state.setdefault("entries", [])
         state.setdefault("construction", None)
+        state.setdefault("images", [])
         new = fn(state)
         if new is not None:
             fh.seek(0)
@@ -64,6 +65,21 @@ def append(role: str, text: str, **extra) -> dict:
 def set_construction(construction: dict | None) -> dict:
     def fn(s):
         s["construction"] = construction
+        return s
+    return _locked(fn)
+
+
+def add_image(path: str, name: str) -> dict:
+    def fn(s):
+        if not any(i["path"] == path for i in s["images"]):
+            s["images"].append({"path": path, "name": name, "ts": int(time.time())})
+        return s
+    return _locked(fn)
+
+
+def remove_image(path: str) -> dict:
+    def fn(s):
+        s["images"] = [i for i in s["images"] if i["path"] != path]
         return s
     return _locked(fn)
 

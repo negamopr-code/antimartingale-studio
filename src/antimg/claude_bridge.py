@@ -98,8 +98,16 @@ def load_skill(name: str) -> str | None:
 def build_prompt(question: str, history: list[dict] | None = None,
                  construction: dict | None = None,
                  sources: list[dict] | None = None,
-                 skills: list[dict] | None = None) -> str:
+                 skills: list[dict] | None = None,
+                 images: list[dict] | None = None) -> str:
     parts = [_PREAMBLE]
+    if images:
+        lst = "\n".join(f"- {i['path']}  (файл пользователя: {i.get('name', '?')})"
+                        for i in images)
+        parts.append(
+            "ПРИЛОЖЕННЫЕ ИЗОБРАЖЕНИЯ — пользователь загрузил картинки (скриншоты брокера, "
+            "доски опционов, слайды). ОБЯЗАТЕЛЬНО прочитай КАЖДЫЙ файл инструментом Read "
+            "ПЕРЕД ответом и опирайся на их фактическое содержимое:\n" + lst)
     if skills:
         blocks = "\n\n".join(f"[Скилл /{s['name']}]\n{s['content']}" for s in skills)
         parts.append(
@@ -151,11 +159,14 @@ def _run_claude(prompt: str, model: str, extra_args: list[str] | None = None) ->
 
 def chat(question: str, history: list[dict] | None = None,
          construction: dict | None = None, sources: list[dict] | None = None,
-         skills: list[dict] | None = None, model: str | None = None) -> dict:
+         skills: list[dict] | None = None, model: str | None = None,
+         images: list[dict] | None = None) -> dict:
     """One stateless turn (optionally compiling notebook sources, with skill doctrines
-    in context). {answer, model} | {error}."""
-    return _run_claude(build_prompt(question, history, construction, sources, skills),
-                       model or CHAT_MODEL)
+    and attached pictures in context). {answer, model} | {error}. With images the Read
+    tool is enabled (the ONLY tool) so the model actually sees the pixels."""
+    prompt = build_prompt(question, history, construction, sources, skills, images)
+    extra = ["--allowedTools", "Read"] if images else None
+    return _run_claude(prompt, model or CHAT_MODEL, extra_args=extra)
 
 
 _EXTRACT_PROMPT = (

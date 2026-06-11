@@ -2218,7 +2218,7 @@ function prSourcesPayload(ids) {
 }
 
 const prHistory = [];   // compact chat history for the Claude context: {role: q|a|c, text, title?}
-const PR_PART_ICON = { doctrine: "📜", skill: "🧠", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖" };
+const PR_PART_ICON = { doctrine: "📜", skill: "🧠", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖", image: "📷" };
 const PR_DEFAULT_SKILLS = ["hedgedintraday", "antimartingal-strategy"];   // pre-checked if present
 
 // combinable skill doctrines + the model dropdown for the Claude chat
@@ -2296,6 +2296,8 @@ function prCtxHint() {
   const sks = $$(".pr-skill-cb").filter((c) => c.checked).map((c) => "/" + c.value);
   const parts = ["📜 доктрина ПИ"];
   if (sks.length) parts.push(`🧠 скиллы: ${sks.join(" + ")}`);
+  const nimg = prImages.filter((i) => i.checked).length;
+  if (nimg) parts.push(`📷 картинки (${nimg})`);
   if (nbs.length) parts.push(`📖 ноутбуки-источники: ${nbs.join(", ")} → компиляция`);
   else parts.push("📖 ноутбуки не отмечены → ответ по истории чата");
   if (prLastStats) parts.push("📐 текущая конструкция");
@@ -2350,6 +2352,7 @@ $("#pr-ask-claude").onclick = (e) => {
         question: q, history: prHistory.slice(0, -1),   // current q goes as `question`, not history
         construction: prLastStats, notebook_ids: ids, skills, model,
         sources: prSourcesPayload(ids),
+        images: prImages.filter((i) => i.checked).map((i) => i.path),
       });
       for (const r of d.notebook_results || [])         // raw per-notebook answers first (transparency)
         if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
@@ -2411,19 +2414,59 @@ $("#pr-real-price").onclick = (e) => {
   });
 };
 
-// 📷 picture of a concrete example (broker screenshot / option board / slide) →
-// upload → Claude reads the image → params → form → graph
+// 📷 uploaded pictures — SEVERAL allowed; checked chips ride along with the next Claude
+// question (the model reads the actual images); 📐 on a chip extracts params → graph.
+const prImages = [];   // {path, name, checked}
+function prRenderImages() {
+  const box = $("#pr-images");
+  box.innerHTML = "";
+  for (const img of prImages) {
+    const chip = document.createElement("span");
+    chip.style.cssText = "display:inline-flex;align-items:center;gap:3px;border:1px solid #2a3340;"
+      + "border-radius:10px;padding:1px 7px;font-size:11px;background:#0d1117";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = img.checked;
+    cb.title = "включить картинку в следующий вопрос Claude";
+    cb.onchange = () => { img.checked = cb.checked; prCtxHint(); };
+    chip.appendChild(cb);
+    chip.appendChild(document.createTextNode("📷 " + img.name));
+    const ex = document.createElement("button");
+    ex.type = "button"; ex.textContent = "📐";
+    ex.title = "извлечь параметры конструкции из ЭТОЙ картинки → график";
+    ex.style.cssText = "padding:0 4px;font-size:11px";
+    ex.onclick = () => withBusy(ex, async () => {
+      toast("Claude читает картинку и извлекает параметры…", true);
+      const d = await post("/api/practice/extract-image", { path: img.path });
+      await prApplyExtracted(d, "📷 " + img.name);
+    });
+    chip.appendChild(ex);
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.textContent = "✖";
+    rm.title = "убрать картинку (файл удаляется)";
+    rm.style.cssText = "padding:0 4px;font-size:11px;color:#f85149";
+    rm.onclick = () => withBusy(rm, async () => {
+      await post("/api/practice/image/remove", { path: img.path });
+      prImages.splice(prImages.indexOf(img), 1);
+      prRenderImages(); prCtxHint();
+    });
+    chip.appendChild(rm);
+    box.appendChild(chip);
+  }
+}
 $("#pr-image").onchange = async (e) => {
-  const f = e.target.files && e.target.files[0];
-  if (!f) return;
+  const files = [...(e.target.files || [])];
+  if (!files.length) return;
   e.target.disabled = true;
   try {
-    toast("Загружаю картинку и извлекаю параметры (Claude читает изображение)…", true);
-    const fd = new FormData();
-    fd.append("file", f);
-    const up = await api("/api/practice/upload", { method: "POST", body: fd });
-    const d = await post("/api/practice/extract-image", { path: up.path });
-    await prApplyExtracted(d, "📷 " + (up.name || "картинка"));
+    for (const f of files) {
+      const fd = new FormData();
+      fd.append("file", f);
+      const up = await api("/api/practice/upload", { method: "POST", body: fd });
+      prImages.push({ path: up.path, name: up.name || "картинка", checked: true });
+    }
+    prRenderImages(); prCtxHint();
+    toast(`Загружено картинок: ${files.length} — отмеченные уйдут в следующий вопрос Claude`, true);
+    prChatAdd("s", "Загружены картинки: " + files.map((f) => f.name).join(", "));
   } catch (err) { toast("Error: " + (err.message || err)); console.error(err); }
   finally { e.target.disabled = false; e.target.value = ""; }
 };
@@ -2527,6 +2570,9 @@ async function prLoadState() {
     for (const en of st.entries || [])
       prChatAdd(en.role, en.text, { title: en.title, model: en.model,
                                     participants: en.participants, sources: en.sources });
+    prImages.length = 0;
+    for (const i of st.images || []) prImages.push({ path: i.path, name: i.name, checked: true });
+    prRenderImages();
     const c = st.construction;
     if (c && c.request) {
       const form = $("#form-pr-payoff");
@@ -2541,6 +2587,8 @@ $("#pr-clear-log").onclick = (e) => withBusy(e.target, async () => {
   await post("/api/practice/state/clear", {});
   $("#pr-chat").innerHTML = "";
   prHistory.length = 0;
+  prImages.length = 0;
+  prRenderImages();
   prCtxHint();
   toast("Лог вкладки очищен", true);
 });

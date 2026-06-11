@@ -393,6 +393,8 @@ class PracticeClaudeReq(BaseModel):
     skills: list[str] = Field(default_factory=list, max_length=6)
     model: str | None = None                           # validated against claude_bridge.MODELS
     sources: dict[str, list[str]] = Field(default_factory=dict)   # per-notebook source filter
+    # uploaded pictures (paths from /api/practice/upload) to discuss directly with Claude
+    images: list[str] = Field(default_factory=list, max_length=8)
 
 
 class PracticeExtractImageReq(BaseModel):

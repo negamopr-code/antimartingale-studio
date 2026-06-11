@@ -1272,3 +1272,20 @@ Not implemented; documented as a rejected tactic.
   → {s0: 92500, strike: 92500, n_calls: 2, n_futs: 1, premium: 1850, dte_days: 30} → graph.
 - nlm subprocess pinned to UTF-8 (mojibake source titles are garbled in NotebookLM itself, not by us).
 - 190 tests (+8). python-multipart dep. assets v108.
+
+## D104 — Practice tab v6: MULTIPLE pictures + discussing them with Claude directly (2026-06-11)
+- **User ask:** upload SEVERAL pictures and discuss them with the Claude model directly — not necessarily
+  through NotebookLM.
+- **Image strip in the chat area:** the 📷 input is `multiple`; each upload registers the picture in the
+  persisted tab state (`practice_log.add_image`, survives reloads). Uploaded pictures render as chips:
+  [✓] attach-to-next-question (default on) · 📐 extract params from THIS picture → graph · ✖ remove
+  (deletes the file + state entry, /api/practice/image/remove).
+- **Discussing with Claude:** PracticeClaudeReq.images[] (paths validated to the uploads dir);
+  `claude_bridge.chat(images=…)` adds a «ПРИЛОЖЕННЫЕ ИЗОБРАЖЕНИЯ — ОБЯЗАТЕЛЬНО прочитай каждый файл
+  инструментом Read» section and enables the Read tool (the ONLY tool) for that turn. Works with or
+  WITHOUT notebooks/skills — pure picture discussion is now first-class. Each picture appears in
+  participants (kind=image) and the 🧩 hint shows «📷 картинки (N)».
+- **Verified live:** two rendered option boards (Si 92500/prem 1850/DTE 30 and RTS 110000/prem 4200/
+  DTE 60) uploaded → fable-5 read BOTH, built a comparison table, computed premium-% (4.0% vs 7.64%)
+  and breakevens F₀±2P — correct on both counts.
+- 193 tests (+3). assets v109.

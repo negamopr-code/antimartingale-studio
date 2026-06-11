@@ -247,7 +247,7 @@ def test_claude_compiles_notebook_sources_with_participants(monkeypatch):
     seen = {}
 
     def fake_chat(question, history=None, construction=None, sources=None,
-                  skills=None, model=None):
+                  skills=None, model=None, images=None):
         seen["sources"] = sources
         return {"answer": "компиляция", "model": model or claude_bridge.CHAT_MODEL}
     monkeypatch.setattr(claude_bridge, "chat", fake_chat)
@@ -296,7 +296,7 @@ def test_claude_combines_selected_skills(_skills_dir, monkeypatch):
     seen = {}
 
     def fake_chat(question, history=None, construction=None, sources=None,
-                  skills=None, model=None):
+                  skills=None, model=None, images=None):
         seen.update(skills=skills, model=model)
         return {"answer": "ок", "model": model or claude_bridge.CHAT_MODEL}
     monkeypatch.setattr(claude_bridge, "chat", fake_chat)
@@ -448,6 +448,54 @@ def test_upload_and_extract_image_roundtrip(tmp_path, monkeypatch):
     path = r.json()["path"]
     r2 = client.post("/api/practice/extract-image", json={"path": path})
     assert r2.status_code == 200 and r2.json()["params"]["s0"] == 5000
+
+
+def test_multiple_images_persist_and_attach_to_claude(tmp_path, monkeypatch):
+    """Several uploaded pictures live in the tab state and ride along with a Claude
+    question (the model reads them via Read) — no NotebookLM involved."""
+    import antimg.web.api as apimod
+    monkeypatch.setattr(apimod, "_UPLOAD_DIR", str(tmp_path / "up"))
+    paths = []
+    for nm in ("board1.png", "board2.jpg"):
+        r = client.post("/api/practice/upload",
+                        files={"file": (nm, b"\x89PNG fake", "image/png")})
+        paths.append(r.json()["path"])
+    st = client.get("/api/practice/state").json()
+    assert [i["name"] for i in st["images"]] == ["board1.png", "board2.jpg"]
+
+    seen = {}
+
+    def fake_chat(question, history=None, construction=None, sources=None,
+                  skills=None, model=None, images=None):
+        seen["images"] = images
+        return {"answer": "вижу обе картинки", "model": model or claude_bridge.CHAT_MODEL}
+    monkeypatch.setattr(claude_bridge, "chat", fake_chat)
+    r = client.post("/api/practice/claude",
+                    json={"question": "сравни две доски", "images": paths})
+    assert r.status_code == 200
+    assert [i["name"] for i in seen["images"]] == ["board1.png", "board2.jpg"]
+    img_parts = [p["name"] for p in r.json()["participants"] if p["kind"] == "image"]
+    assert img_parts == ["📷 board1.png", "📷 board2.jpg"]
+
+    # remove one: file gone + state updated
+    r2 = client.post("/api/practice/image/remove", json={"path": paths[0]})
+    assert [i["name"] for i in r2.json()["images"]] == ["board2.jpg"]
+    import os as _os
+    assert not _os.path.exists(paths[0])
+
+
+def test_claude_rejects_foreign_image_path(tmp_path, monkeypatch):
+    import antimg.web.api as apimod
+    monkeypatch.setattr(apimod, "_UPLOAD_DIR", str(tmp_path / "up"))
+    r = client.post("/api/practice/claude",
+                    json={"question": "x", "images": ["/etc/passwd"]})
+    assert r.status_code == 422
+
+
+def test_build_prompt_with_images_demands_read():
+    p = claude_bridge.build_prompt("что на скрине?", images=[
+        {"path": "/data/uploads/a.png", "name": "доска.png"}])
+    assert "инструментом Read" in p and "/data/uploads/a.png" in p
 
 
 def test_upload_rejects_non_image_and_foreign_paths(tmp_path, monkeypatch):
