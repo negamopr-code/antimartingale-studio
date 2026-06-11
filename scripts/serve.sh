@@ -14,6 +14,10 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="antimg-web:latest"
 NAME="antimg-web"
 PORT="${PORT:-8090}"
+# Shared NotebookLM auth profile (HOST path — the docker daemon resolves it), same one
+# yt2nlm-web uses. Mounted at the app user's ~/.notebooklm-mcp-cli for the Practice tab;
+# if absent on this host the tab degrades gracefully (calculator still works).
+NLM_PROFILE="${NLM_PROFILE:-/root/claude-sandbox/persistent/nlm-profile}"
 
 echo "[serve] building $IMAGE …"
 docker build -f deploy/Dockerfile -t "$IMAGE" .
@@ -21,7 +25,9 @@ docker build -f deploy/Dockerfile -t "$IMAGE" .
 echo "[serve] (re)creating $NAME on :$PORT (--restart unless-stopped) …"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" --restart unless-stopped \
-  -p "${PORT}:8000" -v antimg-data:/data "$IMAGE" >/dev/null
+  -p "${PORT}:8000" -v antimg-data:/data \
+  -v "${NLM_PROFILE}:/home/app/.notebooklm-mcp-cli" \
+  "$IMAGE" >/dev/null
 
 sleep 5
 docker ps --filter "name=$NAME" --format '[serve] {{.Names}}  {{.Status}}  {{.Ports}}'

@@ -17,6 +17,9 @@ services:
       ANTIMG_DEFAULT_START: "${ANTIMG_DEFAULT_START:-2005-01-01}"
     volumes:
       - antimg-data:/data
+      # NotebookLM auth profile for the Practice tab (shared, host path; optional —
+      # without it the tab reports "nlm unavailable" and the calculator still works)
+      - ${NLM_PROFILE:-/root/claude-sandbox/persistent/nlm-profile}:/home/app/.notebooklm-mcp-cli
     restart: unless-stopped
 
 volumes:

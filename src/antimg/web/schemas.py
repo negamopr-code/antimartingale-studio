@@ -360,6 +360,31 @@ class PiSimReq(BaseModel):
     use_term_structure: bool = True
 
 
+class PracticeAskReq(BaseModel):
+    """Tab 15 — «Практика»: forward one question VERBATIM to one NotebookLM notebook
+    (the corpus of concrete examples — e.g. the ПИ webinars). Answered by Gemini on
+    Google's side via the `nlm` CLI; zero LLM tokens spent here."""
+    notebook_id: str = Field(..., min_length=8, max_length=64)
+    question: str = Field(..., min_length=3, max_length=4000)
+
+
+class PracticePayoffReq(BaseModel):
+    """Tab 15 — manual ПИ construction in concrete numbers (rebuild an example from the
+    notebook): n_calls LONG calls at strike K + n_futs SHORT futures from S0. Either the
+    real premium (points per call — the number from the example) or an IV; with a premium
+    the BS implied vol is extracted for the greeks."""
+    s0: float = Field(..., gt=0)                       # futures/underlying price at entry
+    strike: float = Field(..., gt=0)
+    n_calls: float = Field(2.0, ge=0, le=100)
+    n_futs: float = Field(1.0, ge=0, le=100)           # SHORT futures legs
+    premium: float | None = Field(None, gt=0)          # per-call premium, points (from the example)
+    iv: float | None = Field(None, gt=0, le=5)         # else BS premium from this sigma
+    dte_days: float = Field(30.0, ge=0.5, le=365)
+    r: float = Field(0.045, ge=-0.05, le=0.5)
+    multiplier: float = Field(1.0, gt=0)               # $ per point per lot
+    lots: float = Field(1.0, gt=0, le=10_000)
+
+
 class FromSignalsReq(BaseModel):
     strategy_id: str | None = None
     base_bet: float = Field(100.0, gt=0)

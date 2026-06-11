@@ -17,6 +17,12 @@ WORKDIR /app
 COPY requirements-web.txt .
 RUN pip install -r requirements-web.txt
 
+# NotebookLM CLI for the Practice tab — isolated venv so its deps never touch the app's.
+# Auth comes from the shared profile bind-mounted at ~app/.notebooklm-mcp-cli (scripts/serve.sh);
+# without the mount the tab degrades gracefully (the construction calculator still works).
+RUN python -m venv /opt/nlmvenv && /opt/nlmvenv/bin/pip install notebooklm-mcp-cli
+ENV NLM_BIN=/opt/nlmvenv/bin/nlm
+
 COPY src/ ./src/
 
 # non-root + writable data volume

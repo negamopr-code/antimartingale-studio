@@ -27,6 +27,7 @@
       <button class="tab" data-tab="amov">12 · ПИ × Antimartingale</button>
       <button class="tab" data-tab="picoin">13 · ПИ Coin estimator</button>
       <button class="tab" data-tab="pisim">14 · 💵 Симуляция в деньгах</button>
+      <button class="tab" data-tab="practice">15 · 🎓 Практика</button>
     </nav>
   </header>
 
@@ -534,6 +535,53 @@
     <div class="tradetable" id="sim-grid"></div>
   </section>
 
-  <script src="/app.js?v=103"></script>
+  <!-- TAB 15 -->
+  <section id="practice" class="panel">
+    <p class="hint"><b>Практика — конкретные примеры из NotebookLM + графика опционной конструкции.</b>
+      1) Выбери ноутбук (корпус вебинаров/инструкций — например, корпус ПИ Коровина) и спроси
+      <i>конкретный пример</i>: инструмент, цена фьючерса, страйк, премия. Отвечает Gemini по
+      источникам ноутбука — 0 токенов Claude. 2) Введи числа из примера в конструктор ниже —
+      получишь график выплат, безубытки, лимит убытка (= премия) и тету, которую должен отбивать
+      скальп. 3) Кнопка «спросить про эту конструкцию» отправляет твои числа обратно в ноутбук
+      для дальнейшего разбора.</p>
+
+    <h3 style="margin:10px 0 4px;font-size:14px;color:#8b949e">📚 1 · Ноутбук с примерами</h3>
+    <form class="controls" id="form-pr-nb" onsubmit="return false">
+      <label style="min-width:340px">Notebook
+        <select name="notebook" id="pr-notebook" style="max-width:420px"></select></label>
+      <button type="button" id="pr-nb-refresh" title="перечитать список ноутбуков">🔄</button>
+      <span class="hint" id="pr-nb-status" style="margin-left:8px"></span>
+    </form>
+
+    <div id="pr-chat" class="tradetable" style="margin:8px 0"></div>
+    <form class="controls" id="form-pr-ask">
+      <label style="flex:1;min-width:420px">Вопрос к ноутбуку
+        <textarea name="question" rows="3" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #2a3340;border-radius:6px;padding:6px"
+          placeholder="Например: дай конкретный пример конструкции ПИ с числами — инструмент, цена фьючерса, страйк, премия колла, сколько коллов и фьючей"></textarea></label>
+      <button type="submit" title="ответ считает Gemini по источникам ноутбука; может занять 1–2 минуты">❓ Спросить</button>
+      <button type="button" id="pr-preset-example" title="готовый вопрос: запросить конкретный пример с числами">🎯 Пример с числами</button>
+    </form>
+
+    <h3 style="margin:18px 0 4px;font-size:14px;color:#8b949e">📐 2 · Конструктор: n·Колл − m·Фьюч в конкретных числах</h3>
+    <form class="controls" id="form-pr-payoff">
+      <label title="цена фьючерса/базового актива при входе">Цена фьючерса S₀ <input name="s0" type="number" step="any" value="100000"></label>
+      <label title="страйк коллов (для классического ПИ ≈ около денег)">Страйк K <input name="strike" type="number" step="any" value="100000"></label>
+      <label>Коллов (long) <input name="n_calls" type="number" step="any" value="2"></label>
+      <label title="фьючей в шорт от S₀">Фьючей (short) <input name="n_futs" type="number" step="any" value="1"></label>
+      <label title="премия ОДНОГО колла в пунктах — число из примера ноутбука. Если задана, IV извлекается из неё (implied)">Премия колла (пп) <input name="premium" type="number" step="any" placeholder="из примера"></label>
+      <label title="если премии нет — посчитать её по Блэку-Шоулзу из этой IV">IV (если нет премии) <input name="iv" type="number" step="any" placeholder="0.60"></label>
+      <label>DTE (дней) <input name="dte_days" type="number" step="any" value="30"></label>
+      <label>Risk-free r <input name="r" type="number" step="any" value="0.045"></label>
+      <label title="$ за пункт на 1 лот">Мультипликатор <input name="multiplier" type="number" step="any" value="1"></label>
+      <label title="масштаб всей конструкции">Лотов <input name="lots" type="number" step="any" value="1"></label>
+      <button type="submit">📐 Рассчитать</button>
+      <button type="button" id="pr-ask-this" title="вставить текущую конструкцию в вопрос ноутбуку — для дальнейшего расчёта/разбора">💬 Спросить про эту конструкцию</button>
+    </form>
+    <pre class="stats" id="pr-notes" hidden></pre>
+    <div class="results"><div class="plots"><div id="pr-payoff"></div></div>
+      <pre class="stats" id="pr-stats"></pre></div>
+  </section>
+
+  <script src="/app.js?v=104"></script>
 </body>
 </html>

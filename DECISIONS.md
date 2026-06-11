@@ -1162,3 +1162,28 @@ Not implemented; documented as a rejected tactic.
   chop-fraction + gate-managed stuck demoted to CROSS-CHECKS. Narration/verdict/UI updated.
 - **AM risk made visible:** AM tables show an «AM риск $» column (= mult×premium); stats spell out «при ×N
   макс. убыток = N×$1000 — заслуженный риск, риск НЕ остаётся $1000». 151 tests (+2). assets v102.
+
+## D99 — Tab 15 «Практика»: NotebookLM examples + manual construction calculator (2026-06-11)
+- **Goal (user):** practice on CONCRETE examples — pick a NotebookLM notebook (the corpus of webinars,
+  e.g. «hedged intraday» 5fada65b), ask it questions, and have an option payoff graph + further
+  calculations right there.
+- **NotebookLM bridge** (`src/antimg/nlm_bridge.py`): shells out to the `nlm` CLI exactly like the proven
+  yt2nlm-web sibling — `nlm notebook list` / `nlm notebook query <id> <q> --json`. Gemini answers from the
+  notebook sources → 0 Claude tokens. Serialized calls (1.5s min gap), 5-min list cache, graceful degrade
+  (no CLI/profile → tab reports why; the calculator keeps working). Parser accepts BOTH CLI output shapes:
+  old ≤0.6.x `{"value": {...}}` wrapper AND the current top-level `{"answer": ...}` (the wrapped-only parse
+  bit us live: «empty answer» on a good reply).
+- **Construction calculator** (`src/antimg/practice.py`): manual n·Calls − m·Futs in concrete numbers from
+  the example: S0, K, premium per call (→ implied vol via bisection) OR iv (→ BS premium), DTE, multiplier,
+  lots. Returns expiry payoff grid + today's BS curve, analytic breakevens (slope −n_f below K, n_c−n_f
+  above), loss cap (= premium for the proper 2C−1F), Δ at entry, theta $/day & $/period, and «сколько
+  скальп должен давать в день». Flags uncovered short futs (n_f > n_c = убыток вверх не ограничен).
+- **API:** GET /api/practice/notebooks, POST /api/practice/ask (502 with reason on failure),
+  POST /api/practice/payoff. UI: notebook picker (preselects the ПИ corpus), chat log, preset «пример с
+  числами» question, payoff form, «💬 спросить про эту конструкцию» button that feeds the computed numbers
+  back into the notebook question (the «further calculation» loop).
+- **Deploy:** image bakes `notebooklm-mcp-cli` into /opt/nlmvenv (NLM_BIN env); serve.sh/compose mount the
+  shared host profile /root/claude-sandbox/persistent/nlm-profile → /home/app/.notebooklm-mcp-cli (same
+  auth as yt2nlm-web; notebook UUID = connection string). Verified live end-to-end: list (30+ notebooks),
+  payoff math (loss cap = premium at K, BE ±14% @ IV60/DTE30), real query to 5fada65b answered with sources.
+- 165 tests (+14). assets v104.

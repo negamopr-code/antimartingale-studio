@@ -19,11 +19,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import am_overlay as amov
 from .. import atr_strategy as strat
+from .. import nlm_bridge
 from .. import pi_coin as picoin
 from .. import data as datamod
 from .. import hedged_intraday as hi
 from .. import pi_model as pim
 from .. import pi_sim as pisim
+from .. import practice as prac
 from .. import pure_straddle as ps
 from .. import vol as volmod
 from .. import instruments, scenarios, signals, tradingview
@@ -32,7 +34,8 @@ from . import serialization as ser
 from .config import settings
 from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
-                      PiCoinReq, PiSimReq, PureStraddleReq, ScanReq)
+                      PiCoinReq, PiSimReq, PracticeAskReq, PracticePayoffReq,
+                      PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1582,6 +1585,60 @@ def backtest_from_signals(req: FromSignalsReq):
         "stats": {"n_trials": res.n_trials, "wins": res.wins, "empirical_p": res.empirical_p,
                   "final_bank": res.final_bank, "max_drawdown": res.max_drawdown,
                   "ev_cycle": res.closed_form_ev_cycle},
+    }
+
+
+# ----------------------------------------------------------------- tab 15: practice
+@app.get("/api/practice/notebooks")
+def practice_notebooks(force: bool = Query(False)):
+    """NotebookLM notebooks available to the studio (via the baked-in `nlm` CLI).
+    Never 500s — when the CLI/profile is missing the tab shows the reason and the
+    payoff calculator keeps working."""
+    out = nlm_bridge.list_notebooks(force=force)
+    ok, why = nlm_bridge.available()
+    return {"available": ok and not out.get("error"),
+            "notebooks": out.get("notebooks", []),
+            "error": out.get("error") or (why or None)}
+
+
+@app.post("/api/practice/ask")
+def practice_ask(req: PracticeAskReq):
+    """Forward the question VERBATIM to one notebook (Gemini answers from the corpus —
+    zero LLM tokens here). Long call: nlm query can take ~1–2 min."""
+    res = nlm_bridge.query(req.notebook_id, req.question)
+    if "error" in res:
+        raise HTTPException(status_code=502, detail=res["error"])
+    return res
+
+
+@app.post("/api/practice/payoff")
+def practice_payoff(req: PracticePayoffReq):
+    """Manual ПИ construction (n·Calls − m·Futs) in concrete numbers — payoff graph,
+    breakevens, loss cap, theta the scalp must cover. Pure math, no market data."""
+    try:
+        c = prac.build(req.s0, req.strike, n_calls=req.n_calls, n_futs=req.n_futs,
+                       premium=req.premium, iv=req.iv, dte_days=req.dte_days,
+                       r=req.r, multiplier=req.multiplier, lots=req.lots)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {
+        "payoff": c.payoff,
+        "stats": {
+            "premium_per_call_pts": round(c.premium, 4),
+            "premium_total_usd": round(c.premium_total, 2),
+            "implied_or_given_iv": round(c.iv, 4) if c.iv is not None else None,
+            "max_loss_usd": round(c.max_loss, 2),
+            "max_loss_at_S": c.max_loss_at,
+            "breakeven_down": round(c.be_down, 4) if c.be_down else None,
+            "breakeven_up": round(c.be_up, 4) if c.be_up else None,
+            "breakeven_down_pct": c.be_down_pct,
+            "breakeven_up_pct": c.be_up_pct,
+            "delta_at_entry_futs": c.delta0,
+            "theta_usd_per_day": c.theta_day,
+            "theta_usd_period": c.theta_period,
+            "scalp_needed_usd_per_day": c.scalp_per_day_needed,
+        },
+        "notes": c.notes,
     }
 
 

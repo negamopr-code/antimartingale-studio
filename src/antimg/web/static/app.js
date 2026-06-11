@@ -2126,6 +2126,135 @@ $("#pisim-scan-all").onclick = (e) => withBusy(e.target, async () => {
   renderPiSimScan(await post("/api/pi-sim/scan", o));
 });
 
+// ---- tab 15: Практика — NotebookLM examples + manual construction payoff
+const PR_DEFAULT_NB = /прикрыт|интрадей|intraday|коровин/i;   // preselect the ПИ corpus if present
+
+async function prLoadNotebooks(force = false) {
+  const sel = $("#pr-notebook"), st = $("#pr-nb-status");
+  st.textContent = "загружаю список ноутбуков…";
+  try {
+    const d = await api("/api/practice/notebooks" + (force ? "?force=true" : ""));
+    sel.innerHTML = "";
+    if (!d.available || !d.notebooks.length) {
+      st.textContent = "⚠ " + (d.error || "ноутбуки недоступны — работает только конструктор");
+      return;
+    }
+    for (const n of d.notebooks) {
+      const o = document.createElement("option");
+      o.value = n.id;
+      o.textContent = n.title + (n.sources != null ? ` (${n.sources} ист.)` : "");
+      if (PR_DEFAULT_NB.test(n.title) && !sel.querySelector("option[data-def]")) {
+        o.selected = true; o.dataset.def = "1";
+      }
+      sel.appendChild(o);
+    }
+    st.textContent = `${d.notebooks.length} ноутбуков; отвечает Gemini по источникам (0 токенов Claude)`;
+  } catch (e) { st.textContent = "⚠ " + (e.message || e); }
+}
+$("#pr-nb-refresh").onclick = (e) => withBusy(e.target, () => prLoadNotebooks(true));
+
+function prChatAdd(role, text, sources) {
+  const box = $("#pr-chat");
+  const div = document.createElement("div");
+  div.style.cssText = "padding:8px 10px;border-bottom:1px solid #2a3340;white-space:pre-wrap";
+  const tag = role === "q" ? "🧑 Вопрос" : (role === "a" ? "📖 Ноутбук" : "⚠");
+  const head = document.createElement("b");
+  head.style.color = role === "q" ? "#58a6ff" : (role === "a" ? "#3fb950" : "#f85149");
+  head.textContent = tag + (sources && sources.length ? ` (${sources.length} источников)` : "");
+  div.appendChild(head);
+  div.appendChild(document.createTextNode("\n" + text));
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+$("#form-pr-ask").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () => {
+    const nb = $("#pr-notebook").value;
+    const q = (new FormData(e.target).get("question") || "").toString().trim();
+    if (!nb) { toast("Сначала выбери ноутбук"); return; }
+    if (!q) { toast("Введи вопрос"); return; }
+    prChatAdd("q", q);
+    toast("Спрашиваю ноутбук (Gemini по источникам, может занять 1–2 мин)…", true);
+    try {
+      const d = await post("/api/practice/ask", { notebook_id: nb, question: q });
+      prChatAdd("a", d.answer, d.sources_used);
+      e.target.question.value = "";
+    } catch (err) { prChatAdd("e", err.message || String(err)); throw err; }
+  });
+};
+$("#pr-preset-example").onclick = () => {
+  $("#form-pr-ask").question.value =
+    "Дай ОДИН конкретный пример конструкции прикрытого интрадея с числами из материалов: " +
+    "инструмент, цена фьючерса при входе, страйк коллов, премия одного колла (в пунктах), " +
+    "сколько коллов куплено и сколько фьючерсов продано, срок до экспирации. " +
+    "Если есть несколько примеров — выбери самый подробный.";
+};
+
+let prLastStats = null;
+async function renderPracticePayoff(d, o) {
+  prLastStats = { ...o, ...d.stats };
+  const p = d.payoff, s = d.stats;
+  const traces = [{ x: p.S, y: p.expiry, mode: "lines", name: "P&L на экспирации",
+                    line: { width: 2.5, color: "#58a6ff" } }];
+  if (p.today)
+    traces.push({ x: p.S, y: p.today, mode: "lines", name: "P&L сегодня (BS)",
+                  line: { width: 1.5, color: "#d29922", dash: "dot" } });
+  const shapes = [
+    { type: "line", x0: p.S[0], x1: p.S[p.S.length - 1], y0: 0, y1: 0,
+      line: { color: "#8b949e", width: 1, dash: "dash" } },
+    { type: "line", x0: p.S0, x1: p.S0, yref: "paper", y0: 0, y1: 1,
+      line: { color: "#3fb950", width: 1, dash: "dot" } },
+  ];
+  const ann = [{ x: p.S0, yref: "paper", y: 1.04, text: "S₀", showarrow: false, font: { color: "#3fb950" } }];
+  for (const [be, lbl] of [[s.breakeven_down, "BE↓"], [s.breakeven_up, "BE↑"]])
+    if (be != null) {
+      shapes.push({ type: "line", x0: be, x1: be, yref: "paper", y0: 0, y1: 1,
+                    line: { color: "#f85149", width: 1, dash: "dot" } });
+      ann.push({ x: be, yref: "paper", y: 1.04, text: lbl, showarrow: false, font: { color: "#f85149" } });
+    }
+  await plot("pr-payoff", traces,
+    layout(`Конструкция ${o.n_calls}C − ${o.n_futs}F · страйк ${o.strike}`,
+           { height: 380, shapes, annotations: ann,
+             xaxis: { gridcolor: "#2a3340", title: { text: "цена на экспирации S_T" } },
+             yaxis: { gridcolor: "#2a3340", title: { text: "P&L, $" } } }));
+  const f = (v) => v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 4 });
+  $("#pr-stats").textContent =
+    `премия 1 колла      : ${f(s.premium_per_call_pts)} пп\n` +
+    `премия всего ($)    : ${f(s.premium_total_usd)}  ← лимит убытка конструкции\n` +
+    `IV (implied/given)  : ${f(s.implied_or_given_iv)}\n` +
+    `макс. убыток ($)    : ${f(s.max_loss_usd)}  при S_T = ${f(s.max_loss_at_S)}\n` +
+    `безубыток вниз      : ${f(s.breakeven_down)}  (${f(s.breakeven_down_pct)}%)\n` +
+    `безубыток вверх     : ${f(s.breakeven_up)}  (${f(s.breakeven_up_pct)}%)\n` +
+    `дельта при входе    : ${f(s.delta_at_entry_futs)} фьюча (≈0 = нейтрально)\n` +
+    `тета $/день         : ${f(s.theta_usd_per_day)}\n` +
+    `тета $ за период    : ${f(s.theta_usd_period)}\n` +
+    `скальп должен давать: ${f(s.scalp_needed_usd_per_day)} $/день чтобы отбить тету`;
+  const notes = $("#pr-notes");
+  notes.hidden = !(d.notes && d.notes.length);
+  notes.textContent = (d.notes || []).map((n) => "ℹ " + n).join("\n");
+}
+$("#form-pr-payoff").onsubmit = (e) => {
+  e.preventDefault();
+  withBusy(e.submitter, async () => {
+    const o = formData(e.target);
+    renderPracticePayoff(await post("/api/practice/payoff", o), o);
+  });
+};
+$("#pr-ask-this").onclick = () => {
+  if (!prLastStats) { toast("Сначала нажми «Рассчитать»"); return; }
+  const s = prLastStats;
+  $("#form-pr-ask").question.value =
+    `Разбери конструкцию: куплено ${s.n_calls} колл(а) страйк ${s.strike}, продано ${s.n_futs} ` +
+    `фьючерс(а) по ${s.s0}, премия колла ${s.premium_per_call_pts} пп, ${s.dte_days} дней до экспирации. ` +
+    `Премия всего $${s.premium_total_usd}, тета $${s.theta_usd_per_day}/день, безубытки ` +
+    `${s.breakeven_down ?? "—"} / ${s.breakeven_up ?? "—"}. ` +
+    `Как по методике вести эту позицию: какую сетку скальпа выставить, сколько кругов в день нужно, ` +
+    `чтобы отбить тету, и что делать при сильном тренде?`;
+  $("#form-pr-ask").question.scrollIntoView({ behavior: "smooth", block: "center" });
+};
+prLoadNotebooks();
+
 loadInstruments();
 window.addEventListener("load", () => {
   if (typeof Plotly === "undefined")
