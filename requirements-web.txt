@@ -6,3 +6,4 @@ yfinance
 fastapi
 uvicorn[standard]
 gunicorn
+python-multipart

@@ -8,11 +8,12 @@ runs them in a threadpool, keeping the event loop free.
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,7 +38,8 @@ from .config import settings
 from .schemas import (AntimgOverlayReq, BacktestReq, CoinFlipReq, ExplainReq, FromSignalsReq,
                       HedgedIntradayReq, HedgedIntradayScanReq, InspectReq, OptionsReq,
                       PiCoinReq, PiSimReq, PracticeAskReq, PracticeClaudeReq,
-                      PracticeExtractReq, PracticePayoffReq, PureStraddleReq, ScanReq)
+                      PracticeExtractImageReq, PracticeExtractReq, PracticePayoffReq,
+                      PureStraddleReq, ScanReq)
 
 app = FastAPI(title="Antimartingale studio", version="1.0",
               description="Antimartingale simulator + ATR backtest + options + TradingView ingest")
@@ -1607,14 +1609,18 @@ def practice_notebooks(force: bool = Query(False)):
             "claude_model": claude_bridge.CHAT_MODEL if cl_ok else None}
 
 
-def _nlm_fanout(notebook_ids: list[str], question: str) -> list[dict]:
-    """Serial fan-out of one question across notebooks → [{notebook_id, title, answer|error}]."""
+def _nlm_fanout(notebook_ids: list[str], question: str,
+                sources: dict[str, list[str]] | None = None) -> list[dict]:
+    """Serial fan-out of one question across notebooks → [{notebook_id, title, answer|error}].
+    `sources` optionally restricts a notebook to EXACT files inside it."""
     titles = {n["id"]: n["title"]
               for n in nlm_bridge.list_notebooks().get("notebooks", [])}
     results = []
     for nb_id in dict.fromkeys(notebook_ids):           # de-dup, keep order
-        res = nlm_bridge.query(nb_id, question)
-        results.append({"notebook_id": nb_id, "title": titles.get(nb_id, nb_id), **res})
+        sel = (sources or {}).get(nb_id) or None
+        res = nlm_bridge.query(nb_id, question, source_ids=sel)
+        results.append({"notebook_id": nb_id, "title": titles.get(nb_id, nb_id),
+                        **({"source_filter": len(sel)} if sel else {}), **res})
     return results
 
 
@@ -1631,7 +1637,7 @@ def practice_ask(req: PracticeAskReq):
     corpus — zero LLM tokens here). Serial calls: N notebooks can take N×1–2 min. Partial
     failures are per-notebook; only all-failed becomes a 502."""
     prlog.append("q", req.question)
-    results = _nlm_fanout(req.notebook_ids, req.question)
+    results = _nlm_fanout(req.notebook_ids, req.question, req.sources)
     _log_fanout(results)
     if all(r.get("error") for r in results):
         raise HTTPException(status_code=502, detail="; ".join(
@@ -1668,12 +1674,13 @@ def practice_claude(req: PracticeClaudeReq):
     notebook_results = []
     sources = None
     if req.notebook_ids:
-        notebook_results = _nlm_fanout(req.notebook_ids, req.question)
+        notebook_results = _nlm_fanout(req.notebook_ids, req.question, req.sources)
         _log_fanout(notebook_results)
         sources = [r for r in notebook_results if not r.get("error")]
         for r in notebook_results:
             participants.append({
-                "kind": "notebook", "name": r["title"],
+                "kind": "notebook",
+                "name": r["title"] + (f" ({r['source_filter']} файл.)" if r.get("source_filter") else ""),
                 **({"error": r["error"]} if r.get("error") else {})})
 
     res = claude_bridge.chat(req.question,
@@ -1686,6 +1693,79 @@ def practice_claude(req: PracticeClaudeReq):
                          + (" — компиляция источников" if sources else " — прямой ответ")})
     prlog.append("c", res["answer"], model=res["model"], participants=participants)
     return {**res, "participants": participants, "notebook_results": notebook_results}
+
+
+@app.get("/api/practice/sources")
+def practice_sources(notebook_id: str = Query(..., min_length=8, max_length=64),
+                     force: bool = Query(False)):
+    """Files inside one notebook — so a question can target EXACT sources (no confusion
+    from the rest of the corpus). Never 500s; degrades with a reason."""
+    return nlm_bridge.list_sources(notebook_id, force=force)
+
+
+@app.get("/api/practice/price")
+def practice_price(ticker: str = Query(..., min_length=1, max_length=20)):
+    """REAL latest price of a catalog instrument + its daily ATR, so the construction
+    starts from the true asset price instead of a made-up number. The daily cache has
+    no TTL (fine for backtests, WRONG for «текущая цена») — so when the cached last bar
+    is older than a few days we force a re-download; if that fails (Yahoo 429…) we serve
+    the cached close honestly flagged `stale`."""
+    daily, _, _ = _load(ticker, "2024-01-01", 14)
+
+    def _age_days(df):
+        return (pd.Timestamp.now() - df.index[-1]).days
+    stale = _age_days(daily) > 4                       # > weekend + holiday gap
+    if stale:
+        try:
+            daily = datamod.fetch(ticker, start="2024-01-01", refresh=True)
+            stale = _age_days(daily) > 4
+        except Exception:
+            pass                                       # network down → cached + stale flag
+    datr = datamod.atr(daily, 14)
+    return {"ticker": ticker,
+            "price": round(float(daily["Close"].iloc[-1]), 4),
+            "date": daily.index[-1].date().isoformat(),
+            "atr": round(float(datr.iloc[-1]), 4),
+            "stale": bool(stale)}
+
+
+_UPLOAD_DIR = os.environ.get("ANTIMG_UPLOADS", "uploads")
+_UPLOAD_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_UPLOAD_MAX = 12 * 1024 * 1024
+
+
+@app.post("/api/practice/upload")
+async def practice_upload(file: UploadFile):
+    """Upload a PICTURE of a concrete example (broker screenshot, option board, slide).
+    Returns the server path to feed /api/practice/extract-image."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _UPLOAD_EXT:
+        raise HTTPException(status_code=422, detail=f"image only ({'/'.join(sorted(_UPLOAD_EXT))})")
+    data = await file.read()
+    if len(data) > _UPLOAD_MAX:
+        raise HTTPException(status_code=422, detail="file too large (max 12 MB)")
+    os.makedirs(_UPLOAD_DIR, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = os.path.join(_UPLOAD_DIR, name)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return {"path": os.path.abspath(path), "name": file.filename, "bytes": len(data)}
+
+
+@app.post("/api/practice/extract-image")
+def practice_extract_image(req: PracticeExtractImageReq):
+    """Extract construction parameters from an uploaded picture (Claude reads the image
+    with its Read tool). Path must be one returned by /api/practice/upload."""
+    real = os.path.realpath(req.path)
+    updir = os.path.realpath(_UPLOAD_DIR)
+    if not real.startswith(updir + os.sep) or not os.path.isfile(real):
+        raise HTTPException(status_code=422, detail="path is not an uploaded file")
+    res = claude_bridge.extract_construction_from_image(real)
+    if "error" in res:
+        raise HTTPException(status_code=502, detail=res["error"])
+    if res["comment"]:
+        prlog.append("s", "Извлёк параметры из картинки: " + res["comment"])
+    return res
 
 
 @app.get("/api/practice/skills")

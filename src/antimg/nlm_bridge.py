@@ -32,6 +32,7 @@ LIST_TTL = float(os.environ.get("NLM_LIST_TTL", "300"))      # notebook-list cac
 _lock = threading.Lock()
 _last_call = 0.0
 _list_cache: tuple[float, list[dict]] | None = None
+_sources_cache: dict[str, tuple[float, list[dict]]] = {}   # notebook_id → (ts, sources)
 
 
 def available() -> tuple[bool, str]:
@@ -63,7 +64,8 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     with _lock:
         _gap_wait()
         try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return subprocess.run(cmd, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=timeout)
         finally:
             _last_call = time.monotonic()
 
@@ -94,15 +96,43 @@ def list_notebooks(force: bool = False) -> dict:
     return {"notebooks": nbs}
 
 
-def query(notebook_id: str, question: str) -> dict:
-    """Ask one notebook. Returns {answer, sources_used} or {error}."""
+def list_sources(notebook_id: str, force: bool = False) -> dict:
+    """Files/sources inside one notebook: {sources: [{id,title}], error?}. Cached per notebook."""
+    ok, why = available()
+    if not ok:
+        return {"sources": [], "error": why}
+    hit = _sources_cache.get(notebook_id)
+    if not force and hit and time.monotonic() - hit[0] < LIST_TTL:
+        return {"sources": hit[1]}
+    try:
+        proc = _run([NLM_BIN, "source", "list", notebook_id, "--json"], LIST_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"sources": [], "error": "nlm source list: timeout"}
+    if proc.returncode != 0:
+        return {"sources": [],
+                "error": (proc.stderr or proc.stdout).strip()[:400] or "nlm source list failed"}
+    try:
+        data = _json_after(proc.stdout, "[")
+    except Exception as exc:
+        return {"sources": [], "error": f"parse nlm output: {exc}"}
+    srcs = [{"id": s["id"], "title": s.get("title") or s.get("name") or s["id"]}
+            for s in data if isinstance(s, dict) and s.get("id")]
+    _sources_cache[notebook_id] = (time.monotonic(), srcs)
+    return {"sources": srcs}
+
+
+def query(notebook_id: str, question: str, source_ids: list[str] | None = None) -> dict:
+    """Ask one notebook (optionally restricted to EXACT source files inside it).
+    Returns {answer, sources_used} or {error}."""
     ok, why = available()
     if not ok:
         return {"error": why}
+    cmd = [NLM_BIN, "notebook", "query", notebook_id, question,
+           "--json", "--timeout", str(int(QUERY_TIMEOUT))]
+    if source_ids:
+        cmd += ["--source-ids", ",".join(source_ids)]
     try:
-        proc = _run([NLM_BIN, "notebook", "query", notebook_id, question,
-                     "--json", "--timeout", str(int(QUERY_TIMEOUT))],
-                    QUERY_TIMEOUT + 30)
+        proc = _run(cmd, QUERY_TIMEOUT + 30)
     except subprocess.TimeoutExpired:
         return {"error": "NotebookLM query timed out"}
     if proc.returncode != 0:

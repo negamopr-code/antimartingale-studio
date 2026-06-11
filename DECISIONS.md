@@ -1251,3 +1251,24 @@ Not implemented; documented as a rejected tactic.
   cross-compiled both doctrines (EV identity `b·((2p)^N−1)` at p≈0.51 ⇒ ~no edge; ПИ's payoff asymmetry
   regime; p_net<0.5 execution risk ⇒ pyramid amplifies loss) — matches the canonical skill findings.
 - 182 tests (+4). assets v107.
+
+## D103 — Practice tab v5: REAL asset price (stale-cache bug), exact-file selection, picture upload (2026-06-11)
+- **User flagged: «price of the active is simply wrong on the option graph».** Root cause found live:
+  the daily pickle cache has NO TTL — /api/practice/price served BTC-USD = 76 304 from a 2026-04-30
+  cached close (6 weeks stale; real 62 843). Fix: the price endpoint force-refreshes (`fetch(refresh=
+  True)`) when the cached last bar is > 4 days old; if the re-download fails (Yahoo 429) it serves the
+  cached close honestly flagged `stale` (UI shows ⚠ КЭШ УСТАРЕЛ). Also NEW in the constructor: an
+  instrument select + «📈 Реальная цена» button → real latest close (+date, +ATR14) into S₀/strike, so
+  the graph starts from the true asset price, never a made-up default.
+- **Exact files inside a notebook:** `nlm notebook query --source-ids` is native → 📄 button next to
+  each notebook expands its file list (`nlm source list`, cached 5 min); checked files restrict the query
+  to EXACTLY those sources (no confusion from the rest of the corpus). Works in both 📖 fan-out and the
+  🤖 Claude compile path (`sources: {notebook_id: [src…]}`); the filter shows in participants
+  («N файл.») and the 🧩 hint. Verified live: question answered from ONLY file «02. Конструкция».
+- **Picture upload for concrete examples:** 📷 file input → POST /api/practice/upload (image-only ≤12MB,
+  uuid names under /data/uploads) → /api/practice/extract-image: headless claude (haiku) reads the image
+  with its Read tool — the ONLY allowed tool — and returns the same strict-JSON params → form → graph.
+  Path validated to the uploads dir (no traversal). Verified live: a rendered «доска опционов Si» screenshot
+  → {s0: 92500, strike: 92500, n_calls: 2, n_futs: 1, premium: 1850, dte_days: 30} → graph.
+- nlm subprocess pinned to UTF-8 (mojibake source titles are garbled in NotebookLM itself, not by us).
+- 190 tests (+8). python-multipart dep. assets v108.

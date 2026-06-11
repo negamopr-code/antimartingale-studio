@@ -131,12 +131,12 @@ def build_prompt(question: str, history: list[dict] | None = None,
     return "\n\n---\n\n".join(parts)
 
 
-def _run_claude(prompt: str, model: str) -> dict:
+def _run_claude(prompt: str, model: str, extra_args: list[str] | None = None) -> dict:
     ok, why = available()
     if not ok:
         return {"error": why}
     try:
-        proc = subprocess.run([CLAUDE_BIN, "-p", "--model", model],
+        proc = subprocess.run([CLAUDE_BIN, "-p", "--model", model, *(extra_args or [])],
                               input=prompt, capture_output=True, text=True,
                               timeout=CHAT_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -175,10 +175,7 @@ _EXTRACT_PROMPT = (
 )
 
 
-def extract_construction(text: str) -> dict:
-    """Pull construction parameters out of a notebook's textual example.
-    Returns {params: {...}, comment} or {error}."""
-    res = _run_claude(_EXTRACT_PROMPT + text[:16_000], EXTRACT_MODEL)
+def _parse_extraction(res: dict) -> dict:
     if "error" in res:
         return res
     raw = res["answer"]
@@ -192,3 +189,20 @@ def extract_construction(text: str) -> dict:
     comment = str(data.pop("comment", "") or "")
     params = {k: v for k, v in data.items() if v is not None}
     return {"params": params, "comment": comment, "model": EXTRACT_MODEL}
+
+
+def extract_construction(text: str) -> dict:
+    """Pull construction parameters out of a notebook's textual example.
+    Returns {params: {...}, comment} or {error}."""
+    return _parse_extraction(_run_claude(_EXTRACT_PROMPT + text[:16_000], EXTRACT_MODEL))
+
+
+def extract_construction_from_image(path: str) -> dict:
+    """Same extraction, but from a user-uploaded PICTURE of the example (broker screenshot,
+    option board photo, webinar slide). The headless CLI reads the image with its Read tool
+    — the ONLY tool allowed — so the model actually sees the pixels."""
+    prompt = (f"Сначала прочитай изображение по пути {path} инструментом Read. "
+              "Затем выполни задание по его содержимому.\n\n" + _EXTRACT_PROMPT
+              + "(текст = содержимое изображения выше)")
+    return _parse_extraction(
+        _run_claude(prompt, EXTRACT_MODEL, extra_args=["--allowedTools", "Read"]))

@@ -367,6 +367,9 @@ class PracticeAskReq(BaseModel):
     serially (anti RESOURCE_EXHAUSTED) — N notebooks ≈ N× the single-notebook latency."""
     notebook_ids: list[str] = Field(..., min_length=1, max_length=8)
     question: str = Field(..., min_length=3, max_length=4000)
+    # optional restriction to EXACT files inside a notebook: {notebook_id: [source_id, …]};
+    # a notebook absent from the map (or mapped to []) is queried over ALL its sources
+    sources: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class PracticeChatTurn(BaseModel):
@@ -389,6 +392,14 @@ class PracticeClaudeReq(BaseModel):
     # combinable skill doctrines (names from /api/practice/skills) injected into the prompt
     skills: list[str] = Field(default_factory=list, max_length=6)
     model: str | None = None                           # validated against claude_bridge.MODELS
+    sources: dict[str, list[str]] = Field(default_factory=dict)   # per-notebook source filter
+
+
+class PracticeExtractImageReq(BaseModel):
+    """Tab 15 — extract construction parameters from an UPLOADED picture of the example
+    (broker screenshot / option board / webinar slide). `path` must come from
+    /api/practice/upload."""
+    path: str = Field(..., min_length=4, max_length=500)
 
 
 class PracticeExtractReq(BaseModel):

@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     ANTIMG_CACHE=/data/cache \
     ANTIMG_SIGNAL_DB=/data/signals.db \
     ANTIMG_PRACTICE_LOG=/data/practice_log.json \
+    ANTIMG_UPLOADS=/data/uploads \
     PORT=8000 \
     WEB_CONCURRENCY=4
 

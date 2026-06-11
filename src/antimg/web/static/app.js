@@ -2146,8 +2146,9 @@ async function prLoadNotebooks(force = false) {
     }
     let defDone = false;
     for (const n of d.notebooks) {
+      const row = document.createElement("div");
       const lab = document.createElement("label");
-      lab.style.cssText = "display:block;padding:1px 4px;font-weight:normal;cursor:pointer";
+      lab.style.cssText = "display:inline-block;padding:1px 4px;font-weight:normal;cursor:pointer";
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.value = n.id; cb.className = "pr-nb-cb";
       cb.style.marginRight = "6px";
@@ -2155,7 +2156,18 @@ async function prLoadNotebooks(force = false) {
       lab.appendChild(cb);
       lab.appendChild(document.createTextNode(
         n.title + (n.sources != null ? ` (${n.sources} ист.)` : "")));
-      box.appendChild(lab);
+      row.appendChild(lab);
+      // 📄 exact-file picker: restrict the query to chosen sources INSIDE this notebook
+      const fbtn = document.createElement("button");
+      fbtn.type = "button"; fbtn.textContent = "📄";
+      fbtn.title = "выбрать КОНКРЕТНЫЕ файлы внутри ноутбука (вопрос пойдёт только по ним)";
+      fbtn.style.cssText = "margin-left:6px;padding:0 6px;font-size:11px";
+      const sub = document.createElement("div");
+      sub.style.cssText = "display:none;margin:2px 0 4px 26px;padding:4px;border-left:2px solid #2a3340";
+      fbtn.onclick = () => prToggleSources(n.id, fbtn, sub);
+      row.appendChild(fbtn);
+      row.appendChild(sub);
+      box.appendChild(row);
     }
     st.textContent = `${d.notebooks.length} ноутбуков — отметь нужные; Gemini отвечает по источникам `
       + `(0 токенов Claude)${prClaudeInfo.available ? ` · 🤖 ${prClaudeInfo.model} доступен` : ""}`;
@@ -2164,6 +2176,46 @@ async function prLoadNotebooks(force = false) {
   } catch (e) { st.textContent = "⚠ " + (e.message || e); }
 }
 $("#pr-nb-refresh").onclick = (e) => withBusy(e.target, () => prLoadNotebooks(true));
+
+// per-notebook source selection: {notebook_id: Set(source_id)} — empty/missing = ALL files
+const prSourceSel = {};
+async function prToggleSources(nbId, btn, sub) {
+  if (sub.style.display !== "none") { sub.style.display = "none"; return; }
+  sub.style.display = "block";
+  if (!sub.dataset.loaded) {
+    sub.textContent = "загружаю файлы…";
+    try {
+      const d = await api("/api/practice/sources?notebook_id=" + encodeURIComponent(nbId));
+      sub.textContent = "";
+      if (d.error || !d.sources.length) { sub.textContent = "⚠ " + (d.error || "нет файлов"); return; }
+      for (const s of d.sources) {
+        const lab = document.createElement("label");
+        lab.style.cssText = "display:block;font-weight:normal;cursor:pointer;font-size:11px;padding:0 2px";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.value = s.id;
+        cb.style.marginRight = "5px";
+        cb.onchange = () => {
+          const set = prSourceSel[nbId] || (prSourceSel[nbId] = new Set());
+          cb.checked ? set.add(s.id) : set.delete(s.id);
+          const k = set.size;
+          btn.textContent = k ? `📄 ${k}/${d.sources.length}` : "📄";
+          prCtxHint();
+        };
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(s.title));
+        sub.appendChild(lab);
+      }
+      sub.dataset.loaded = "1";
+    } catch (e) { sub.textContent = "⚠ " + (e.message || e); }
+  }
+}
+// {notebook_id: [ids…]} for notebooks that are CHECKED and have a non-empty file selection
+function prSourcesPayload(ids) {
+  const out = {};
+  for (const id of ids)
+    if (prSourceSel[id] && prSourceSel[id].size) out[id] = [...prSourceSel[id]];
+  return out;
+}
 
 const prHistory = [];   // compact chat history for the Claude context: {role: q|a|c, text, title?}
 const PR_PART_ICON = { doctrine: "📜", skill: "🧠", construction: "📐", history: "🕘", notebook: "📖", claude: "🤖" };
@@ -2236,7 +2288,11 @@ function prCtxHint() {
   const el = $("#pr-ctx");
   if (!el) return;
   const nbs = $$(".pr-nb-cb").filter((c) => c.checked)
-    .map((c) => c.closest("label").textContent.trim().replace(/\s*\(\d+ ист\.\)$/, ""));
+    .map((c) => {
+      const t = c.closest("label").textContent.trim().replace(/\s*\(\d+ ист\.\)$/, "");
+      const k = prSourceSel[c.value] && prSourceSel[c.value].size;
+      return k ? `${t} [${k} файл.]` : t;
+    });
   const sks = $$(".pr-skill-cb").filter((c) => c.checked).map((c) => "/" + c.value);
   const parts = ["📜 доктрина ПИ"];
   if (sks.length) parts.push(`🧠 скиллы: ${sks.join(" + ")}`);
@@ -2264,7 +2320,8 @@ $("#form-pr-ask").onsubmit = (e) => {        // 📖 fan the question across che
     prChatAdd("q", q);
     toast(`Спрашиваю ${ids.length} ноутбук(а) — Gemini по источникам, ~1–2 мин на каждый…`, true);
     try {
-      const d = await post("/api/practice/ask", { notebook_ids: ids, question: q });
+      const d = await post("/api/practice/ask",
+        { notebook_ids: ids, question: q, sources: prSourcesPayload(ids) });
       for (const r of d.results)
         if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
         else prChatAdd("a", r.answer, { title: r.title, sources: r.sources_used });
@@ -2292,6 +2349,7 @@ $("#pr-ask-claude").onclick = (e) => {
       const d = await post("/api/practice/claude", {
         question: q, history: prHistory.slice(0, -1),   // current q goes as `question`, not history
         construction: prLastStats, notebook_ids: ids, skills, model,
+        sources: prSourcesPayload(ids),
       });
       for (const r of d.notebook_results || [])         // raw per-notebook answers first (transparency)
         if (r.error) prChatAdd("e", `${r.title}: ${r.error}`);
@@ -2303,6 +2361,29 @@ $("#pr-ask-claude").onclick = (e) => {
   });
 };
 
+// shared: apply extracted params {s0,strike,…} to the form, log, compute + draw if complete
+async function prApplyExtracted(d, sourceLabel) {
+  const p = d.params || {};
+  const form = $("#form-pr-payoff");
+  const setIf = (name, v) => { if (v != null && form[name]) form[name].value = v; };
+  setIf("s0", p.s0); setIf("strike", p.strike);
+  setIf("n_calls", p.n_calls); setIf("n_futs", p.n_futs);
+  setIf("premium", p.premium); setIf("iv", p.iv);
+  setIf("dte_days", p.dte_days); setIf("multiplier", p.multiplier);
+  prExampleSource = (p.instrument ? p.instrument + " — " : "") + sourceLabel;
+  prChatAdd("s", `Извлёк параметры из «${sourceLabel}»: `
+    + JSON.stringify(p) + (d.comment ? "\n" + d.comment : ""));
+  const missing = ["s0", "strike"].filter((k) => p[k] == null);
+  if (p.premium == null && p.iv == null) missing.push("premium/iv");
+  if (missing.length) {
+    toast("В примере не хватает: " + missing.join(", ") + " — дополни форму и нажми «Рассчитать»");
+    return;
+  }
+  const o = formData(form);
+  renderPracticePayoff(await post("/api/practice/payoff", o), o);
+  toast("График построен по примеру", true);
+}
+
 // 📊 build the straddle graph from the REAL example in the last notebook answer:
 // haiku extracts {S0, strike, premium, legs, DTE…} → fill the form → compute → draw.
 $("#pr-graph-example").onclick = (e) => {
@@ -2311,26 +2392,40 @@ $("#pr-graph-example").onclick = (e) => {
     if (!last) { toast("Сначала получи пример из ноутбука (📖) — график строится из его ответа"); return; }
     toast("Извлекаю параметры конструкции из ответа ноутбука…", true);
     const d = await post("/api/practice/extract", { text: last.text });
-    const p = d.params || {};
-    const form = $("#form-pr-payoff");
-    const setIf = (name, v) => { if (v != null && form[name]) form[name].value = v; };
-    setIf("s0", p.s0); setIf("strike", p.strike);
-    setIf("n_calls", p.n_calls); setIf("n_futs", p.n_futs);
-    setIf("premium", p.premium); setIf("iv", p.iv);
-    setIf("dte_days", p.dte_days); setIf("multiplier", p.multiplier);
-    prExampleSource = (p.instrument ? p.instrument + " — " : "") + (last.title || "пример из ноутбука");
-    prChatAdd("s", `Извлёк параметры из «${last.title || "ноутбука"}»: `
-      + JSON.stringify(p) + (d.comment ? "\n" + d.comment : ""));
-    const missing = ["s0", "strike"].filter((k) => p[k] == null);
-    if (p.premium == null && p.iv == null) missing.push("premium/iv");
-    if (missing.length) {
-      toast("В примере не хватает: " + missing.join(", ") + " — дополни форму и нажми «Рассчитать»");
-      return;
-    }
-    const o = formData(form);
-    renderPracticePayoff(await post("/api/practice/payoff", o), o);
-    toast("График построен по примеру из ноутбука", true);
+    await prApplyExtracted(d, last.title || "пример из ноутбука");
   });
+};
+
+// 📈 REAL latest price of the chosen catalog instrument → S₀ + strike (no made-up prices)
+$("#pr-real-price").onclick = (e) => {
+  withBusy(e.target, async () => {
+    const tk = $("#pr-instr").value;
+    const d = await api("/api/practice/price?ticker=" + encodeURIComponent(tk));
+    const form = $("#form-pr-payoff");
+    form.s0.value = d.price;
+    form.strike.value = d.price;
+    const staleNote = d.stale ? ` ⚠ КЭШ УСТАРЕЛ — свежее скачать не удалось` : "";
+    prExampleSource = `${d.ticker} @ ${d.price} (закрытие ${d.date})`;
+    toast(`${d.ticker}: реальная цена ${d.price} (закрытие ${d.date}, ATR ${d.atr}) → S₀ и страйк${staleNote}`, !d.stale);
+    prChatAdd("s", `Реальная цена ${d.ticker} = ${d.price} (дневное закрытие ${d.date}, ATR14 ${d.atr}) подставлена в S₀/страйк.${staleNote}`);
+  });
+};
+
+// 📷 picture of a concrete example (broker screenshot / option board / slide) →
+// upload → Claude reads the image → params → form → graph
+$("#pr-image").onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  e.target.disabled = true;
+  try {
+    toast("Загружаю картинку и извлекаю параметры (Claude читает изображение)…", true);
+    const fd = new FormData();
+    fd.append("file", f);
+    const up = await api("/api/practice/upload", { method: "POST", body: fd });
+    const d = await post("/api/practice/extract-image", { path: up.path });
+    await prApplyExtracted(d, "📷 " + (up.name || "картинка"));
+  } catch (err) { toast("Error: " + (err.message || err)); console.error(err); }
+  finally { e.target.disabled = false; e.target.value = ""; }
 };
 $("#pr-preset-example").onclick = () => {
   $("#form-pr-ask").question.value =

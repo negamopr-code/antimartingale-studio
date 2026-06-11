@@ -111,7 +111,7 @@ def test_practice_notebooks_lists_and_caches(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "_list_cache", None)
     monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, **kw):
         calls.append(cmd)
         return _FakeProc('chatter\n[{"id": "abc12345", "title": "ПИ Коровин", "source_count": 15}]')
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -156,7 +156,7 @@ def test_practice_ask_fans_out_to_selected_notebooks(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {
         "notebooks": [{"id": "nb-one-12345", "title": "ПИ Коровин", "sources": 50},
                       {"id": "nb-two-12345", "title": "MES Straddle", "sources": 5}]})
-    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q: {
+    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q, source_ids=None: {
         "answer": f"ответ из {nb}", "sources_used": [1]})
     r = client.post("/api/practice/ask", json={
         "notebook_ids": ["nb-one-12345", "nb-two-12345", "nb-one-12345"],   # dup dropped
@@ -169,7 +169,7 @@ def test_practice_ask_fans_out_to_selected_notebooks(monkeypatch):
 
 def test_practice_ask_partial_failure_is_200(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {"notebooks": []})
-    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q:
+    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q, source_ids=None:
                         {"error": "RESOURCE_EXHAUSTED"} if nb.startswith("bad")
                         else {"answer": "ок", "sources_used": []})
     r = client.post("/api/practice/ask", json={
@@ -182,7 +182,7 @@ def test_practice_ask_partial_failure_is_200(monkeypatch):
 def test_practice_ask_all_failed_becomes_502(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {"notebooks": []})
     monkeypatch.setattr(nlm_bridge, "query",
-                        lambda nb, q: {"error": "RESOURCE_EXHAUSTED"})
+                        lambda nb, q, source_ids=None: {"error": "RESOURCE_EXHAUSTED"})
     r = client.post("/api/practice/ask",
                     json={"notebook_ids": ["abcd1234efgh"], "question": "дай пример"})
     assert r.status_code == 502
@@ -241,7 +241,7 @@ def test_claude_compiles_notebook_sources_with_participants(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {
         "notebooks": [{"id": "nb-one-12345", "title": "ПИ Коровин", "sources": 50},
                       {"id": "nb-two-12345", "title": "MES Straddle", "sources": 5}]})
-    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q:
+    monkeypatch.setattr(nlm_bridge, "query", lambda nb, q, source_ids=None:
                         {"error": "quota"} if nb == "nb-two-12345"
                         else {"answer": "пример RI", "sources_used": [1]})
     seen = {}
@@ -348,11 +348,123 @@ def test_extract_endpoint(monkeypatch):
     assert r.json()["params"]["s0"] == 50_000
 
 
+# ------------------------------------------------------------------ exact-file selection
+def test_bridge_query_passes_source_ids(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "available", lambda: (True, ""))
+    monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
+    seen = {}
+
+    def fake_run(cmd, capture_output, text, timeout, **kw):
+        seen["cmd"] = cmd
+        return _FakeProc('{"answer": "ок", "sources": []}')
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    nlm_bridge.query("nb-12345678", "вопрос", source_ids=["s1", "s2"])
+    i = seen["cmd"].index("--source-ids")
+    assert seen["cmd"][i + 1] == "s1,s2"
+
+
+def test_sources_endpoint_lists_files(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "available", lambda: (True, ""))
+    monkeypatch.setattr(nlm_bridge, "MIN_GAP", 0.0)
+    monkeypatch.setattr(nlm_bridge, "_sources_cache", {})
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(
+        '[{"id": "src-1", "title": "Вебинар 3"}, {"id": "src-2", "name": "Инструкция"}]'))
+    d = client.get("/api/practice/sources?notebook_id=nb-12345678").json()
+    assert d["sources"] == [{"id": "src-1", "title": "Вебинар 3"},
+                            {"id": "src-2", "title": "Инструкция"}]
+
+
+def test_ask_fans_out_with_per_notebook_source_filter(monkeypatch):
+    monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {
+        "notebooks": [{"id": "nb-one-12345", "title": "ПИ", "sources": 50}]})
+    seen = {}
+
+    def fake_query(nb, q, source_ids=None):
+        seen[nb] = source_ids
+        return {"answer": "ок", "sources_used": []}
+    monkeypatch.setattr(nlm_bridge, "query", fake_query)
+    r = client.post("/api/practice/ask", json={
+        "notebook_ids": ["nb-one-12345"], "question": "дай пример",
+        "sources": {"nb-one-12345": ["src-1", "src-2"]}})
+    assert r.status_code == 200
+    assert seen["nb-one-12345"] == ["src-1", "src-2"]
+    assert r.json()["results"][0]["source_filter"] == 2
+
+
+# ------------------------------------------------------------------ real price + image
+def _fake_daily(end_offset_days: int):
+    import pandas as pd
+    end = pd.Timestamp.now().normalize() - pd.Timedelta(days=end_offset_days)
+    idx = pd.date_range(end=end, periods=30, freq="D")
+    return pd.DataFrame({"Open": 100.0, "High": 102.0, "Low": 99.0, "Volume": 1000,
+                         "Close": [100.0 + i for i in range(30)]}, index=idx)
+
+
+def test_price_endpoint_returns_fresh_close(monkeypatch):
+    from antimg import data as datamod
+    df = _fake_daily(1)                               # yesterday's close → fresh
+    monkeypatch.setattr(datamod, "fetch", lambda ticker, start=None, refresh=False: df)
+    d = client.get("/api/practice/price?ticker=SPY").json()
+    assert d["price"] == 129.0 and d["stale"] is False and d["atr"] > 0
+
+
+def test_price_endpoint_refreshes_stale_cache(monkeypatch):
+    """The daily cache has no TTL — a weeks-old close must trigger refresh=True
+    (the live 'price of the asset is simply wrong' bug, BTC served 6 weeks stale)."""
+    from antimg import data as datamod
+    calls = []
+
+    def fake_fetch(ticker, start=None, refresh=False):
+        calls.append(refresh)
+        return _fake_daily(1) if refresh else _fake_daily(40)
+    monkeypatch.setattr(datamod, "fetch", fake_fetch)
+    d = client.get("/api/practice/price?ticker=SPY").json()
+    assert True in calls                              # refresh was forced
+    assert d["stale"] is False                        # and the fresh close is served
+
+
+def test_price_endpoint_flags_stale_when_refresh_fails(monkeypatch):
+    from antimg import data as datamod
+    state = {"first": True}
+
+    def fake_fetch(ticker, start=None, refresh=False):
+        if refresh:
+            raise RuntimeError("Yahoo 429")
+        return _fake_daily(40)
+    monkeypatch.setattr(datamod, "fetch", fake_fetch)
+    d = client.get("/api/practice/price?ticker=SPY").json()
+    assert d["stale"] is True                         # honest flag, no 500
+
+
+def test_upload_and_extract_image_roundtrip(tmp_path, monkeypatch):
+    import antimg.web.api as apimod
+    monkeypatch.setattr(apimod, "_UPLOAD_DIR", str(tmp_path / "up"))
+    monkeypatch.setattr(claude_bridge, "extract_construction_from_image", lambda path: {
+        "params": {"s0": 5000, "strike": 5000, "premium": 120}, "comment": "со скрина",
+        "model": "claude-haiku-4-5"})
+    r = client.post("/api/practice/upload",
+                    files={"file": ("board.png", b"\x89PNG fake", "image/png")})
+    assert r.status_code == 200
+    path = r.json()["path"]
+    r2 = client.post("/api/practice/extract-image", json={"path": path})
+    assert r2.status_code == 200 and r2.json()["params"]["s0"] == 5000
+
+
+def test_upload_rejects_non_image_and_foreign_paths(tmp_path, monkeypatch):
+    import antimg.web.api as apimod
+    monkeypatch.setattr(apimod, "_UPLOAD_DIR", str(tmp_path / "up"))
+    r = client.post("/api/practice/upload",
+                    files={"file": ("evil.sh", b"#!/bin/sh", "text/x-sh")})
+    assert r.status_code == 422
+    r2 = client.post("/api/practice/extract-image", json={"path": "/etc/passwd"})
+    assert r2.status_code == 422
+
+
 # ------------------------------------------------------------------ persisted tab state
 def test_state_accumulates_and_restores(monkeypatch):
     monkeypatch.setattr(nlm_bridge, "list_notebooks", lambda force=False: {"notebooks": []})
     monkeypatch.setattr(nlm_bridge, "query",
-                        lambda nb, q: {"answer": "ответ ноутбука", "sources_used": [1, 2]})
+                        lambda nb, q, source_ids=None: {"answer": "ответ ноутбука", "sources_used": [1, 2]})
     client.post("/api/practice/ask",
                 json={"notebook_ids": ["abcd1234efgh"], "question": "дай пример"})
     client.post("/api/practice/payoff", json={

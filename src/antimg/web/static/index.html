@@ -575,6 +575,12 @@
 
     <h3 style="margin:18px 0 4px;font-size:14px;color:#8b949e">📐 2 · Конструктор: n·Колл − m·Фьюч в конкретных числах</h3>
     <form class="controls" id="form-pr-payoff">
+      <div style="flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px">
+        <label title="инструмент каталога — чтобы взять его РЕАЛЬНУЮ цену">Инструмент <select id="pr-instr" class="instr"></select></label>
+        <button type="button" id="pr-real-price" title="подставить РЕАЛЬНУЮ последнюю цену инструмента (тот же дневной фид, что в бэктестах) в S₀ и страйк">📈 Реальная цена</button>
+        <label title="скриншот брокера / доска опционов / слайд вебинара — Claude прочитает картинку и извлечёт параметры конструкции">📷 Картинка-пример
+          <input type="file" id="pr-image" accept="image/png,image/jpeg,image/webp,image/gif" style="max-width:240px"></label>
+      </div>
       <label title="цена фьючерса/базового актива при входе">Цена фьючерса S₀ <input name="s0" type="number" step="any" value="100000"></label>
       <label title="страйк коллов (для классического ПИ ≈ около денег)">Страйк K <input name="strike" type="number" step="any" value="100000"></label>
       <label>Коллов (long) <input name="n_calls" type="number" step="any" value="2"></label>
@@ -593,6 +599,6 @@
       <pre class="stats" id="pr-stats"></pre></div>
   </section>
 
-  <script src="/app.js?v=107"></script>
+  <script src="/app.js?v=108"></script>
 </body>
 </html>
